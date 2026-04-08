@@ -1,0 +1,98 @@
+{
+  "project_name": "Kaimera Learning",
+  "theme": "light",
+  "archetype": "Archetype 6: Vibrant Play",
+  "design_philosophy": "Friendly, engaging, and energetic. The UI should evoke a sense of playfulness and optimism suitable for an education marketplace. We use soft geometry (rounded corners), high-contrast playful accents, and a clear, functional layout that doesn't feel overly corporate.",
+  "typography": {
+    "heading_font": "Fredoka",
+    "body_font": "Nunito",
+    "import_instruction": "@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&display=swap');",
+    "scale": {
+      "h1": "text-4xl sm:text-5xl font-bold tracking-tight text-slate-900",
+      "h2": "text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900",
+      "h3": "text-xl sm:text-2xl font-semibold text-slate-800",
+      "h4": "text-lg font-medium text-slate-800",
+      "body": "text-base font-normal text-slate-600 leading-relaxed",
+      "small": "text-sm font-medium text-slate-500 uppercase tracking-wide"
+    }
+  },
+  "colors": {
+    "background": "hsl(210, 20%, 98%)", 
+    "foreground": "hsl(222, 47%, 11%)",
+    "primary": "hsl(199, 89%, 48%)", 
+    "primary_foreground": "hsl(0, 0%, 100%)",
+    "secondary": "hsl(43, 96%, 58%)", 
+    "secondary_foreground": "hsl(222, 47%, 11%)",
+    "accent": "hsl(160, 84%, 39%)", 
+    "destructive": "hsl(0, 84%, 60%)",
+    "border": "hsl(214, 32%, 91%)",
+    "card": "hsl(0, 0%, 100%)",
+    "ring": "hsl(199, 89%, 48%)"
+  },
+  "layout_and_spacing": {
+    "container": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "spacing_scale": "Use generous spacing. p-6 or p-8 inside cards to let content breathe.",
+    "grid_system": "Bento Grid Protocol. Dashboard should use grid-cols-1 md:grid-cols-3 lg:grid-cols-4 with gap-6. Keep it dense but visually separated.",
+    "border_radius": "rounded-3xl for major cards, rounded-full for buttons. Soft, friendly geometry."
+  },
+  "surface_styles": {
+    "card_default": "bg-white rounded-3xl border-2 border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden",
+    "card_interactive": "bg-white rounded-3xl border-2 border-slate-200 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)] hover:-translate-y-1 hover:shadow-[4px_6px_0px_0px_rgba(203,213,225,1)] transition-all duration-200 cursor-pointer",
+    "header": "sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-slate-200",
+    "primary_button": "bg-sky-500 text-white font-bold rounded-full px-6 py-3 hover:bg-sky-600 hover:-translate-y-0.5 active:translate-y-0 active:shadow-none transition-all shadow-[0_4px_14px_0_rgba(14,165,233,0.39)]",
+    "secondary_button": "bg-amber-400 text-slate-900 font-bold rounded-full px-6 py-3 hover:bg-amber-500 hover:-translate-y-0.5 active:translate-y-0 transition-all shadow-[0_4px_14px_0_rgba(245,158,11,0.39)]",
+    "destructive_button": "bg-red-500 text-white font-bold rounded-full px-6 py-3 hover:bg-red-600 transition-all",
+    "input_field": "bg-slate-50 border-2 border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-4 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
+  },
+  "media": {
+    "students": [
+      {
+        "url": "https://images.unsplash.com/photo-1623076189461-f7706b741c04?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwxfHxzdHVkZW50JTIwbGVhcm5pbmclMjBvbmxpbmUlMjBmcmllbmRseXxlbnwwfHx8fDE3NzU2NDI4MDl8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Little girl learning",
+        "usage": "Student dashboard hero or profile placeholder"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1759984782106-4b56d0aa05b8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwzfHxzdHVkZW50JTIwbGVhcm5pbmclMjBvbmxpbmUlMjBmcmllbmRseXxlbnwwfHx8fDE3NzU2NDI4MDl8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Young woman studying",
+        "usage": "Class listing thumbnail or marketing"
+      }
+    ],
+    "teachers": [
+      {
+        "url": "https://images.pexels.com/photos/6326370/pexels-photo-6326370.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Teacher online math class",
+        "usage": "Teacher dashboard hero or profile placeholder"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1758599880935-516d241bc5f3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzV8MHwxfHNlYXJjaHwyfHx0ZWFjaGVyJTIwb25saW5lJTIwY2xhc3MlMjBmcmllbmRseXxlbnwwfHx8fDE3NzU2NDI4MDl8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Woman recording tutorial",
+        "usage": "Teacher profile image or class banner"
+      }
+    ],
+    "video_placeholder": {
+      "url": "https://images.unsplash.com/photo-1611623516688-c47bb8d43311?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwyfHxzdHVkZW50JTIwbGVhcm5pbmclMjBvbmxpbmUlMjBmcmllbmRseXxlbnwwfHx8fDE3NzU2NDI4MDl8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Person on video call",
+      "usage": "Background or placeholder for the video call screen"
+    }
+  },
+  "component_instructions": {
+    "shadcn_overrides": "Override Shadcn default border-radius to 1.5rem (rounded-3xl) for cards and modals. Change primary color to Sky Blue (sky-500).",
+    "cards": "Do not use standard subtle borders. Use 'card_interactive' surface style for clickable classes. It provides a tactile, engaging feel.",
+    "badges": "Use highly rounded (rounded-full) badges with vibrant background colors (amber-100 text-amber-800, sky-100 text-sky-800) for class subjects or statuses.",
+    "icons": "Use lucide-react. Standardize size to 20px or 24px. Keep stroke-width at 2 or 2.5 for a bolder, friendlier appearance."
+  },
+  "accessibility_and_testing": {
+    "data_testid": "ALL interactive elements (buttons, links, inputs, forms) MUST have a `data-testid` attribute in kebab-case representing their role. Example: `data-testid='login-submit-button'`, `data-testid='book-class-button'`.",
+    "contrast": "Ensure white text is only used on primary/destructive buttons. Dark navy text must be used on warning/yellow buttons for APCA contrast compliance."
+  },
+  "instructions_to_main_agent": [
+    "1. Setup tailwind.config.js to include Fredoka and Nunito font families.",
+    "2. Apply the HSL variables in index.css mapped to the colors provided here.",
+    "3. Build the Dashboard using the Bento grid layout style. It should not look like a sterile Vercel app; inject the primary and secondary colors generously in headers, icons, and buttons.",
+    "4. For Authentication, create a split layout: left side with a vibrant gradient (sky-400 to violet-500) and an illustration/image of a student, right side clean login form with rounded-2xl inputs.",
+    "5. Use the provided Unsplash/Pexels media URLs exactly as specified for class thumbnails and profile placeholders. DO NOT use generic placeholder services.",
+    "6. Ensure the Video Integration placeholder is a massive, immersive UI area taking up 80vh, with a floating 'Leave Class' destructive button and controls floating over the image using glassmorphism.",
+    "7. All buttons and interactive elements MUST have `data-testid` properties.",
+    "8. Ensure React components are created as .js or .jsx files, not .tsx."
+  ]
+}
