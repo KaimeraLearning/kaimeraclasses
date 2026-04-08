@@ -44,6 +44,9 @@ class User(BaseModel):
     is_approved: bool = True  # For teacher approval
     phone: Optional[str] = None  # Only for students and counsellors, NOT teachers
     bio: Optional[str] = None  # Teacher profile bio
+    institute: Optional[str] = None  # Student's institute
+    goal: Optional[str] = None  # Student's goal
+    preferred_time_slot: Optional[str] = None  # Student's preferred time
     created_at: datetime
 
 class UserRegister(BaseModel):
