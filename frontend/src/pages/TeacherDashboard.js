@@ -116,14 +116,14 @@ const TeacherDashboard = () => {
 
   if (!user?.is_approved) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center" data-testid="teacher-pending-approval">
         <div className="bg-white rounded-3xl p-12 border-2 border-amber-200 max-w-md text-center">
           <AlertCircle className="w-16 h-16 text-amber-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-slate-900 mb-2">Approval Pending</h2>
           <p className="text-slate-600 mb-6">
             Your teacher account is awaiting admin approval. You'll be able to create classes once approved.
           </p>
-          <Button onClick={handleLogout} className="rounded-full">
+          <Button onClick={handleLogout} className="rounded-full" data-testid="logout-button">
             Logout
           </Button>
         </div>

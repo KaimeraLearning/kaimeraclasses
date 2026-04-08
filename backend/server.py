@@ -574,8 +574,11 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
-    await db.class_sessions.insert_one(class_doc)
+    # Create a copy for insertion to avoid ObjectId in response
+    insert_doc = class_doc.copy()
+    await db.class_sessions.insert_one(insert_doc)
     
+    # Convert datetime for response
     class_doc['created_at'] = datetime.fromisoformat(class_doc['created_at'])
     
     return {"message": "Class created successfully", "class": class_doc}
