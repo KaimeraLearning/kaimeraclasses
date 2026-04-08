@@ -14,8 +14,7 @@ const API = `${BACKEND_URL}/api`;
 const TeacherDashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
-  const [thisWeekClasses, setThisWeekClasses] = useState([]);
-  const [otherClasses, setOtherClasses] = useState([]);
+  const [groupedData, setGroupedData] = useState({ today: [], by_student: [], ended_count: 0 });
   const [pendingAssignments, setPendingAssignments] = useState([]);
   const [approvedStudents, setApprovedStudents] = useState([]);
   const [proofs, setProofs] = useState([]);
@@ -25,8 +24,12 @@ const TeacherDashboard = () => {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showProofDialog, setShowProofDialog] = useState(false);
   const [showNotifDialog, setShowNotifDialog] = useState(false);
-  const [showOtherClasses, setShowOtherClasses] = useState(false);
   const [selectedClassForProof, setSelectedClassForProof] = useState(null);
+  const [expandedStudent, setExpandedStudent] = useState(null);
+  const [studentSearch, setStudentSearch] = useState('');
+  const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
+  const [feedbackTarget, setFeedbackTarget] = useState(null);
+  const [feedbackForm, setFeedbackForm] = useState({ feedback_text: '', performance_rating: 'good' });
   const [formData, setFormData] = useState({
     title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '',
     max_students: '1', assigned_student_id: '', duration_days: '1', is_demo: false
@@ -39,23 +42,23 @@ const TeacherDashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
-      const [userRes, dashboardRes, proofsRes, notifRes, complaintsRes] = await Promise.all([
+      const [userRes, dashboardRes, proofsRes, notifRes, complaintsRes, groupedRes] = await Promise.all([
         fetch(`${API}/auth/me`, { credentials: 'include' }),
         fetch(`${API}/teacher/dashboard`, { credentials: 'include' }),
         fetch(`${API}/teacher/my-proofs`, { credentials: 'include' }),
         fetch(`${API}/notifications/my`, { credentials: 'include' }),
-        fetch(`${API}/teacher/student-complaints`, { credentials: 'include' })
+        fetch(`${API}/teacher/student-complaints`, { credentials: 'include' }),
+        fetch(`${API}/teacher/grouped-classes`, { credentials: 'include' })
       ]);
       if (!userRes.ok || !dashboardRes.ok) throw new Error('Failed to fetch data');
       setUser(await userRes.json());
       const dashboardData = await dashboardRes.json();
-      setThisWeekClasses(dashboardData.classes || []);
-      setOtherClasses(dashboardData.other_classes || []);
       setPendingAssignments(dashboardData.pending_assignments || []);
       setApprovedStudents(dashboardData.approved_students || []);
       if (proofsRes.ok) setProofs(await proofsRes.json());
       if (notifRes.ok) setNotifications(await notifRes.json());
       if (complaintsRes.ok) setStudentComplaints(await complaintsRes.json());
+      if (groupedRes.ok) setGroupedData(await groupedRes.json());
       setLoading(false);
     } catch (error) {
       toast.error('Failed to load dashboard');

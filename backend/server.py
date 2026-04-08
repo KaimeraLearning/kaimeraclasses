@@ -297,6 +297,17 @@ async def generate_teacher_code():
     return f"KL-T{doc['seq']:04d}"
 
 
+async def generate_student_code():
+    """Auto-generate unique student ID like KL-S0001"""
+    await db.counters.update_one(
+        {"counter_id": "student_code"},
+        {"$inc": {"seq": 1}},
+        upsert=True
+    )
+    doc = await db.counters.find_one({"counter_id": "student_code"}, {"_id": 0})
+    return f"KL-S{doc['seq']:04d}"
+
+
 async def send_email(to_email: str, subject: str, html_content: str):
     """Send email via Resend (non-blocking)"""
     try:
@@ -1161,10 +1172,11 @@ async def adjust_credits(adjustment: CreditAdjustment, request: Request, authori
     
     # Create transaction
     transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+    txn_type = "credit_add" if adjustment.action == "add" else "credit_deduct"
     await db.transactions.insert_one({
         "transaction_id": transaction_id,
         "user_id": adjustment.user_id,
-        "type": "adjustment",
+        "type": txn_type,
         "amount": adjustment.amount,
         "description": description,
         "status": "completed",
@@ -2100,6 +2112,7 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
     
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     password_hash = bcrypt.hashpw(student_data.password.encode('utf-8'), bcrypt.gensalt(int(os.environ.get('BCRYPT_ROUNDS', 12)))).decode('utf-8')
+    student_code = await generate_student_code()
     
     student_doc = {
         "user_id": user_id,
@@ -2119,6 +2132,7 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
         "city": student_data.city,
         "country": student_data.country,
         "grade": student_data.grade,
+        "student_code": student_code,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -2129,6 +2143,7 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
         "user_id": user_id,
         "email": student_data.email,
         "name": student_data.name,
+        "student_code": student_code,
         "credentials": {
             "email": student_data.email,
             "password": student_data.password
@@ -3578,6 +3593,222 @@ async def student_nag_check(request: Request, authorization: Optional[str] = Hea
     }
 
 
+# ==================== ADMIN CREDENTIAL MANAGEMENT ====================
+
+@api_router.post("/admin/reset-password")
+async def admin_reset_password(request: Request, authorization: Optional[str] = Header(None)):
+    """Admin resets password for any user"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    body = await request.json()
+    target_email = body.get("email")
+    new_password = body.get("new_password")
+    if not target_email or not new_password:
+        raise HTTPException(status_code=400, detail="Email and new_password required")
+
+    target = await db.users.find_one({"email": target_email}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    password_hash = hash_password(new_password)
+    await db.users.update_one({"email": target_email}, {"$set": {"password_hash": password_hash}})
+
+    return {"message": f"Password reset for {target['name']} ({target_email})", "role": target["role"]}
+
+
+@api_router.get("/admin/all-users")
+async def admin_get_all_users(request: Request, authorization: Optional[str] = Header(None)):
+    """Admin gets all users with search capability"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    users_list = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(5000)
+    return users_list
+
+
+@api_router.get("/admin/user-detail/{user_id}")
+async def admin_get_user_detail(user_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin gets full detail of any user with all related data"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    result = {"user": target}
+
+    if target["role"] == "student":
+        result["assignments"] = await db.student_teacher_assignments.find({"student_id": user_id}, {"_id": 0}).to_list(100)
+        result["classes"] = await db.class_sessions.find({"enrolled_students.user_id": user_id}, {"_id": 0}).to_list(100)
+        result["demos"] = await db.demo_requests.find({"$or": [{"student_user_id": user_id}, {"email": target.get("email")}]}, {"_id": 0}).to_list(100)
+        result["complaints"] = await db.complaints.find({"student_id": user_id}, {"_id": 0}).to_list(100)
+    elif target["role"] == "teacher":
+        result["assignments"] = await db.student_teacher_assignments.find({"teacher_id": user_id}, {"_id": 0}).to_list(100)
+        result["classes"] = await db.class_sessions.find({"teacher_id": user_id}, {"_id": 0}).to_list(100)
+        result["demos"] = await db.demo_requests.find({"accepted_by_teacher_id": user_id}, {"_id": 0}).to_list(100)
+    elif target["role"] == "counsellor":
+        result["assignments"] = await db.student_teacher_assignments.find({"assigned_by": user_id}, {"_id": 0}).to_list(500)
+        result["history_logs"] = await db.history_logs.find({"actor_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
+
+    result["transactions"] = await db.transactions.find({"user_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return result
+
+
+# ==================== BADGE TEMPLATE ENDPOINTS ====================
+
+@api_router.post("/admin/badge-template")
+async def create_badge_template(request: Request, authorization: Optional[str] = Header(None)):
+    """Admin creates a badge template"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    body = await request.json()
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Badge name required")
+
+    existing = await db.badge_templates.find_one({"name": name}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Badge already exists")
+
+    await db.badge_templates.insert_one({
+        "badge_id": f"badge_{uuid.uuid4().hex[:8]}",
+        "name": name,
+        "description": body.get("description", ""),
+        "color": body.get("color", "#8b5cf6"),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    return {"message": f"Badge '{name}' created"}
+
+
+@api_router.get("/admin/badge-templates")
+async def get_badge_templates(request: Request, authorization: Optional[str] = Header(None)):
+    """Get all badge templates"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    templates = await db.badge_templates.find({}, {"_id": 0}).sort("name", 1).to_list(100)
+    return templates
+
+
+@api_router.delete("/admin/badge-template/{badge_id}")
+async def delete_badge_template(badge_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin deletes a badge template"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    await db.badge_templates.delete_one({"badge_id": badge_id})
+    return {"message": "Badge template deleted"}
+
+
+# ==================== TEACHER GROUPED CLASSES ====================
+
+@api_router.get("/teacher/grouped-classes")
+async def get_teacher_grouped_classes(request: Request, authorization: Optional[str] = Header(None)):
+    """Get teacher's classes grouped by student, with today's classes separate"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    all_classes = await db.class_sessions.find(
+        {"teacher_id": user.user_id},
+        {"_id": 0}
+    ).sort("date", -1).to_list(1000)
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    today_classes = []
+    active_by_student = {}
+    ended_classes = []
+
+    for cls in all_classes:
+        start_date = cls.get("date", "")
+        end_date = cls.get("end_date", start_date)
+
+        # Determine if class is truly ended
+        if end_date < today_str and cls.get("status") not in ["in_progress"]:
+            cls["display_status"] = "ended"
+            ended_classes.append(cls)
+            continue
+
+        # Today's classes
+        if start_date <= today_str <= end_date:
+            cls["is_today"] = True
+            today_classes.append(cls)
+
+        # Group by student
+        for student in cls.get("enrolled_students", []):
+            sid = student.get("user_id", "unknown")
+            sname = student.get("name", "Unknown Student")
+            if sid not in active_by_student:
+                active_by_student[sid] = {"student_id": sid, "student_name": sname, "classes": []}
+            active_by_student[sid]["classes"].append(cls)
+
+    # Get student details for active students
+    for sid in active_by_student:
+        student = await db.users.find_one({"user_id": sid}, {"_id": 0, "password_hash": 0})
+        if student:
+            active_by_student[sid]["student_details"] = student
+
+    return {
+        "today": today_classes,
+        "by_student": list(active_by_student.values()),
+        "ended_count": len(ended_classes)
+    }
+
+
+# ==================== COUNSELLOR STUDENT SEARCH ====================
+
+@api_router.get("/counsellor/search-students")
+async def counsellor_search_students(q: str = "", request: Request = None, authorization: Optional[str] = Header(None)):
+    """Search students by name, email, or student_code"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if q.strip():
+        students = await db.users.find(
+            {"role": "student", "$or": [
+                {"name": {"$regex": q, "$options": "i"}},
+                {"email": {"$regex": q, "$options": "i"}},
+                {"student_code": {"$regex": q, "$options": "i"}}
+            ]},
+            {"_id": 0, "password_hash": 0}
+        ).sort("name", 1).to_list(1000)
+    else:
+        students = await db.users.find(
+            {"role": "student"},
+            {"_id": 0, "password_hash": 0}
+        ).sort("name", 1).to_list(1000)
+
+    return students
+
+
+# ==================== TEACHER SCHEDULE VIEW ====================
+
+@api_router.get("/teacher/schedule")
+async def get_teacher_schedule(request: Request, authorization: Optional[str] = Header(None)):
+    """Get teacher's full schedule for schedule planner view"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    classes = await db.class_sessions.find(
+        {"teacher_id": user.user_id, "status": {"$in": ["scheduled", "in_progress"]}},
+        {"_id": 0}
+    ).sort("date", 1).to_list(500)
+
+    return classes
+
+
 # Include the router in the main app
 app.include_router(api_router)
 
@@ -3608,6 +3839,15 @@ async def startup_event():
         code = await generate_teacher_code()
         await db.users.update_one({"user_id": t["user_id"]}, {"$set": {"teacher_code": code}})
         logger.info(f"Backfilled teacher_code {code} for {t['name']}")
+    # Backfill student_code for existing students without one
+    students_without_code = await db.users.find(
+        {"role": "student", "$or": [{"student_code": None}, {"student_code": {"$exists": False}}]},
+        {"_id": 0}
+    ).to_list(5000)
+    for s in students_without_code:
+        code = await generate_student_code()
+        await db.users.update_one({"user_id": s["user_id"]}, {"$set": {"student_code": code}})
+        logger.info(f"Backfilled student_code {code} for {s.get('name', s['email'])}")
     logger.info("Kaimera Learning API started")
 
 @app.on_event("shutdown")
