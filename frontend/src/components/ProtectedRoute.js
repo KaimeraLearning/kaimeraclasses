@@ -34,6 +34,7 @@ const ProtectedRoute = ({ children, requiredRole }) => {
           // Redirect to appropriate dashboard
           if (userData.role === 'student') navigate('/student-dashboard');
           else if (userData.role === 'teacher') navigate('/teacher-dashboard');
+          else if (userData.role === 'counsellor') navigate('/counsellor-dashboard');
           else if (userData.role === 'admin') navigate('/admin-dashboard');
           return;
         }

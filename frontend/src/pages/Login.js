@@ -60,6 +60,8 @@ const Login = () => {
         navigate('/student-dashboard', { state: { user } });
       } else if (user.role === 'teacher') {
         navigate('/teacher-dashboard', { state: { user } });
+      } else if (user.role === 'counsellor') {
+        navigate('/counsellor-dashboard', { state: { user } });
       } else if (user.role === 'admin') {
         navigate('/admin-dashboard', { state: { user } });
       }
@@ -296,11 +298,14 @@ const Login = () => {
                         onChange={(e) => setRegisterRole(e.target.value)}
                         className="w-full pl-10 bg-slate-50 border-2 border-slate-200 rounded-xl h-12 text-slate-900"
                         data-testid="register-role-select"
+                        disabled
                       >
-                        <option value="student">Student</option>
-                        <option value="teacher">Teacher</option>
+                        <option value="student">Student (Only students can self-register)</option>
                       </select>
                     </div>
+                    <p className="text-xs text-slate-500 mt-2">
+                      Note: Teachers are created by admin only
+                    </p>
                   </div>
 
                   <Button

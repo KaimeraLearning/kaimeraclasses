@@ -4,6 +4,7 @@ import AuthCallback from './pages/AuthCallback';
 import StudentDashboard from './pages/StudentDashboard';
 import TeacherDashboard from './pages/TeacherDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import CounsellorDashboard from './pages/CounsellorDashboard';
 import BrowseClasses from './pages/BrowseClasses';
 import VideoClass from './pages/VideoClass';
 import PaymentSuccess from './pages/PaymentSuccess';
@@ -41,6 +42,13 @@ function AppRouter() {
         <Route path="/teacher-dashboard" element={
           <ProtectedRoute requiredRole="teacher">
             <TeacherDashboard />
+          </ProtectedRoute>
+        } />
+        
+        {/* Counsellor Routes */}
+        <Route path="/counsellor-dashboard" element={
+          <ProtectedRoute requiredRole="counsellor">
+            <CounsellorDashboard />
           </ProtectedRoute>
         } />
         

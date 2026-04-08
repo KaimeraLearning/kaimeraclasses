@@ -37,11 +37,13 @@ class User(BaseModel):
     user_id: str
     email: str
     name: str
-    role: str  # student, teacher, admin
+    role: str  # student, teacher, admin, counsellor
     credits: float = 0.0
     picture: Optional[str] = None
     password_hash: Optional[str] = None
     is_approved: bool = True  # For teacher approval
+    phone: Optional[str] = None  # Only for students and counsellors, NOT teachers
+    bio: Optional[str] = None  # Teacher profile bio
     created_at: datetime
 
 class UserRegister(BaseModel):
@@ -134,6 +136,21 @@ class AssignStudentToTeacher(BaseModel):
 class TeacherApprovalRequest(BaseModel):
     assignment_id: str
     approved: bool
+
+class SystemPricing(BaseModel):
+    demo_price_student: float  # What student pays for demo
+    class_price_student: float  # What student pays per class (can be overridden per student)
+    demo_earning_teacher: float  # What teacher earns for demo
+    class_earning_teacher: float  # What teacher earns per class
+
+class CreateTeacherAccount(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+
+class UpdateTeacherProfile(BaseModel):
+    bio: Optional[str] = None
+    picture: Optional[str] = None
 
 class CreditAdjustment(BaseModel):
     user_id: str
@@ -248,28 +265,31 @@ async def seed_admin():
 
 @api_router.post("/auth/register")
 async def register(user_data: UserRegister):
-    """Register new user with email/password"""
+    """Register new user - ONLY creates students with 0 credits"""
     # Check if user exists
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    # Force role to student - only students can self-register
+    if user_data.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can self-register. Teachers are created by admin.")
+    
     # Create user
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     password_hash = hash_password(user_data.password)
-    
-    # Teachers start unapproved
-    is_approved = True if user_data.role != "teacher" else False
     
     user_doc = {
         "user_id": user_id,
         "email": user_data.email,
         "name": user_data.name,
-        "role": user_data.role,
-        "credits": 0.0,
+        "role": "student",  # Always student
+        "credits": 0.0,  # Always start with 0 credits
         "picture": None,
         "password_hash": password_hash,
-        "is_approved": is_approved,
+        "is_approved": True,
+        "phone": None,
+        "bio": None,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -284,7 +304,7 @@ async def register(user_data: UserRegister):
     return {
         "user": user.model_dump(),
         "session_token": session_token,
-        "message": "Registration successful" if is_approved else "Registration successful. Awaiting teacher approval."
+        "message": "Student account created successfully with 0 credits. Please contact admin to purchase credits."
     }
 
 @api_router.post("/auth/login")
@@ -800,6 +820,28 @@ async def submit_feedback(feedback_data: FeedbackCreate, request: Request, autho
     
     return {"message": "Feedback submitted successfully"}
 
+@api_router.post("/teacher/update-profile")
+async def update_teacher_profile(profile_data: UpdateTeacherProfile, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher updates their profile - NO phone number allowed"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    
+    update_fields = {}
+    if profile_data.bio is not None:
+        update_fields['bio'] = profile_data.bio
+    if profile_data.picture is not None:
+        update_fields['picture'] = profile_data.picture
+    
+    if update_fields:
+        await db.users.update_one(
+            {"user_id": user.user_id},
+            {"$set": update_fields}
+        )
+    
+    return {"message": "Profile updated successfully"}
+
 # ==================== ADMIN ENDPOINTS ====================
 
 @api_router.post("/admin/approve-teacher")
@@ -1025,6 +1067,127 @@ async def get_all_students(request: Request, authorization: Optional[str] = Head
     
     return students
 
+@api_router.post("/admin/create-teacher")
+async def create_teacher_account(teacher_data: CreateTeacherAccount, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin creates teacher account"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    # Check if email exists
+    existing = await db.users.find_one({"email": teacher_data.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create teacher
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    password_hash = hash_password(teacher_data.password)
+    
+    teacher_doc = {
+        "user_id": user_id,
+        "email": teacher_data.email,
+        "name": teacher_data.name,
+        "role": "teacher",
+        "credits": 0.0,  # Teacher starts with 0, earns through classes
+        "picture": None,
+        "password_hash": password_hash,
+        "is_approved": True,  # Admin-created teachers are auto-approved
+        "phone": None,  # Teachers cannot add phone
+        "bio": None,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.users.insert_one(teacher_doc)
+    
+    return {"message": "Teacher account created successfully", "user_id": user_id, "email": teacher_data.email}
+
+@api_router.post("/admin/create-counsellor")
+async def create_counsellor_account(counsellor_data: CreateTeacherAccount, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin creates counsellor account"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    # Check if email exists
+    existing = await db.users.find_one({"email": counsellor_data.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create counsellor
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    password_hash = hash_password(counsellor_data.password)
+    
+    counsellor_doc = {
+        "user_id": user_id,
+        "email": counsellor_data.email,
+        "name": counsellor_data.name,
+        "role": "counsellor",
+        "credits": 0.0,
+        "picture": None,
+        "password_hash": password_hash,
+        "is_approved": True,
+        "phone": None,
+        "bio": None,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.users.insert_one(counsellor_doc)
+    
+    return {"message": "Counsellor account created successfully", "user_id": user_id, "email": counsellor_data.email}
+
+@api_router.post("/admin/set-pricing")
+async def set_system_pricing(pricing: SystemPricing, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin sets system-wide pricing"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    pricing_doc = {
+        "pricing_id": "system_pricing",  # Single document for system pricing
+        "demo_price_student": pricing.demo_price_student,
+        "class_price_student": pricing.class_price_student,
+        "demo_earning_teacher": pricing.demo_earning_teacher,
+        "class_earning_teacher": pricing.class_earning_teacher,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": user.user_id
+    }
+    
+    # Upsert pricing
+    await db.system_pricing.update_one(
+        {"pricing_id": "system_pricing"},
+        {"$set": pricing_doc},
+        upsert=True
+    )
+    
+    return {"message": "System pricing updated successfully"}
+
+@api_router.get("/admin/get-pricing")
+async def get_system_pricing(request: Request, authorization: Optional[str] = Header(None)):
+    """Get current system pricing"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+    
+    if not pricing:
+        # Return default pricing if not set
+        return {
+            "demo_price_student": 0.0,
+            "class_price_student": 0.0,
+            "demo_earning_teacher": 0.0,
+            "class_earning_teacher": 0.0
+        }
+    
+    if isinstance(pricing.get('updated_at'), str):
+        pricing['updated_at'] = datetime.fromisoformat(pricing['updated_at'])
+    
+    return pricing
+
 # ==================== STRIPE PAYMENT ENDPOINTS ====================
 
 CREDIT_PACKAGES = {
@@ -1174,6 +1337,31 @@ async def stripe_webhook(request: Request):
         return {"received": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# ==================== COUNSELLOR ENDPOINTS ====================
+
+@api_router.get("/counsellor/dashboard")
+async def counsellor_dashboard(request: Request, authorization: Optional[str] = Header(None)):
+    """Get counsellor dashboard data"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "counsellor":
+        raise HTTPException(status_code=403, detail="Counsellor access only")
+    
+    # Get all students
+    students = await db.users.find({"role": "student"}, {"_id": 0, "password_hash": 0}).to_list(1000)
+    
+    # Get all teachers
+    teachers = await db.users.find({"role": "teacher", "is_approved": True}, {"_id": 0, "password_hash": 0}).to_list(1000)
+    
+    # Get all assignments
+    assignments = await db.student_teacher_assignments.find({}, {"_id": 0}).to_list(1000)
+    
+    return {
+        "students": students,
+        "teachers": teachers,
+        "assignments": assignments
+    }
 
 # Include the router in the main app
 app.include_router(api_router)

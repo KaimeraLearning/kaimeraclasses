@@ -49,6 +49,8 @@ const AuthCallback = () => {
           navigate('/student-dashboard', { state: { user }, replace: true });
         } else if (user.role === 'teacher') {
           navigate('/teacher-dashboard', { state: { user }, replace: true });
+        } else if (user.role === 'counsellor') {
+          navigate('/counsellor-dashboard', { state: { user }, replace: true });
         } else if (user.role === 'admin') {
           navigate('/admin-dashboard', { state: { user }, replace: true });
         }
