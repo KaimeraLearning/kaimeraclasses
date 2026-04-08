@@ -84,6 +84,7 @@ class ClassSessionCreate(BaseModel):
     end_time: str
     max_students: int
     assigned_student_id: str  # REQUIRED - Teacher must select which student
+    duration_days: int  # How many days this class will run
 
 class BookingRequest(BaseModel):
     class_id: str
@@ -663,6 +664,10 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     # Use custom price for this student from assignment
     credits_required = assignment['credit_price']
     
+    # Calculate end date based on duration
+    start_date = datetime.fromisoformat(class_data.date)
+    end_date = start_date + timedelta(days=class_data.duration_days - 1)  # -1 because start date counts as day 1
+    
     class_id = f"class_{uuid.uuid4().hex[:12]}"
     
     class_doc = {
@@ -673,12 +678,14 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
         "subject": class_data.subject,
         "class_type": class_data.class_type,
         "date": class_data.date,
+        "end_date": end_date.isoformat().split('T')[0],  # End date
+        "duration_days": class_data.duration_days,
         "start_time": class_data.start_time,
         "end_time": class_data.end_time,
         "credits_required": credits_required,  # From assignment, teacher doesn't see this
         "max_students": class_data.max_students,
         "assigned_student_id": class_data.assigned_student_id,  # Class created for specific student
-        "enrolled_students": [],
+        "enrolled_students": [],  # Will auto-enroll student after creation
         "status": "scheduled",
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -686,6 +693,31 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     # Create a copy for insertion to avoid ObjectId in response
     insert_doc = class_doc.copy()
     await db.class_sessions.insert_one(insert_doc)
+    
+    # Auto-enroll the student (no booking needed for teacher-created classes)
+    student = await db.users.find_one({"user_id": class_data.assigned_student_id}, {"_id": 0})
+    await db.class_sessions.update_one(
+        {"class_id": class_id},
+        {"$push": {"enrolled_students": {"user_id": student['user_id'], "name": student['name']}}}
+    )
+    
+    # Deduct credits from student (auto-deduct for teacher-created classes)
+    await db.users.update_one(
+        {"user_id": student['user_id']},
+        {"$inc": {"credits": -credits_required}}
+    )
+    
+    # Create transaction
+    transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+    await db.transactions.insert_one({
+        "transaction_id": transaction_id,
+        "user_id": student['user_id'],
+        "type": "auto_booking",
+        "amount": credits_required,
+        "description": f"Auto-enrolled in class: {class_data.title}",
+        "status": "completed",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
     
     # Don't return credits_required to teacher
     response_doc = {k: v for k, v in class_doc.items() if k != 'credits_required'}
@@ -1006,21 +1038,13 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
     # CRITICAL: Check if student already has an active assignment (one student, one teacher only)
     existing_active = await db.student_teacher_assignments.find_one({
         "student_id": assignment.student_id,
-        "status": {"$in": ["pending", "approved"]}
+        "status": {"$in": ["pending", "approved"]}  # Only pending or approved block new assignments
     }, {"_id": 0})
     
     if existing_active:
         raise HTTPException(status_code=400, detail=f"Student already assigned to {existing_active['teacher_name']}. Only one teacher per student allowed.")
     
-    # Check if assignment to this specific teacher already exists
-    existing = await db.student_teacher_assignments.find_one({
-        "student_id": assignment.student_id,
-        "teacher_id": assignment.teacher_id,
-        "status": {"$in": ["pending", "approved"]}
-    }, {"_id": 0})
-    
-    if existing:
-        raise HTTPException(status_code=400, detail="Student already assigned to this teacher")
+    # Rejected assignments don't block - student can be reassigned to a different teacher
     
     assignment_id = f"assign_{uuid.uuid4().hex[:12]}"
     assigned_at = datetime.now(timezone.utc)

@@ -27,7 +27,8 @@ const TeacherDashboard = () => {
     start_time: '',
     end_time: '',
     max_students: '',
-    assigned_student_id: ''
+    assigned_student_id: '',
+    duration_days: '1'
   });
 
   useEffect(() => {
@@ -68,7 +69,8 @@ const TeacherDashboard = () => {
         body: JSON.stringify({
           ...formData,
           max_students: parseInt(formData.max_students),
-          assigned_student_id: formData.assigned_student_id
+          assigned_student_id: formData.assigned_student_id,
+          duration_days: parseInt(formData.duration_days)
         })
       });
 
@@ -87,7 +89,8 @@ const TeacherDashboard = () => {
         start_time: '',
         end_time: '',
         max_students: '',
-        assigned_student_id: ''
+        assigned_student_id: '',
+        duration_days: '1'
       });
       fetchDashboardData();
     } catch (error) {
@@ -428,6 +431,19 @@ const TeacherDashboard = () => {
                   ))}
                 </select>
                 <p className="text-xs text-slate-500 mt-1">Class will be created for this student only</p>
+              </div>
+              <div>
+                <Label>Duration (Days)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={formData.duration_days}
+                  onChange={(e) => setFormData({ ...formData, duration_days: e.target.value })}
+                  className="rounded-xl"
+                  required
+                  data-testid="class-duration-input"
+                />
+                <p className="text-xs text-slate-500 mt-1">How many days will this class run?</p>
               </div>
               <div>
                 <Label>Max Students</Label>
