@@ -82,6 +82,7 @@ class ClassSessionCreate(BaseModel):
     end_time: str
     credits_required: float
     max_students: int
+    assigned_student_id: Optional[str] = None  # For teacher to create class for specific student
 
 class BookingRequest(BaseModel):
     class_id: str
@@ -110,6 +111,29 @@ class FeedbackCreate(BaseModel):
     student_id: str
     rating: int
     comments: str
+
+class StudentTeacherAssignment(BaseModel):
+    assignment_id: str
+    student_id: str
+    student_name: str
+    student_email: str
+    teacher_id: str
+    teacher_name: str
+    teacher_email: str
+    status: str  # pending, approved, rejected, expired
+    credit_price: float  # Admin-set price per class for this student
+    assigned_at: datetime
+    approved_at: Optional[datetime] = None
+    expires_at: datetime  # 24 hours from assignment
+
+class AssignStudentToTeacher(BaseModel):
+    student_id: str
+    teacher_id: str
+    credit_price: float
+
+class TeacherApprovalRequest(BaseModel):
+    assignment_id: str
+    approved: bool
 
 class CreditAdjustment(BaseModel):
     user_id: str
@@ -385,14 +409,36 @@ async def logout(request: Request, response: Response):
 
 @api_router.get("/classes/browse")
 async def browse_classes(request: Request, authorization: Optional[str] = Header(None)):
-    """Browse available classes"""
+    """Browse available classes - students only see classes from their assigned teachers"""
     user = await get_current_user(request, authorization)
     
-    # Get all scheduled classes
-    classes = await db.class_sessions.find(
-        {"status": "scheduled"},
-        {"_id": 0}
-    ).to_list(1000)
+    if user.role == "student":
+        # Get approved teacher assignments for this student
+        approved_assignments = await db.student_teacher_assignments.find(
+            {"student_id": user.user_id, "status": "approved"},
+            {"_id": 0}
+        ).to_list(1000)
+        
+        if not approved_assignments:
+            return []  # No assigned teachers yet
+        
+        # Get teacher IDs
+        teacher_ids = [assignment['teacher_id'] for assignment in approved_assignments]
+        
+        # Get classes only from assigned teachers
+        classes = await db.class_sessions.find(
+            {
+                "status": "scheduled",
+                "teacher_id": {"$in": teacher_ids}
+            },
+            {"_id": 0}
+        ).to_list(1000)
+    else:
+        # Admin/Teacher can see all classes
+        classes = await db.class_sessions.find(
+            {"status": "scheduled"},
+            {"_id": 0}
+        ).to_list(1000)
     
     # Convert datetime
     for cls in classes:
@@ -403,7 +449,7 @@ async def browse_classes(request: Request, authorization: Optional[str] = Header
 
 @api_router.post("/classes/book")
 async def book_class(booking: BookingRequest, request: Request, authorization: Optional[str] = Header(None)):
-    """Book a class"""
+    """Book a class - uses admin-set custom price for the student"""
     user = await get_current_user(request, authorization)
     
     if user.role != "student":
@@ -426,14 +472,27 @@ async def book_class(booking: BookingRequest, request: Request, authorization: O
     if len(cls['enrolled_students']) >= cls['max_students']:
         raise HTTPException(status_code=400, detail="Class is full")
     
+    # Get student-teacher assignment to get custom price
+    assignment = await db.student_teacher_assignments.find_one({
+        "student_id": user.user_id,
+        "teacher_id": cls['teacher_id'],
+        "status": "approved"
+    }, {"_id": 0})
+    
+    if not assignment:
+        raise HTTPException(status_code=403, detail="You are not assigned to this teacher")
+    
+    # Use custom price set by admin
+    credits_to_deduct = assignment['credit_price']
+    
     # Check credits
-    if user.credits < cls['credits_required']:
+    if user.credits < credits_to_deduct:
         raise HTTPException(status_code=400, detail="Insufficient credits")
     
     # Deduct credits
     await db.users.update_one(
         {"user_id": user.user_id},
-        {"$inc": {"credits": -cls['credits_required']}}
+        {"$inc": {"credits": -credits_to_deduct}}
     )
     
     # Add student to class
@@ -448,17 +507,17 @@ async def book_class(booking: BookingRequest, request: Request, authorization: O
         "transaction_id": transaction_id,
         "user_id": user.user_id,
         "type": "booking",
-        "amount": cls['credits_required'],
-        "description": f"Booked class: {cls['title']}",
+        "amount": credits_to_deduct,
+        "description": f"Booked class: {cls['title']} (Custom price: {credits_to_deduct} credits)",
         "status": "completed",
         "created_at": datetime.now(timezone.utc).isoformat()
     })
     
-    return {"message": "Class booked successfully", "credits_remaining": user.credits - cls['credits_required']}
+    return {"message": "Class booked successfully", "credits_remaining": user.credits - credits_to_deduct, "credits_deducted": credits_to_deduct}
 
 @api_router.post("/classes/cancel/{class_id}")
 async def cancel_booking(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Cancel a class booking"""
+    """Cancel a class booking - refunds custom price"""
     user = await get_current_user(request, authorization)
     
     # Get class
@@ -467,8 +526,13 @@ async def cancel_booking(class_id: str, request: Request, authorization: Optiona
         raise HTTPException(status_code=404, detail="Class not found")
     
     # Check if enrolled
-    enrolled = any(s['user_id'] == user.user_id for s in cls['enrolled_students'])
-    if not enrolled:
+    enrolled_student = None
+    for s in cls['enrolled_students']:
+        if s['user_id'] == user.user_id:
+            enrolled_student = s
+            break
+    
+    if not enrolled_student:
         raise HTTPException(status_code=400, detail="Not enrolled in this class")
     
     # Check if class has started
@@ -479,10 +543,19 @@ async def cancel_booking(class_id: str, request: Request, authorization: Optiona
     if datetime.now(timezone.utc) >= class_datetime:
         raise HTTPException(status_code=400, detail="Cannot cancel after class start time")
     
+    # Get assignment to find custom price
+    assignment = await db.student_teacher_assignments.find_one({
+        "student_id": user.user_id,
+        "teacher_id": cls['teacher_id'],
+        "status": "approved"
+    }, {"_id": 0})
+    
+    refund_amount = assignment['credit_price'] if assignment else cls['credits_required']
+    
     # Refund credits
     await db.users.update_one(
         {"user_id": user.user_id},
-        {"$inc": {"credits": cls['credits_required']}}
+        {"$inc": {"credits": refund_amount}}
     )
     
     # Remove student from class
@@ -497,7 +570,7 @@ async def cancel_booking(class_id: str, request: Request, authorization: Optiona
         "transaction_id": transaction_id,
         "user_id": user.user_id,
         "type": "refund",
-        "amount": cls['credits_required'],
+        "amount": refund_amount,
         "description": f"Cancelled class: {cls['title']}",
         "status": "completed",
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -601,10 +674,77 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         if isinstance(cls['created_at'], str):
             cls['created_at'] = datetime.fromisoformat(cls['created_at'])
     
+    # Get pending student assignments
+    pending_assignments = await db.student_teacher_assignments.find(
+        {"teacher_id": user.user_id, "status": "pending"},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    for assignment in pending_assignments:
+        if isinstance(assignment.get('assigned_at'), str):
+            assignment['assigned_at'] = datetime.fromisoformat(assignment['assigned_at'])
+        if isinstance(assignment.get('expires_at'), str):
+            assignment['expires_at'] = datetime.fromisoformat(assignment['expires_at'])
+    
+    # Get approved students
+    approved_students = await db.student_teacher_assignments.find(
+        {"teacher_id": user.user_id, "status": "approved"},
+        {"_id": 0}
+    ).to_list(1000)
+    
     return {
         "is_approved": user.is_approved,
-        "classes": classes
+        "classes": classes,
+        "pending_assignments": pending_assignments,
+        "approved_students": approved_students
     }
+
+@api_router.post("/teacher/approve-assignment")
+async def approve_student_assignment(approval: TeacherApprovalRequest, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher approves or rejects student assignment"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    
+    assignment = await db.student_teacher_assignments.find_one(
+        {"assignment_id": approval.assignment_id},
+        {"_id": 0}
+    )
+    
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    if assignment['teacher_id'] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not your assignment")
+    
+    if assignment['status'] != "pending":
+        raise HTTPException(status_code=400, detail="Assignment already processed")
+    
+    # Check if not expired
+    expires_at = datetime.fromisoformat(assignment['expires_at'])
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    
+    if datetime.now(timezone.utc) > expires_at:
+        await db.student_teacher_assignments.update_one(
+            {"assignment_id": approval.assignment_id},
+            {"$set": {"status": "expired"}}
+        )
+        raise HTTPException(status_code=400, detail="Assignment expired")
+    
+    new_status = "approved" if approval.approved else "rejected"
+    
+    await db.student_teacher_assignments.update_one(
+        {"assignment_id": approval.assignment_id},
+        {"$set": {
+            "status": new_status,
+            "approved_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    action = "approved" if approval.approved else "rejected"
+    return {"message": f"Student assignment {action}"}
 
 @api_router.post("/classes/start/{class_id}")
 async def start_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
@@ -768,6 +908,122 @@ async def adjust_credits(adjustment: CreditAdjustment, request: Request, authori
     })
     
     return {"message": "Credits adjusted successfully"}
+
+@api_router.post("/admin/assign-student")
+async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin assigns student to teacher"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    # Get student and teacher details
+    student = await db.users.find_one({"user_id": assignment.student_id, "role": "student"}, {"_id": 0})
+    teacher = await db.users.find_one({"user_id": assignment.teacher_id, "role": "teacher"}, {"_id": 0})
+    
+    if not student or not teacher:
+        raise HTTPException(status_code=404, detail="Student or teacher not found")
+    
+    # Check if assignment already exists
+    existing = await db.student_teacher_assignments.find_one({
+        "student_id": assignment.student_id,
+        "teacher_id": assignment.teacher_id,
+        "status": {"$in": ["pending", "approved"]}
+    }, {"_id": 0})
+    
+    if existing:
+        raise HTTPException(status_code=400, detail="Student already assigned to this teacher")
+    
+    assignment_id = f"assign_{uuid.uuid4().hex[:12]}"
+    assigned_at = datetime.now(timezone.utc)
+    expires_at = assigned_at + timedelta(hours=24)
+    
+    assignment_doc = {
+        "assignment_id": assignment_id,
+        "student_id": assignment.student_id,
+        "student_name": student['name'],
+        "student_email": student['email'],
+        "teacher_id": assignment.teacher_id,
+        "teacher_name": teacher['name'],
+        "teacher_email": teacher['email'],
+        "status": "pending",
+        "credit_price": assignment.credit_price,
+        "assigned_at": assigned_at.isoformat(),
+        "approved_at": None,
+        "expires_at": expires_at.isoformat()
+    }
+    
+    await db.student_teacher_assignments.insert_one(assignment_doc)
+    
+    return {"message": "Student assigned to teacher. Teacher has 24 hours to approve.", "assignment_id": assignment_id}
+
+@api_router.get("/admin/emergency-assignments")
+async def get_emergency_assignments(request: Request, authorization: Optional[str] = Header(None)):
+    """Get assignments that expired without teacher approval"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    # Check for expired pending assignments
+    now = datetime.now(timezone.utc)
+    
+    # Find pending assignments past expiry
+    pending_assignments = await db.student_teacher_assignments.find({
+        "status": "pending"
+    }, {"_id": 0}).to_list(1000)
+    
+    emergency_assignments = []
+    for assignment in pending_assignments:
+        expires_at = datetime.fromisoformat(assignment['expires_at'])
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        
+        if now > expires_at:
+            # Mark as expired
+            await db.student_teacher_assignments.update_one(
+                {"assignment_id": assignment['assignment_id']},
+                {"$set": {"status": "expired"}}
+            )
+            assignment['status'] = "expired"
+            emergency_assignments.append(assignment)
+    
+    return emergency_assignments
+
+@api_router.get("/admin/all-assignments")
+async def get_all_assignments(request: Request, authorization: Optional[str] = Header(None)):
+    """Get all student-teacher assignments"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    assignments = await db.student_teacher_assignments.find({}, {"_id": 0}).to_list(1000)
+    
+    for assignment in assignments:
+        for field in ['assigned_at', 'expires_at']:
+            if assignment.get(field) and isinstance(assignment[field], str):
+                assignment[field] = datetime.fromisoformat(assignment[field])
+        if assignment.get('approved_at') and isinstance(assignment['approved_at'], str):
+            assignment['approved_at'] = datetime.fromisoformat(assignment['approved_at'])
+    
+    return assignments
+
+@api_router.get("/admin/students")
+async def get_all_students(request: Request, authorization: Optional[str] = Header(None)):
+    """Get all students"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    students = await db.users.find({"role": "student"}, {"_id": 0, "password_hash": 0}).to_list(1000)
+    
+    for student in students:
+        if isinstance(student.get('created_at'), str):
+            student['created_at'] = datetime.fromisoformat(student['created_at'])
+    
+    return students
 
 # ==================== STRIPE PAYMENT ENDPOINTS ====================
 
