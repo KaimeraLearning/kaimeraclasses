@@ -1,8 +1,10 @@
 # Kaimera Learning - EdTech CRM Platform PRD
 
 ## Original Problem Statement
-Build a complete EdTech CRM/Management Platform with 4 roles: Admin, Counsellor, Teacher, Student. 
-Flow: Students sign up (0 credits) -> Counsellor assigns student to Teacher -> Teacher approves -> Teacher creates classes for student (auto-enrolling, credits deducted). Admin/Counsellor sets pricing. Teachers submit class proofs for counsellor verification to earn wallet credits.
+Complete EdTech CRM/Management Platform with 4 roles: Admin, Counsellor, Teacher, Student.
+Students cannot self-register openly. Admin creates student accounts manually and shares credentials.
+Counsellor assigns students to teachers. Teacher approves, creates classes (auto-enrollment).
+Complaints visibility is role-scoped: student complaints go to their assigned teacher + counsellor only.
 
 ## Tech Stack
 - Frontend: React + Shadcn/UI + Tailwind CSS
@@ -12,63 +14,72 @@ Flow: Students sign up (0 credits) -> Counsellor assigns student to Teacher -> T
 - Payments: Stripe (test key)
 
 ## Core Workflow
-1. Student registers (0 credits) → Admin adds credits
-2. Counsellor assigns student to teacher with custom price
+1. Admin creates student account (email + password + details) → shares credentials
+2. Counsellor assigns student to teacher with custom credit price
 3. Teacher approves assignment (24hr window)
-4. Teacher creates class for that student → auto-enrollment + credit deduction
-5. Teacher submits proof after class → Counsellor verifies → Teacher earns wallet credits
-6. If class duration expires: rebook within 3 days OR release to counsellor pool
+4. Teacher creates class for student → auto-enrollment + credit deduction
+5. Student attends classes; can cancel a day's session (max 3, then class dismissed)
+6. Teacher submits proof after class → Counsellor verifies → Teacher earns wallet credits
+7. If class duration expires: rebook within 3 days OR release to counsellor pool
 
-## Implemented Features (as of Feb 2026)
+## Implemented Features
 
-### Phase 1 - Core CRM (DONE)
+### Core CRM (DONE)
 - 4-role system: Admin, Counsellor, Teacher, Student
 - Session-based auth + Google OAuth
-- Admin: create teachers/counsellors, set pricing, approve teachers, adjust credits
-- Counsellor: assign students to teachers, view all students/teachers
-- Teacher: approve students, create classes (1:1 or group), manage schedule
-- Student: browse assigned classes, auto-enrollment, cancel bookings
-- Stripe payment integration (test key)
+- Admin: create teachers/counsellors/students, set pricing, approve teachers, adjust credits
+- Counsellor: assign students, view profiles, verify proofs, manage complaints
+- Teacher: approve students, create classes (1:1/group, demo/regular), submit proofs
+- Student: view classes, cancel sessions, edit profile, file complaints
 
-### Phase 2 - Profile & Verification (DONE)
-- Student profile popup in Counsellor Dashboard (institute, goal, preferred time slot, credits, assignment info, class history)
-- Student profile edit (phone, institute, goal, preferred time slot)
-- Teacher/Student profile popups with full details
-- Separate scalable pages: CounsellorStudents, TeacherClasses, TeacherSchedule
+### Student Account Creation by Admin (DONE)
+- POST /api/admin/create-student endpoint
+- Admin fills name, email, password, institute, goal, time slot, phone
+- Returns credentials that admin shares with student
+- Admin cannot edit existing credentials (by design)
 
-### Phase 3 - Demo & Proofs (DONE)
-- Demo session flow: is_demo toggle on class creation, uses demo pricing from system settings
-- Teacher class verification: submit proof (feedback, performance rating, topics covered, screenshot)
-- Counsellor proof verification page: approve/reject proofs, reviewer notes
-- Teacher wallet credits on proof approval (uses system pricing earning rates)
+### Class Cancellation System (DONE)
+- Student clicks "Cancel Today's Session" → class extends by 1 day
+- Cancellation tracker shows X/3 used with progress bar
+- After 3 cancellations → class dismissed
+- Teacher receives notification on each cancellation
+- No Join/Cancel Booking buttons (removed)
 
-### Phase 4 - Complaints & Reassignment (DONE)
-- Complaint system: students, teachers, counsellors can raise complaints
-- Admin complaint management: view all complaints, resolve/close
-- Shared complaints page accessible from all dashboards
-- Auto-reassignment logic: expired classes flagged, rebook within 3 days or release student
+### Complaint Visibility (DONE)
+- Student complaints auto-link to their assigned teacher
+- Teachers see ONLY complaints from their students (not other teachers' students)
+- Counsellors see ALL complaints
+- Admin sees ALL complaints and can resolve them
+
+### Notification System (DONE)
+- Teacher notification bell with unread count
+- Notifications for: class cancellations, class dismissals, student complaints
+- Mark all read functionality
+
+### Demo Sessions & Class Verification (DONE)
+- Demo vs regular class toggle
+- Teacher proof submission (feedback, performance, topics, screenshot)
+- Counsellor proof verification → teacher earns credits
+
+### Profile & Student Details (DONE)
+- Student profile popup for counsellors (institute, goal, time slot, class history)
+- Student profile edit (phone, institute, goal, time slot)
+- Teacher schedule calendar view
+
+### Auto-Reassignment (DONE)
+- Expired classes flagged on counsellor dashboard
+- Rebook within 3 days or release student
 
 ## API Endpoints
 ### Auth: /api/auth/register, /api/auth/login, /api/auth/session, /api/auth/me, /api/auth/logout
-### Student: /api/student/dashboard, /api/student/update-profile, /api/classes/browse, /api/classes/book, /api/classes/cancel/{id}
-### Teacher: /api/teacher/dashboard, /api/teacher/approve-assignment, /api/teacher/submit-proof, /api/teacher/my-proofs, /api/teacher/update-profile, /api/classes/create, /api/classes/delete/{id}
+### Student: /api/student/dashboard, /api/student/update-profile, /api/classes/browse, /api/classes/cancel-day/{id}
+### Teacher: /api/teacher/dashboard, /api/teacher/approve-assignment, /api/teacher/submit-proof, /api/teacher/my-proofs, /api/teacher/student-complaints
 ### Counsellor: /api/counsellor/dashboard, /api/counsellor/student-profile/{id}, /api/counsellor/pending-proofs, /api/counsellor/all-proofs, /api/counsellor/verify-proof, /api/counsellor/expired-classes, /api/counsellor/reassign-student
-### Admin: /api/admin/teachers, /api/admin/students, /api/admin/classes, /api/admin/transactions, /api/admin/complaints, /api/admin/resolve-complaint, /api/admin/assign-student, /api/admin/create-teacher, /api/admin/create-counsellor, /api/admin/set-pricing, /api/admin/get-pricing, /api/admin/adjust-credits, /api/admin/approve-teacher, /api/admin/all-assignments, /api/admin/emergency-assignments
+### Admin: /api/admin/teachers, /api/admin/students, /api/admin/classes, /api/admin/complaints, /api/admin/resolve-complaint, /api/admin/assign-student, /api/admin/create-teacher, /api/admin/create-counsellor, /api/admin/create-student, /api/admin/set-pricing, /api/admin/approve-teacher, /api/admin/adjust-credits
+### Notifications: /api/notifications/my, /api/notifications/mark-read/{id}, /api/notifications/mark-all-read
 ### Complaints: /api/complaints/create, /api/complaints/my
 
 ## Remaining Backlog
-- P2: Stripe integration robustness (webhook handling, real payment flow)
+- P2: Stripe integration robustness (webhooks, real payment flow)
 - P3: Video integration for live classes
-- P3: Refactor server.py into modular routers (auth, admin, teacher, student, counsellor)
-
-## Architecture
-```
-/app/backend/server.py - All API endpoints (FastAPI)
-/app/frontend/src/
-  App.js - Route definitions
-  pages/ - StudentDashboard, TeacherDashboard, AdminDashboard, CounsellorDashboard,
-           CounsellorStudents, CounsellorProofs, TeacherClasses, TeacherSchedule,
-           ComplaintsPage, BrowseClasses, VideoClass, PaymentSuccess, Login, AuthCallback
-  components/ui/ - Shadcn components
-  components/ProtectedRoute.js - Role-based route guard
-```
+- P3: Refactor server.py into modular routers
