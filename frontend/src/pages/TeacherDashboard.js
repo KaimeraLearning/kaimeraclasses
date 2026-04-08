@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp } from 'lucide-react';
+import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -279,6 +279,7 @@ const TeacherDashboard = () => {
         {/* Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
           <Button onClick={() => setShowCreateDialog(true)} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full px-6 py-3 font-bold" data-testid="create-class-button"><Plus className="w-5 h-5 mr-2" /> Create New Class</Button>
+          <Button onClick={() => navigate('/demo-live-sheet')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-6 py-3 font-bold" data-testid="demo-live-sheet-button"><Zap className="w-4 h-4 mr-2" /> Demo Live Sheet</Button>
           <Button onClick={() => navigate('/teacher-classes')} variant="outline" className="rounded-full px-6 py-3 font-bold">All Classes</Button>
           <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full px-6 py-3 font-bold"><MessageSquare className="w-4 h-4 mr-2" /> My Complaints</Button>
         </div>

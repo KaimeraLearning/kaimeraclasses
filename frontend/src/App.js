@@ -13,6 +13,10 @@ import BrowseClasses from './pages/BrowseClasses';
 import VideoClass from './pages/VideoClass';
 import PaymentSuccess from './pages/PaymentSuccess';
 import ComplaintsPage from './pages/ComplaintsPage';
+import BookDemo from './pages/BookDemo';
+import DemoLiveSheet from './pages/DemoLiveSheet';
+import DemoFeedback from './pages/DemoFeedback';
+import HistoryPage from './pages/HistoryPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from './components/ui/sonner';
 import './App.css';
@@ -30,6 +34,7 @@ function AppRouter() {
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/book-demo" element={<BookDemo />} />
         
         {/* Student Routes */}
         <Route path="/student-dashboard" element={
@@ -40,6 +45,11 @@ function AppRouter() {
         <Route path="/browse-classes" element={
           <ProtectedRoute requiredRole="student">
             <BrowseClasses />
+          </ProtectedRoute>
+        } />
+        <Route path="/demo-feedback" element={
+          <ProtectedRoute requiredRole="student">
+            <DemoFeedback />
           </ProtectedRoute>
         } />
         
@@ -84,7 +94,17 @@ function AppRouter() {
           </ProtectedRoute>
         } />
         
-        {/* Shared Routes */}
+        {/* Shared Auth Routes */}
+        <Route path="/demo-live-sheet" element={
+          <ProtectedRoute>
+            <DemoLiveSheet />
+          </ProtectedRoute>
+        } />
+        <Route path="/history" element={
+          <ProtectedRoute>
+            <HistoryPage />
+          </ProtectedRoute>
+        } />
         <Route path="/class/:classId" element={
           <ProtectedRoute>
             <VideoClass />

@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Users, BookOpen, UserPlus, ShieldCheck, MessageSquare, Clock, User, MapPin, Target, CalendarClock } from 'lucide-react';
+import { GraduationCap, LogOut, Users, BookOpen, UserPlus, ShieldCheck, MessageSquare, Clock, User, MapPin, Target, CalendarClock, Zap } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -198,6 +198,12 @@ const CounsellorDashboard = () => {
         <div className="flex flex-wrap gap-3 mb-8">
           <Button onClick={() => navigate('/counsellor/proofs')} className="bg-amber-500 hover:bg-amber-600 text-white rounded-full" data-testid="proofs-link">
             <ShieldCheck className="w-4 h-4 mr-2" /> Verify Class Proofs {pendingProofsCount > 0 && `(${pendingProofsCount})`}
+          </Button>
+          <Button onClick={() => navigate('/demo-live-sheet')} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full" data-testid="demo-live-sheet-link">
+            <Zap className="w-4 h-4 mr-2" /> Demo Live Sheet
+          </Button>
+          <Button onClick={() => navigate('/history')} className="bg-violet-500 hover:bg-violet-600 text-white rounded-full" data-testid="history-link">
+            <Clock className="w-4 h-4 mr-2" /> History & Search
           </Button>
           <Button onClick={() => navigate('/counsellor/students')} variant="outline" className="rounded-full" data-testid="all-students-link">
             <Users className="w-4 h-4 mr-2" /> All Students

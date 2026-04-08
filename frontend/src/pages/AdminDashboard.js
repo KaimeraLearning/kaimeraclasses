@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy } from 'lucide-react';
+import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap, Clock, History } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -179,6 +179,16 @@ const AdminDashboard = () => {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Quick Actions */}
+        <div className="flex flex-wrap gap-3 mb-6">
+          <Button onClick={() => navigate('/demo-live-sheet')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full font-bold" data-testid="admin-demo-live-sheet">
+            <Zap className="w-4 h-4 mr-2" /> Demo Live Sheet
+          </Button>
+          <Button onClick={() => navigate('/history')} className="bg-violet-500 hover:bg-violet-600 text-white rounded-full font-bold" data-testid="admin-history-link">
+            <History className="w-4 h-4 mr-2" /> History & Search
+          </Button>
+        </div>
+
         <Tabs defaultValue="teachers" className="w-full">
           <TabsList className="mb-8">
             <TabsTrigger value="teachers" data-testid="teachers-tab">Teachers</TabsTrigger>

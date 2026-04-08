@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, CreditCard, Calendar, Clock, Users, User, MessageSquare, Save, XCircle } from 'lucide-react';
+import { GraduationCap, LogOut, CreditCard, Calendar, Clock, Users, User, MessageSquare, Save, XCircle, Zap, Star } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -142,6 +142,12 @@ const StudentDashboard = () => {
         <div className="flex flex-wrap gap-3 mb-8">
           <Button onClick={() => navigate('/browse-classes')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-6 py-5 font-bold" data-testid="browse-classes-button">
             View My Classes
+          </Button>
+          <Button onClick={() => navigate('/book-demo')} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full px-6 py-5 font-bold" data-testid="book-demo-button">
+            <Zap className="w-4 h-4 mr-2" /> Book a Demo
+          </Button>
+          <Button onClick={() => navigate('/demo-feedback')} variant="outline" className="rounded-full px-6 py-5 font-bold" data-testid="demo-feedback-button">
+            <Star className="w-4 h-4 mr-2" /> Demo Feedback
           </Button>
           <Button onClick={() => setShowProfileDialog(true)} variant="outline" className="rounded-full px-6 py-5 font-bold" data-testid="edit-profile-button">
             <User className="w-4 h-4 mr-2" /> Edit Profile

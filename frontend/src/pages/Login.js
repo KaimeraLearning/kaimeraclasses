@@ -320,6 +320,19 @@ const Login = () => {
               </div>
             </TabsContent>
           </Tabs>
+
+          {/* Book Demo CTA */}
+          <div className="mt-6 text-center">
+            <p className="text-sm text-slate-500 mb-2">Want to try before you sign up?</p>
+            <Button
+              onClick={() => navigate('/book-demo')}
+              variant="outline"
+              className="rounded-full border-2 border-sky-200 text-sky-600 hover:bg-sky-50 font-semibold px-6"
+              data-testid="book-demo-cta"
+            >
+              Book a Free Demo Class
+            </Button>
+          </div>
         </div>
       </div>
     </div>
