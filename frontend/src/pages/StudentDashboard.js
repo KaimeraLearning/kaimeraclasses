@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, CreditCard, Calendar, Clock, Users, User, MessageSquare, Save } from 'lucide-react';
+import { GraduationCap, LogOut, CreditCard, Calendar, Clock, Users, User, MessageSquare, Save, XCircle } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -51,11 +51,13 @@ const StudentDashboard = () => {
     try { await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' }); navigate('/login'); } catch {}
   };
 
-  const handleCancelBooking = async (classId) => {
+  const handleCancelClassDay = async (classId) => {
+    if (!window.confirm('Cancel today\'s class session? This will extend the class by 1 day. You have limited cancellations.')) return;
     try {
-      const response = await fetch(`${API}/classes/cancel/${classId}`, { method: 'POST', credentials: 'include' });
-      if (!response.ok) throw new Error((await response.json()).detail);
-      toast.success('Booking cancelled and credits refunded');
+      const response = await fetch(`${API}/classes/cancel-day/${classId}`, { method: 'POST', credentials: 'include' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail);
+      toast.success(data.message);
       fetchDashboardData();
     } catch (error) { toast.error(error.message); }
   };
@@ -71,12 +73,6 @@ const StudentDashboard = () => {
       setShowProfileDialog(false);
       fetchDashboardData();
     } catch (error) { toast.error(error.message); }
-  };
-
-  const canJoinClass = (classDate, startTime) => {
-    const now = new Date();
-    const classDateTime = new Date(`${classDate}T${startTime}:00`);
-    return now >= new Date(classDateTime.getTime() - 5 * 60000) && now <= classDateTime;
   };
 
   if (loading) return (
@@ -125,7 +121,7 @@ const StudentDashboard = () => {
           <div className="bg-white rounded-3xl p-6 border-2 border-slate-100 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)]">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-slate-600 text-sm font-medium mb-1">Upcoming Classes</p>
+                <p className="text-slate-600 text-sm font-medium mb-1">Active Classes</p>
                 <p className="text-4xl font-bold text-slate-900">{upcomingClasses.length}</p>
               </div>
               <Calendar className="w-12 h-12 text-amber-400" />
@@ -134,7 +130,7 @@ const StudentDashboard = () => {
           <div className="bg-white rounded-3xl p-6 border-2 border-slate-100 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)]">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-slate-600 text-sm font-medium mb-1">Completed Classes</p>
+                <p className="text-slate-600 text-sm font-medium mb-1">Completed</p>
                 <p className="text-4xl font-bold text-slate-900">{pastClasses.length}</p>
               </div>
               <GraduationCap className="w-12 h-12 text-emerald-500" />
@@ -144,8 +140,8 @@ const StudentDashboard = () => {
 
         {/* Quick Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
-          <Button onClick={() => navigate('/browse-classes')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-6 py-5 font-bold shadow-[0_4px_14px_0_rgba(245,158,11,0.39)]" data-testid="browse-classes-button">
-            Browse Available Classes
+          <Button onClick={() => navigate('/browse-classes')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-6 py-5 font-bold" data-testid="browse-classes-button">
+            View My Classes
           </Button>
           <Button onClick={() => setShowProfileDialog(true)} variant="outline" className="rounded-full px-6 py-5 font-bold" data-testid="edit-profile-button">
             <User className="w-4 h-4 mr-2" /> Edit Profile
@@ -155,64 +151,87 @@ const StudentDashboard = () => {
           </Button>
         </div>
 
-        {/* Upcoming Classes */}
+        {/* Active Classes */}
         <div className="mb-8">
-          <h2 className="text-xl font-bold text-slate-900 mb-4">Upcoming Classes</h2>
+          <h2 className="text-xl font-bold text-slate-900 mb-4">Your Classes</h2>
           {upcomingClasses.length === 0 ? (
             <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
-              <p className="text-slate-600">No upcoming classes. Browse and book a class!</p>
+              <p className="text-slate-600">No active classes yet. Your teacher will create classes for you.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {upcomingClasses.map(cls => (
-                <div key={cls.class_id} className="bg-white rounded-3xl border-2 border-slate-200 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)] overflow-hidden" data-testid={`upcoming-class-${cls.class_id}`}>
-                  <div className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h3 className="text-xl font-bold text-slate-900 mb-1">{cls.title}</h3>
-                        <p className="text-sm text-slate-600">{cls.teacher_name}</p>
+              {upcomingClasses.map(cls => {
+                const cancellationCount = cls.cancellation_count || 0;
+                const maxCancellations = cls.max_cancellations || 3;
+                const remaining = maxCancellations - cancellationCount;
+                return (
+                  <div key={cls.class_id} className="bg-white rounded-3xl border-2 border-slate-200 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)] overflow-hidden" data-testid={`class-card-${cls.class_id}`}>
+                    <div className="p-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div>
+                          <h3 className="text-xl font-bold text-slate-900 mb-1">{cls.title}</h3>
+                          <p className="text-sm text-slate-600">by {cls.teacher_name}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="bg-sky-100 text-sky-800 px-3 py-1 rounded-full text-xs font-semibold">{cls.subject}</span>
+                          {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-3 py-1 rounded-full text-xs font-semibold">DEMO</span>}
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <span className="bg-sky-100 text-sky-800 px-3 py-1 rounded-full text-xs font-semibold">{cls.subject}</span>
-                        {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-3 py-1 rounded-full text-xs font-semibold">DEMO</span>}
+                      <div className="space-y-2 mb-4">
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <Calendar className="w-4 h-4" /><span className="text-sm">{format(parseISO(cls.date), 'MMM dd')} - {format(parseISO(cls.end_date || cls.date), 'MMM dd, yyyy')}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <Clock className="w-4 h-4" /><span className="text-sm">{cls.start_time} - {cls.end_time}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <Users className="w-4 h-4" /><span className="text-sm">{cls.duration_days} day program</span>
+                        </div>
                       </div>
-                    </div>
-                    <div className="space-y-2 mb-4">
-                      <div className="flex items-center gap-2 text-slate-600">
-                        <Calendar className="w-4 h-4" /><span className="text-sm">{format(parseISO(cls.date), 'MMM dd, yyyy')}</span>
+
+                      {/* Cancellation info */}
+                      <div className={`rounded-xl p-3 mb-4 ${remaining <= 1 ? 'bg-red-50 border border-red-200' : 'bg-slate-50 border border-slate-200'}`}>
+                        <div className="flex justify-between items-center">
+                          <p className="text-xs font-semibold text-slate-700">Cancellations used</p>
+                          <p className={`text-sm font-bold ${remaining <= 1 ? 'text-red-600' : 'text-slate-900'}`}>
+                            {cancellationCount} / {maxCancellations}
+                          </p>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-1.5 mt-2">
+                          <div className={`h-1.5 rounded-full ${remaining <= 1 ? 'bg-red-500' : 'bg-amber-400'}`} style={{width: `${(cancellationCount/maxCancellations)*100}%`}}></div>
+                        </div>
+                        {remaining <= 1 && remaining > 0 && (
+                          <p className="text-xs text-red-600 mt-1">Last cancellation! Next one will dismiss the class.</p>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2 text-slate-600">
-                        <Clock className="w-4 h-4" /><span className="text-sm">{cls.start_time} - {cls.end_time}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-slate-600">
-                        <Users className="w-4 h-4" /><span className="text-sm">{cls.enrolled_students.length} / {cls.max_students} students</span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {canJoinClass(cls.date, cls.start_time) && (
-                        <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold" data-testid={`join-class-button-${cls.class_id}`}>
-                          Join Class
+
+                      {remaining > 0 && cls.status === 'scheduled' && (
+                        <Button
+                          onClick={() => handleCancelClassDay(cls.class_id)}
+                          variant="outline"
+                          className="w-full border-2 border-amber-300 text-amber-700 hover:bg-amber-50 rounded-full font-bold"
+                          data-testid={`cancel-class-day-${cls.class_id}`}
+                        >
+                          <XCircle className="w-4 h-4 mr-2" /> Cancel Today's Session ({remaining} left)
                         </Button>
                       )}
-                      <Button onClick={() => handleCancelBooking(cls.class_id)} variant="outline" className="flex-1 rounded-full border-2 hover:bg-red-50 hover:border-red-200" data-testid={`cancel-booking-button-${cls.class_id}`}>
-                        Cancel Booking
-                      </Button>
+                      {cls.status === 'dismissed' && (
+                        <div className="bg-red-50 text-red-700 rounded-xl p-3 text-center font-semibold text-sm">
+                          Class Dismissed - Too many cancellations
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
         {/* Past Classes */}
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 mb-4">Past Classes</h2>
-          {pastClasses.length === 0 ? (
-            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
-              <p className="text-slate-600">No past classes yet.</p>
-            </div>
-          ) : (
+        {pastClasses.length > 0 && (
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 mb-4">Past Classes</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {pastClasses.map(cls => (
                 <div key={cls.class_id} className="bg-white rounded-3xl border-2 border-slate-100 p-6 opacity-80">
@@ -222,8 +241,8 @@ const StudentDashboard = () => {
                 </div>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Edit Profile Dialog */}

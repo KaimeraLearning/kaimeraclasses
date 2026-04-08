@@ -209,6 +209,15 @@ class ComplaintResolve(BaseModel):
     resolution: str
     status: str  # resolved or closed
 
+class CreateStudentAccount(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+    institute: Optional[str] = None
+    goal: Optional[str] = None
+    preferred_time_slot: Optional[str] = None
+    phone: Optional[str] = None
+
 # ==================== HELPER FUNCTIONS ====================
 
 def hash_password(password: str) -> str:
@@ -731,6 +740,9 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
         "enrolled_students": [],  # Will auto-enroll student after creation
         "status": "scheduled",
         "verification_status": "pending",  # pending, submitted, verified, rejected
+        "cancellations": [],  # Tracks per-day cancellations by student
+        "cancellation_count": 0,
+        "max_cancellations": 3,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -1703,12 +1715,23 @@ async def create_complaint(complaint: ComplaintCreate, request: Request, authori
     if user.role == "admin":
         raise HTTPException(status_code=403, detail="Admin cannot create complaints")
     
+    # If student, auto-link to their assigned teacher
+    related_teacher_id = None
+    if user.role == "student":
+        assignment = await db.student_teacher_assignments.find_one(
+            {"student_id": user.user_id, "status": {"$in": ["pending", "approved"]}},
+            {"_id": 0}
+        )
+        if assignment:
+            related_teacher_id = assignment.get("teacher_id")
+    
     complaint_id = f"complaint_{uuid.uuid4().hex[:12]}"
     complaint_doc = {
         "complaint_id": complaint_id,
         "raised_by": user.user_id,
         "raised_by_name": user.name,
         "raised_by_role": user.role,
+        "related_teacher_id": related_teacher_id,
         "subject": complaint.subject,
         "description": complaint.description,
         "related_class_id": complaint.related_class_id,
@@ -1719,6 +1742,21 @@ async def create_complaint(complaint: ComplaintCreate, request: Request, authori
     }
     
     await db.complaints.insert_one(complaint_doc)
+    
+    # Notify teacher if student complaint
+    if related_teacher_id:
+        notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+        await db.notifications.insert_one({
+            "notification_id": notif_id,
+            "user_id": related_teacher_id,
+            "type": "complaint_received",
+            "title": "Student Complaint",
+            "message": f"{user.name} raised a complaint: {complaint.subject}",
+            "read": False,
+            "related_id": complaint_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    
     return {"message": "Complaint submitted successfully", "complaint_id": complaint_id}
 
 @api_router.get("/complaints/my")
@@ -1733,10 +1771,10 @@ async def get_my_complaints(request: Request, authorization: Optional[str] = Hea
 
 @api_router.get("/admin/complaints")
 async def get_all_complaints(request: Request, authorization: Optional[str] = Header(None)):
-    """Admin views all complaints"""
+    """Admin/Counsellor views all complaints"""
     user = await get_current_user(request, authorization)
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access only")
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counsellor access only")
     
     complaints = await db.complaints.find({}, {"_id": 0}).to_list(1000)
     return complaints
@@ -1816,6 +1854,193 @@ async def reassign_student(data: Dict[str, Any], request: Request, authorization
         return {"message": "Student kept with current teacher for rebooking"}
     
     raise HTTPException(status_code=400, detail="Invalid action")
+
+# ==================== CANCEL CLASS DAY ENDPOINT ====================
+
+@api_router.post("/classes/cancel-day/{class_id}")
+async def cancel_class_day(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Student cancels class for a day - extends duration, max 3 cancellations"""
+    user = await get_current_user(request, authorization)
+    if user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only")
+    
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if cls.get('assigned_student_id') != user.user_id:
+        raise HTTPException(status_code=403, detail="Not your class")
+    if cls['status'] != 'scheduled':
+        raise HTTPException(status_code=400, detail="Class is not active")
+    
+    cancellation_count = cls.get('cancellation_count', 0)
+    max_cancellations = cls.get('max_cancellations', 3)
+    
+    if cancellation_count >= max_cancellations:
+        # Dismiss the class
+        await db.class_sessions.update_one(
+            {"class_id": class_id},
+            {"$set": {"status": "dismissed"}}
+        )
+        # Notify teacher
+        notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+        await db.notifications.insert_one({
+            "notification_id": notif_id,
+            "user_id": cls['teacher_id'],
+            "type": "class_dismissed",
+            "title": "Class Dismissed",
+            "message": f"Class '{cls['title']}' has been dismissed. {user.name} exceeded max cancellations ({max_cancellations}).",
+            "read": False,
+            "related_id": class_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        raise HTTPException(status_code=400, detail="Maximum cancellations reached. Class has been dismissed.")
+    
+    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    
+    # Check if already cancelled for today
+    existing_cancellations = cls.get('cancellations', [])
+    for c in existing_cancellations:
+        if c.get('date') == today_str:
+            raise HTTPException(status_code=400, detail="Already cancelled for today")
+    
+    # Add cancellation record and extend end_date by 1 day
+    cancellation_record = {
+        "date": today_str,
+        "cancelled_at": datetime.now(timezone.utc).isoformat(),
+        "student_id": user.user_id
+    }
+    
+    # Extend end_date by 1 day
+    current_end_date = datetime.fromisoformat(cls.get('end_date', cls['date']))
+    new_end_date = current_end_date + timedelta(days=1)
+    new_duration = cls.get('duration_days', 1) + 1
+    new_count = cancellation_count + 1
+    
+    await db.class_sessions.update_one(
+        {"class_id": class_id},
+        {
+            "$push": {"cancellations": cancellation_record},
+            "$set": {
+                "cancellation_count": new_count,
+                "end_date": new_end_date.strftime('%Y-%m-%d'),
+                "duration_days": new_duration
+            }
+        }
+    )
+    
+    # Notify teacher
+    notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+    await db.notifications.insert_one({
+        "notification_id": notif_id,
+        "user_id": cls['teacher_id'],
+        "type": "class_cancelled_day",
+        "title": "Class Cancelled Today",
+        "message": f"{user.name} cancelled today's session of '{cls['title']}'. Class extended by 1 day. ({new_count}/{max_cancellations} cancellations used)",
+        "read": False,
+        "related_id": class_id,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    remaining = max_cancellations - new_count
+    return {
+        "message": f"Class cancelled for today. Duration extended by 1 day. {remaining} cancellations remaining.",
+        "cancellation_count": new_count,
+        "remaining_cancellations": remaining,
+        "new_end_date": new_end_date.strftime('%Y-%m-%d')
+    }
+
+# ==================== ADMIN CREATE STUDENT ENDPOINT ====================
+
+@api_router.post("/admin/create-student")
+async def admin_create_student(student_data: CreateStudentAccount, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin creates a student account manually"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    existing = await db.users.find_one({"email": student_data.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    password_hash = bcrypt.hashpw(student_data.password.encode('utf-8'), bcrypt.gensalt(int(os.environ.get('BCRYPT_ROUNDS', 12)))).decode('utf-8')
+    
+    student_doc = {
+        "user_id": user_id,
+        "email": student_data.email,
+        "name": student_data.name,
+        "role": "student",
+        "credits": 0.0,
+        "picture": None,
+        "password_hash": password_hash,
+        "is_approved": True,
+        "phone": student_data.phone,
+        "bio": None,
+        "institute": student_data.institute,
+        "goal": student_data.goal,
+        "preferred_time_slot": student_data.preferred_time_slot,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.users.insert_one(student_doc)
+    
+    return {
+        "message": "Student account created successfully",
+        "user_id": user_id,
+        "email": student_data.email,
+        "name": student_data.name,
+        "credentials": {
+            "email": student_data.email,
+            "password": student_data.password
+        }
+    }
+
+# ==================== NOTIFICATION ENDPOINTS ====================
+
+@api_router.get("/notifications/my")
+async def get_my_notifications(request: Request, authorization: Optional[str] = Header(None)):
+    """Get notifications for the current user"""
+    user = await get_current_user(request, authorization)
+    notifications = await db.notifications.find(
+        {"user_id": user.user_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return notifications
+
+@api_router.post("/notifications/mark-read/{notification_id}")
+async def mark_notification_read(notification_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Mark a notification as read"""
+    user = await get_current_user(request, authorization)
+    await db.notifications.update_one(
+        {"notification_id": notification_id, "user_id": user.user_id},
+        {"$set": {"read": True}}
+    )
+    return {"message": "Notification marked as read"}
+
+@api_router.post("/notifications/mark-all-read")
+async def mark_all_notifications_read(request: Request, authorization: Optional[str] = Header(None)):
+    """Mark all notifications as read"""
+    user = await get_current_user(request, authorization)
+    await db.notifications.update_many(
+        {"user_id": user.user_id, "read": False},
+        {"$set": {"read": True}}
+    )
+    return {"message": "All notifications marked as read"}
+
+# ==================== TEACHER STUDENT COMPLAINTS ====================
+
+@api_router.get("/teacher/student-complaints")
+async def get_teacher_student_complaints(request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher sees complaints from their assigned students"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    
+    complaints = await db.complaints.find(
+        {"related_teacher_id": user.user_id},
+        {"_id": 0}
+    ).to_list(1000)
+    return complaints
 
 # Include the router in the main app
 app.include_router(api_router)

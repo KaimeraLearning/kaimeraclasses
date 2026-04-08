@@ -24,9 +24,7 @@ const BrowseClasses = () => {
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     try {
@@ -34,47 +32,13 @@ const BrowseClasses = () => {
         fetch(`${API}/auth/me`, { credentials: 'include' }),
         fetch(`${API}/classes/browse`, { credentials: 'include' })
       ]);
-
-      if (!userRes.ok || !classesRes.ok) throw new Error('Failed to fetch data');
-
-      const userData = await userRes.json();
-      const classesData = await classesRes.json();
-
-      setUserCredits(userData.credits);
-      setClasses(classesData);
+      if (!userRes.ok || !classesRes.ok) throw new Error('Failed to fetch');
+      setUserCredits((await userRes.json()).credits);
+      setClasses(await classesRes.json());
       setLoading(false);
     } catch (error) {
-      console.error(error);
       toast.error('Failed to load classes');
       setLoading(false);
-    }
-  };
-
-  const handleBookClass = async (cls) => {
-    if (userCredits < cls.credits_required) {
-      setShowPaymentDialog(true);
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API}/classes/book`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ class_id: cls.class_id })
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail);
-      }
-
-      const data = await response.json();
-      toast.success('Class booked successfully!');
-      setUserCredits(data.credits_remaining);
-      fetchData();
-    } catch (error) {
-      toast.error(error.message);
     }
   };
 
@@ -83,51 +47,32 @@ const BrowseClasses = () => {
     try {
       const originUrl = window.location.origin;
       const response = await fetch(`${API}/payments/checkout?package_id=${pkg.id}&origin_url=${encodeURIComponent(originUrl)}`, {
-        method: 'POST',
-        credentials: 'include'
+        method: 'POST', credentials: 'include'
       });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail);
-      }
-
-      const data = await response.json();
-      window.location.href = data.url;
+      if (!response.ok) throw new Error((await response.json()).detail);
+      window.location.href = (await response.json()).url;
     } catch (error) {
       toast.error(error.message);
       setIsProcessing(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-600 font-medium">Loading classes...</p>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="w-16 h-16 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button
-                onClick={() => navigate('/student-dashboard')}
-                variant="outline"
-                className="rounded-full"
-                data-testid="back-button"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back
+              <Button onClick={() => navigate('/student-dashboard')} variant="outline" className="rounded-full" data-testid="back-button">
+                <ArrowLeft className="w-4 h-4 mr-2" /> Back
               </Button>
-              <h1 className="text-2xl font-bold text-slate-900">Browse Classes</h1>
+              <h1 className="text-2xl font-bold text-slate-900">My Classes</h1>
             </div>
             <div className="flex items-center gap-3 bg-sky-100 px-4 py-2 rounded-full">
               <CreditCard className="w-5 h-5 text-sky-600" />
@@ -139,46 +84,34 @@ const BrowseClasses = () => {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
-          <Button
-            onClick={() => setShowPaymentDialog(true)}
-            className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-full px-6 py-3 font-bold"
-            data-testid="open-payment-dialog-button"
-          >
-            <CreditCard className="w-4 h-4 mr-2" />
-            Purchase Credits
+          <Button onClick={() => setShowPaymentDialog(true)} className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-full px-6 py-3 font-bold" data-testid="open-payment-dialog-button">
+            <CreditCard className="w-4 h-4 mr-2" /> Purchase Credits
           </Button>
         </div>
 
         {classes.length === 0 ? (
           <div className="bg-white rounded-3xl p-12 border-2 border-slate-100 text-center">
             <GraduationCap className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-            <p className="text-slate-600 text-lg">No classes available at the moment.</p>
+            <p className="text-slate-600 text-lg">No classes available. Your teacher will create classes for you.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {classes.map((cls) => (
-              <div
-                key={cls.class_id}
-                className="bg-white rounded-3xl border-2 border-slate-200 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)] hover:-translate-y-1 hover:shadow-[4px_6px_0px_0px_rgba(203,213,225,1)] transition-all overflow-hidden"
-                data-testid={`class-card-${cls.class_id}`}
-              >
+              <div key={cls.class_id} className="bg-white rounded-3xl border-2 border-slate-200 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)] overflow-hidden" data-testid={`class-card-${cls.class_id}`}>
                 <div className="p-6">
                   <div className="flex items-start justify-between mb-3">
-                    <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-semibold">
-                      {cls.subject}
-                    </span>
-                    <span className="bg-sky-100 text-sky-800 px-3 py-1 rounded-full text-xs font-semibold">
-                      {cls.class_type}
-                    </span>
+                    <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-semibold">{cls.subject}</span>
+                    <div className="flex gap-2">
+                      <span className="bg-sky-100 text-sky-800 px-3 py-1 rounded-full text-xs font-semibold">{cls.class_type}</span>
+                      {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-3 py-1 rounded-full text-xs font-semibold">DEMO</span>}
+                    </div>
                   </div>
-
                   <h3 className="text-xl font-bold text-slate-900 mb-2">{cls.title}</h3>
                   <p className="text-sm text-slate-600 mb-4">by {cls.teacher_name}</p>
-
                   <div className="space-y-2 mb-4">
                     <div className="flex items-center gap-2 text-slate-600">
                       <Calendar className="w-4 h-4" />
-                      <span className="text-sm">{format(parseISO(cls.date), 'MMM dd, yyyy')}</span>
+                      <span className="text-sm">{format(parseISO(cls.date), 'MMM dd')} - {cls.end_date ? format(parseISO(cls.end_date), 'MMM dd, yyyy') : ''}</span>
                     </div>
                     <div className="flex items-center gap-2 text-slate-600">
                       <Clock className="w-4 h-4" />
@@ -186,29 +119,12 @@ const BrowseClasses = () => {
                     </div>
                     <div className="flex items-center gap-2 text-slate-600">
                       <Users className="w-4 h-4" />
-                      <span className="text-sm">{cls.enrolled_students.length} / {cls.max_students} students</span>
+                      <span className="text-sm">{cls.duration_days} day program</span>
                     </div>
                   </div>
-
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <CreditCard className="w-5 h-5 text-amber-500" />
-                      <span className="font-bold text-lg text-slate-900">{cls.credits_required}</span>
-                      <span className="text-sm text-slate-600">credits</span>
-                    </div>
-                    {cls.enrolled_students.length >= cls.max_students && (
-                      <span className="text-xs text-red-600 font-semibold">FULL</span>
-                    )}
+                  <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                    <p className="text-emerald-700 font-semibold text-sm">Auto-enrolled in this class</p>
                   </div>
-
-                  <Button
-                    onClick={() => handleBookClass(cls)}
-                    disabled={cls.enrolled_students.length >= cls.max_students}
-                    className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                    data-testid={`book-class-button-${cls.class_id}`}
-                  >
-                    {cls.enrolled_students.length >= cls.max_students ? 'Class Full' : 'Book Class'}
-                  </Button>
                 </div>
               </div>
             ))}
@@ -224,42 +140,22 @@ const BrowseClasses = () => {
           </DialogHeader>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
             {CREDIT_PACKAGES.map((pkg) => (
-              <div
-                key={pkg.id}
-                className={`relative bg-white rounded-2xl border-2 p-6 transition-all cursor-pointer ${
-                  selectedPackage?.id === pkg.id
-                    ? 'border-sky-500 shadow-lg'
-                    : 'border-slate-200 hover:border-sky-300'
-                } ${pkg.popular ? 'ring-2 ring-amber-400' : ''}`}
-                onClick={() => setSelectedPackage(pkg)}
-                data-testid={`credit-package-${pkg.id}`}
-              >
-                {pkg.popular && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 px-3 py-1 rounded-full text-xs font-bold">
-                    POPULAR
-                  </div>
-                )}
+              <div key={pkg.id} className={`relative bg-white rounded-2xl border-2 p-6 transition-all cursor-pointer ${
+                selectedPackage?.id === pkg.id ? 'border-sky-500 shadow-lg' : 'border-slate-200 hover:border-sky-300'
+              } ${pkg.popular ? 'ring-2 ring-amber-400' : ''}`}
+                onClick={() => setSelectedPackage(pkg)} data-testid={`credit-package-${pkg.id}`}>
+                {pkg.popular && <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 px-3 py-1 rounded-full text-xs font-bold">POPULAR</div>}
                 <div className="text-center">
                   <p className="text-3xl font-bold text-slate-900 mb-1">{pkg.credits}</p>
                   <p className="text-sm text-slate-600 mb-3">Credits</p>
                   <p className="text-2xl font-bold text-sky-600">${pkg.price}</p>
                 </div>
-                {selectedPackage?.id === pkg.id && (
-                  <div className="absolute top-3 right-3">
-                    <div className="bg-sky-500 rounded-full p-1">
-                      <Check className="w-4 h-4 text-white" />
-                    </div>
-                  </div>
-                )}
+                {selectedPackage?.id === pkg.id && <div className="absolute top-3 right-3"><div className="bg-sky-500 rounded-full p-1"><Check className="w-4 h-4 text-white" /></div></div>}
               </div>
             ))}
           </div>
-          <Button
-            onClick={() => selectedPackage && handlePurchaseCredits(selectedPackage)}
-            disabled={!selectedPackage || isProcessing}
-            className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold text-lg mt-4"
-            data-testid="proceed-to-payment-button"
-          >
+          <Button onClick={() => selectedPackage && handlePurchaseCredits(selectedPackage)} disabled={!selectedPackage || isProcessing}
+            className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold text-lg mt-4" data-testid="proceed-to-payment-button">
             {isProcessing ? 'Processing...' : 'Proceed to Payment'}
           </Button>
         </DialogContent>

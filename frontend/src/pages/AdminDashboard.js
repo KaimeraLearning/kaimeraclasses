@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare } from 'lucide-react';
+import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -20,9 +20,14 @@ const AdminDashboard = () => {
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreditsDialog, setShowCreditsDialog] = useState(false);
+  const [showCreateStudentDialog, setShowCreateStudentDialog] = useState(false);
+  const [showCredsResult, setShowCredsResult] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [creditAmount, setCreditAmount] = useState('');
   const [creditAction, setCreditAction] = useState('add');
+  const [newStudent, setNewStudent] = useState({
+    name: '', email: '', password: '', institute: '', goal: '', preferred_time_slot: '', phone: ''
+  });
 
   useEffect(() => {
     fetchDashboardData();
@@ -105,13 +110,37 @@ const AdminDashboard = () => {
 
   const handleLogout = async () => {
     try {
-      await fetch(`${API}/auth/logout`, {
-        method: 'POST',
-        credentials: 'include'
-      });
+      await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
       navigate('/login');
-    } catch (error) {
-      console.error(error);
+    } catch (error) { console.error(error); }
+  };
+
+  const handleCreateStudent = async (e) => {
+    e.preventDefault();
+    if (!newStudent.name || !newStudent.email || !newStudent.password) {
+      toast.error('Name, email and password are required');
+      return;
+    }
+    try {
+      const response = await fetch(`${API}/admin/create-student`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(newStudent)
+      });
+      if (!response.ok) throw new Error((await response.json()).detail);
+      const data = await response.json();
+      toast.success('Student account created!');
+      setShowCredsResult(data.credentials);
+      setNewStudent({ name: '', email: '', password: '', institute: '', goal: '', preferred_time_slot: '', phone: '' });
+      fetchDashboardData();
+    } catch (error) { toast.error(error.message); }
+  };
+
+  const copyCredentials = () => {
+    if (showCredsResult) {
+      navigator.clipboard.writeText(`Email: ${showCredsResult.email}\nPassword: ${showCredsResult.password}`);
+      toast.success('Credentials copied to clipboard!');
     }
   };
 
@@ -153,6 +182,7 @@ const AdminDashboard = () => {
         <Tabs defaultValue="teachers" className="w-full">
           <TabsList className="mb-8">
             <TabsTrigger value="teachers" data-testid="teachers-tab">Teachers</TabsTrigger>
+            <TabsTrigger value="students" data-testid="students-tab">Add Student</TabsTrigger>
             <TabsTrigger value="classes" data-testid="classes-tab">Classes</TabsTrigger>
             <TabsTrigger value="transactions" data-testid="transactions-tab">Transactions</TabsTrigger>
             <TabsTrigger value="complaints" data-testid="complaints-tab">Complaints ({complaints.length})</TabsTrigger>
@@ -229,6 +259,47 @@ const AdminDashboard = () => {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="students">
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">Create Student Account</h2>
+            <div className="bg-white rounded-3xl border-2 border-slate-200 p-6 max-w-xl">
+              {showCredsResult ? (
+                <div className="space-y-4">
+                  <div className="bg-emerald-50 rounded-xl p-6 border-2 border-emerald-200">
+                    <h3 className="text-lg font-bold text-emerald-800 mb-3">Student Account Created!</h3>
+                    <p className="text-sm text-slate-700 mb-1">Share these credentials with the student:</p>
+                    <div className="bg-white rounded-lg p-4 mt-3 font-mono text-sm">
+                      <p><strong>Email:</strong> {showCredsResult.email}</p>
+                      <p><strong>Password:</strong> {showCredsResult.password}</p>
+                    </div>
+                    <div className="flex gap-2 mt-4">
+                      <Button onClick={copyCredentials} className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-full" data-testid="copy-credentials-button">
+                        <Copy className="w-4 h-4 mr-2" /> Copy Credentials
+                      </Button>
+                      <Button onClick={() => setShowCredsResult(null)} variant="outline" className="rounded-full">
+                        Create Another
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleCreateStudent} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div><Label>Name *</Label><Input value={newStudent.name} onChange={e => setNewStudent({...newStudent, name: e.target.value})} className="rounded-xl" required data-testid="student-name-input" /></div>
+                    <div><Label>Email *</Label><Input type="email" value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} className="rounded-xl" required data-testid="student-email-input" /></div>
+                    <div><Label>Password *</Label><Input value={newStudent.password} onChange={e => setNewStudent({...newStudent, password: e.target.value})} className="rounded-xl" required data-testid="student-password-input" /></div>
+                    <div><Label>Phone</Label><Input value={newStudent.phone} onChange={e => setNewStudent({...newStudent, phone: e.target.value})} className="rounded-xl" data-testid="student-phone-input" /></div>
+                    <div><Label>Institute</Label><Input value={newStudent.institute} onChange={e => setNewStudent({...newStudent, institute: e.target.value})} className="rounded-xl" data-testid="student-institute-input" /></div>
+                    <div><Label>Goal</Label><Input value={newStudent.goal} onChange={e => setNewStudent({...newStudent, goal: e.target.value})} className="rounded-xl" data-testid="student-goal-input" /></div>
+                    <div className="col-span-2"><Label>Preferred Time Slot</Label><Input value={newStudent.preferred_time_slot} onChange={e => setNewStudent({...newStudent, preferred_time_slot: e.target.value})} className="rounded-xl" placeholder="e.g., Weekdays 5-7 PM" data-testid="student-timeslot-input" /></div>
+                  </div>
+                  <Button type="submit" className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="create-student-submit">
+                    <UserPlus className="w-5 h-5 mr-2" /> Create Student Account
+                  </Button>
+                </form>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="classes">
