@@ -162,13 +162,11 @@ const WalletPage = () => {
           ) : (
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {wallet.transactions.map((txn, i) => {
-                const isCredit = ['earning', 'credit_purchase', 'credit', 'admin_add', 'add', 'proof_approved'].includes(txn.type) || txn.amount > 0;
-                const isDebit = ['debit', 'deduct', 'admin_deduct', 'payment', 'booking'].includes(txn.type) || txn.amount < 0;
-                const showGreen = isCredit && !isDebit;
+                const isPositive = txn.amount > 0;
                 return (
                   <div key={i} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors border border-slate-100" data-testid={`txn-${i}`}>
                     <div className="flex items-center gap-3">
-                      {showGreen ? (
+                      {isPositive ? (
                         <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
                           <ArrowDownLeft className="w-5 h-5 text-emerald-600" />
                         </div>
@@ -182,8 +180,8 @@ const WalletPage = () => {
                         <p className="text-xs text-slate-400">{formatDate(txn.created_at)}</p>
                       </div>
                     </div>
-                    <span className={`font-bold text-sm ${showGreen ? 'text-emerald-600' : 'text-red-600'}`}>
-                      {showGreen ? '+' : '-'}{Math.abs(txn.amount)}
+                    <span className={`font-bold text-sm ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {isPositive ? '+' : ''}{txn.amount}
                     </span>
                   </div>
                 );

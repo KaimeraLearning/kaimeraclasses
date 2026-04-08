@@ -6,7 +6,8 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap, Clock, History, Search, Shield, Award, Filter, BookOpen, KeyRound, Users, Trash2, Plus } from 'lucide-react';
+import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap, Clock, History, Search, Shield, Award, Filter, BookOpen, KeyRound, Users, Trash2, Plus, Ban, Eye, EyeOff } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -54,6 +55,15 @@ const AdminDashboard = () => {
 
   // Counsellor Tracking
   const [counsellorTracking, setCounsellorTracking] = useState([]);
+  const [counsellorDailyStats, setCounsellorDailyStats] = useState({});
+  const [expandedCounsellor, setExpandedCounsellor] = useState(null);
+
+  // Create Teacher/Counsellor
+  const [newTeacher, setNewTeacher] = useState({ name: '', email: '', password: '' });
+  const [newCounsellor, setNewCounsellor] = useState({ name: '', email: '', password: '' });
+  const [showTeacherCredsResult, setShowTeacherCredsResult] = useState(null);
+  const [showCounsellorCredsResult, setShowCounsellorCredsResult] = useState(null);
+  const [showPasswordFor, setShowPasswordFor] = useState(null);
 
   useEffect(() => { fetchDashboardData(); }, []);
 
@@ -259,6 +269,82 @@ const AdminDashboard = () => {
       navigator.clipboard.writeText(`Email: ${showCredsResult.email}\nPassword: ${showCredsResult.password}`);
       toast.success('Credentials copied to clipboard!');
     }
+  };
+
+  const handleCreateTeacher = async (e) => {
+    e.preventDefault();
+    if (!newTeacher.name || !newTeacher.email || !newTeacher.password) { toast.error('All fields required'); return; }
+    try {
+      const res = await fetch(`${API}/admin/create-teacher`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTeacher)
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      const data = await res.json();
+      toast.success('Teacher account created!');
+      setShowTeacherCredsResult({ email: newTeacher.email, password: newTeacher.password, teacher_code: data.teacher_code });
+      setNewTeacher({ name: '', email: '', password: '' });
+      fetchDashboardData();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleCreateCounsellor = async (e) => {
+    e.preventDefault();
+    if (!newCounsellor.name || !newCounsellor.email || !newCounsellor.password) { toast.error('All fields required'); return; }
+    try {
+      const res = await fetch(`${API}/admin/create-counsellor`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCounsellor)
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success('Counsellor account created!');
+      setShowCounsellorCredsResult({ email: newCounsellor.email, password: newCounsellor.password });
+      setNewCounsellor({ name: '', email: '', password: '' });
+      fetchDashboardData();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleBlockUser = async (userId, blocked) => {
+    const action = blocked ? 'block' : 'unblock';
+    if (!window.confirm(`Are you sure you want to ${action} this user?`)) return;
+    try {
+      const res = await fetch(`${API}/admin/block-user`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, blocked })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      const data = await res.json();
+      toast.success(data.message);
+      fetchDashboardData();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleDeleteUser = async (userId) => {
+    if (!window.confirm('PERMANENTLY delete this user? This action cannot be undone.')) return;
+    if (!window.confirm('Are you absolutely sure? All user data will be removed.')) return;
+    try {
+      const res = await fetch(`${API}/admin/delete-user`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      const data = await res.json();
+      toast.success(data.message);
+      setShowUserDetailDialog(false);
+      fetchDashboardData();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const fetchCounsellorDailyStats = async (counsellorId) => {
+    if (expandedCounsellor === counsellorId) { setExpandedCounsellor(null); return; }
+    setExpandedCounsellor(counsellorId);
+    try {
+      const res = await fetch(`${API}/admin/counsellor-daily-stats/${counsellorId}`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setCounsellorDailyStats(prev => ({ ...prev, [counsellorId]: data }));
+      }
+    } catch {}
   };
 
   const filteredAllUsers = allUsers.filter(u =>
@@ -604,39 +690,107 @@ const AdminDashboard = () => {
           {/* Credentials Tab */}
           <TabsContent value="credentials">
             <h2 className="text-2xl font-bold text-slate-900 mb-4">Credential Management</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+
+            {/* Create Accounts Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+              {/* Create Teacher */}
+              <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
+                <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><UserPlus className="w-5 h-5 text-amber-500" /> Create Teacher Login</h3>
+                {showTeacherCredsResult ? (
+                  <div className="space-y-3">
+                    <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+                      <p className="text-sm font-bold text-emerald-800 mb-2">Teacher Created!</p>
+                      <div className="bg-white rounded-lg p-3 font-mono text-sm space-y-1">
+                        <p><strong>Email:</strong> {showTeacherCredsResult.email}</p>
+                        <p><strong>Password:</strong> {showTeacherCredsResult.password}</p>
+                        {showTeacherCredsResult.teacher_code && <p><strong>Code:</strong> {showTeacherCredsResult.teacher_code}</p>}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={() => { navigator.clipboard.writeText(`Email: ${showTeacherCredsResult.email}\nPassword: ${showTeacherCredsResult.password}`); toast.success('Copied!'); }} className="bg-emerald-500 text-white rounded-full flex-1" data-testid="copy-teacher-creds"><Copy className="w-4 h-4 mr-1" /> Copy</Button>
+                      <Button onClick={() => setShowTeacherCredsResult(null)} variant="outline" className="rounded-full flex-1">New</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <form onSubmit={handleCreateTeacher} className="space-y-3">
+                    <div><Label>Name *</Label><Input value={newTeacher.name} onChange={e => setNewTeacher({...newTeacher, name: e.target.value})} className="rounded-xl" required data-testid="new-teacher-name" /></div>
+                    <div><Label>Email *</Label><Input type="email" value={newTeacher.email} onChange={e => setNewTeacher({...newTeacher, email: e.target.value})} className="rounded-xl" required data-testid="new-teacher-email" /></div>
+                    <div><Label>Password *</Label><Input value={newTeacher.password} onChange={e => setNewTeacher({...newTeacher, password: e.target.value})} className="rounded-xl" required data-testid="new-teacher-password" /></div>
+                    <Button type="submit" className="bg-amber-500 hover:bg-amber-600 text-white rounded-full w-full" data-testid="create-teacher-btn"><UserPlus className="w-4 h-4 mr-2" /> Create Teacher</Button>
+                  </form>
+                )}
+              </div>
+
+              {/* Create Counsellor */}
+              <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
+                <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><UserPlus className="w-5 h-5 text-violet-500" /> Create Counsellor Login</h3>
+                {showCounsellorCredsResult ? (
+                  <div className="space-y-3">
+                    <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+                      <p className="text-sm font-bold text-emerald-800 mb-2">Counsellor Created!</p>
+                      <div className="bg-white rounded-lg p-3 font-mono text-sm space-y-1">
+                        <p><strong>Email:</strong> {showCounsellorCredsResult.email}</p>
+                        <p><strong>Password:</strong> {showCounsellorCredsResult.password}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={() => { navigator.clipboard.writeText(`Email: ${showCounsellorCredsResult.email}\nPassword: ${showCounsellorCredsResult.password}`); toast.success('Copied!'); }} className="bg-emerald-500 text-white rounded-full flex-1" data-testid="copy-counsellor-creds"><Copy className="w-4 h-4 mr-1" /> Copy</Button>
+                      <Button onClick={() => setShowCounsellorCredsResult(null)} variant="outline" className="rounded-full flex-1">New</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <form onSubmit={handleCreateCounsellor} className="space-y-3">
+                    <div><Label>Name *</Label><Input value={newCounsellor.name} onChange={e => setNewCounsellor({...newCounsellor, name: e.target.value})} className="rounded-xl" required data-testid="new-counsellor-name" /></div>
+                    <div><Label>Email *</Label><Input type="email" value={newCounsellor.email} onChange={e => setNewCounsellor({...newCounsellor, email: e.target.value})} className="rounded-xl" required data-testid="new-counsellor-email" /></div>
+                    <div><Label>Password *</Label><Input value={newCounsellor.password} onChange={e => setNewCounsellor({...newCounsellor, password: e.target.value})} className="rounded-xl" required data-testid="new-counsellor-password" /></div>
+                    <Button type="submit" className="bg-violet-500 hover:bg-violet-600 text-white rounded-full w-full" data-testid="create-counsellor-btn"><UserPlus className="w-4 h-4 mr-2" /> Create Counsellor</Button>
+                  </form>
+                )}
+              </div>
+
               {/* Password Reset */}
               <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
-                <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><KeyRound className="w-5 h-5 text-amber-500" /> Reset User Password</h3>
+                <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><KeyRound className="w-5 h-5 text-amber-500" /> Reset Password</h3>
                 <div className="space-y-3">
                   <div><Label>User Email</Label><Input value={resetEmail} onChange={e => setResetEmail(e.target.value)} placeholder="user@example.com" className="rounded-xl" data-testid="reset-email-input" /></div>
                   <div><Label>New Password</Label><Input value={resetPassword} onChange={e => setResetPassword(e.target.value)} placeholder="New password" className="rounded-xl" data-testid="reset-password-input" /></div>
                   <Button onClick={handleResetPassword} className="bg-amber-500 hover:bg-amber-600 text-white rounded-full w-full" data-testid="reset-password-btn"><KeyRound className="w-4 h-4 mr-2" /> Reset Password</Button>
                 </div>
               </div>
-              {/* Quick User Lookup */}
-              <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
-                <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><Search className="w-5 h-5 text-sky-500" /> Search All Users</h3>
-                <Input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Search by name, email, or ID..." className="rounded-xl mb-3" data-testid="user-search-input" />
-                <div className="max-h-64 overflow-y-auto space-y-2">
-                  {filteredAllUsers.slice(0, 20).map(u => (
-                    <div key={u.user_id} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 cursor-pointer border border-slate-100" onClick={() => handleViewUserDetail(u.user_id)} data-testid={`user-row-${u.user_id}`}>
-                      <div className="flex items-center gap-2">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold ${u.role === 'teacher' ? 'bg-amber-500' : u.role === 'student' ? 'bg-sky-500' : u.role === 'counsellor' ? 'bg-violet-500' : 'bg-slate-500'}`}>{u.name?.charAt(0)}</div>
-                        <div>
-                          <p className="font-medium text-slate-900 text-sm">{u.name}</p>
-                          <p className="text-xs text-slate-500">{u.email}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.role === 'admin' ? 'bg-red-100 text-red-700' : u.role === 'teacher' ? 'bg-amber-100 text-amber-700' : u.role === 'student' ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}>{u.role}</span>
-                        {u.teacher_code && <span className="text-xs text-slate-500 font-mono">{u.teacher_code}</span>}
-                        {u.student_code && <span className="text-xs text-slate-500 font-mono">{u.student_code}</span>}
+            </div>
+
+            {/* All Users List with Block/Delete */}
+            <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
+              <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><Search className="w-5 h-5 text-sky-500" /> All Users — Search, Block & Delete</h3>
+              <Input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Search by name, email, or ID..." className="rounded-xl mb-3" data-testid="user-search-input" />
+              <div className="max-h-96 overflow-y-auto space-y-2">
+                {filteredAllUsers.slice(0, 30).map(u => (
+                  <div key={u.user_id} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 border border-slate-100 transition-colors" data-testid={`user-row-${u.user_id}`}>
+                    <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => handleViewUserDetail(u.user_id)}>
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white text-xs font-bold ${u.role === 'teacher' ? 'bg-amber-500' : u.role === 'student' ? 'bg-sky-500' : u.role === 'counsellor' ? 'bg-violet-500' : 'bg-slate-500'}`}>{u.name?.charAt(0)}</div>
+                      <div>
+                        <p className="font-medium text-slate-900 text-sm">{u.name} {u.is_blocked && <span className="text-red-500 text-xs ml-1">(BLOCKED)</span>}</p>
+                        <p className="text-xs text-slate-500">{u.email}</p>
                       </div>
                     </div>
-                  ))}
-                  {filteredAllUsers.length > 20 && <p className="text-xs text-slate-400 text-center py-2">Showing 20 of {filteredAllUsers.length} results</p>}
-                </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.role === 'admin' ? 'bg-red-100 text-red-700' : u.role === 'teacher' ? 'bg-amber-100 text-amber-700' : u.role === 'student' ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}>{u.role}</span>
+                      {u.teacher_code && <span className="text-xs text-slate-500 font-mono">{u.teacher_code}</span>}
+                      {u.student_code && <span className="text-xs text-slate-500 font-mono">{u.student_code}</span>}
+                      {u.role !== 'admin' && (
+                        <>
+                          <Button onClick={(e) => { e.stopPropagation(); handleBlockUser(u.user_id, !u.is_blocked); }} variant="outline" size="sm" className={`rounded-full text-xs ${u.is_blocked ? 'border-emerald-200 text-emerald-600' : 'border-amber-200 text-amber-600'}`} data-testid={`block-${u.user_id}`}>
+                            <Ban className="w-3 h-3 mr-1" /> {u.is_blocked ? 'Unblock' : 'Block'}
+                          </Button>
+                          <Button onClick={(e) => { e.stopPropagation(); handleDeleteUser(u.user_id); }} variant="outline" size="sm" className="rounded-full text-xs border-red-200 text-red-600" data-testid={`delete-${u.user_id}`}>
+                            <Trash2 className="w-3 h-3 mr-1" /> Delete
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {filteredAllUsers.length > 30 && <p className="text-xs text-slate-400 text-center py-2">Showing 30 of {filteredAllUsers.length} results</p>}
               </div>
             </div>
           </TabsContent>
@@ -649,23 +803,50 @@ const AdminDashboard = () => {
             ) : (
               <div className="space-y-4">
                 {counsellorTracking.map(c => (
-                  <div key={c.user_id} className="bg-white rounded-2xl border-2 border-slate-200 p-6" data-testid={`counsellor-track-${c.user_id}`}>
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-4 cursor-pointer" onClick={() => handleViewUserDetail(c.user_id)}>
-                        <div className="w-14 h-14 bg-gradient-to-br from-violet-400 to-violet-500 rounded-2xl flex items-center justify-center text-white font-bold text-xl">{c.name?.charAt(0)}</div>
-                        <div>
-                          <h3 className="font-bold text-slate-900 text-lg hover:text-sky-600 transition-colors">{c.name}</h3>
-                          <p className="text-sm text-slate-500">{c.email}{c.phone ? ` | ${c.phone}` : ''}</p>
-                          {c.badges?.length > 0 && <div className="flex gap-1 mt-1">{c.badges.map((b, i) => <span key={i} className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs">{b}</span>)}</div>}
+                  <div key={c.user_id} className="bg-white rounded-2xl border-2 border-slate-200 overflow-hidden" data-testid={`counsellor-track-${c.user_id}`}>
+                    <div className="p-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-4 cursor-pointer" onClick={() => handleViewUserDetail(c.user_id)}>
+                          <div className="w-14 h-14 bg-gradient-to-br from-violet-400 to-violet-500 rounded-2xl flex items-center justify-center text-white font-bold text-xl">{c.name?.charAt(0)}</div>
+                          <div>
+                            <h3 className="font-bold text-slate-900 text-lg hover:text-sky-600 transition-colors">{c.name}</h3>
+                            <p className="text-sm text-slate-500">{c.email}{c.phone ? ` | ${c.phone}` : ''}</p>
+                            {c.badges?.length > 0 && <div className="flex gap-1 mt-1">{c.badges.map((b, i) => <span key={i} className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs">{b}</span>)}</div>}
+                          </div>
                         </div>
+                        <Button onClick={() => fetchCounsellorDailyStats(c.user_id)} variant="outline" className="rounded-full text-sm" data-testid={`toggle-chart-${c.user_id}`}>
+                          {expandedCounsellor === c.user_id ? 'Hide Chart' : 'View Daily Stats'}
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="bg-slate-50 rounded-xl p-3 text-center"><p className="text-xs text-slate-500">Total Assigned</p><p className="text-2xl font-bold text-slate-900">{c.total_assignments}</p></div>
+                        <div className="bg-emerald-50 rounded-xl p-3 text-center"><p className="text-xs text-emerald-600">Active</p><p className="text-2xl font-bold text-emerald-700">{c.active_assignments}</p></div>
+                        <div className="bg-amber-50 rounded-xl p-3 text-center"><p className="text-xs text-amber-600">Pending</p><p className="text-2xl font-bold text-amber-700">{c.pending_assignments}</p></div>
+                        <div className="bg-red-50 rounded-xl p-3 text-center"><p className="text-xs text-red-600">Rejected</p><p className="text-2xl font-bold text-red-700">{c.rejected_assignments}</p></div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="bg-slate-50 rounded-xl p-3 text-center"><p className="text-xs text-slate-500">Total Assigned</p><p className="text-2xl font-bold text-slate-900">{c.total_assignments}</p></div>
-                      <div className="bg-emerald-50 rounded-xl p-3 text-center"><p className="text-xs text-emerald-600">Active</p><p className="text-2xl font-bold text-emerald-700">{c.active_assignments}</p></div>
-                      <div className="bg-amber-50 rounded-xl p-3 text-center"><p className="text-xs text-amber-600">Pending</p><p className="text-2xl font-bold text-amber-700">{c.pending_assignments}</p></div>
-                      <div className="bg-red-50 rounded-xl p-3 text-center"><p className="text-xs text-red-600">Rejected</p><p className="text-2xl font-bold text-red-700">{c.rejected_assignments}</p></div>
-                    </div>
+                    {/* Bar Chart */}
+                    {expandedCounsellor === c.user_id && (
+                      <div className="border-t border-slate-100 p-6 bg-slate-50">
+                        <h4 className="text-sm font-semibold text-slate-700 mb-3">Daily Activity (Last 30 days)</h4>
+                        {counsellorDailyStats[c.user_id]?.length > 0 ? (
+                          <ResponsiveContainer width="100%" height={280}>
+                            <BarChart data={counsellorDailyStats[c.user_id]} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                              <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={d => d.slice(5)} />
+                              <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                              <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
+                              <Legend wrapperStyle={{ fontSize: '12px' }} />
+                              <Bar dataKey="leads" name="Leads/Demos" fill="#38bdf8" radius={[4, 4, 0, 0]} />
+                              <Bar dataKey="allotments" name="Allotments" fill="#a78bfa" radius={[4, 4, 0, 0]} />
+                              <Bar dataKey="sessions" name="Sessions/Proofs" fill="#34d399" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <p className="text-sm text-slate-400 text-center py-8">No daily activity data available yet</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -698,11 +879,12 @@ const AdminDashboard = () => {
             <div className="space-y-4 mt-4">
               <div className={`rounded-2xl p-6 text-white ${userDetail.user.role === 'teacher' ? 'bg-gradient-to-br from-amber-400 to-amber-500' : userDetail.user.role === 'student' ? 'bg-gradient-to-br from-sky-400 to-sky-500' : 'bg-gradient-to-br from-violet-400 to-violet-500'}`}>
                 <h3 className="text-2xl font-bold" data-testid="user-detail-name">{userDetail.user.name}</h3>
-                <p className="text-white/80">{userDetail.user.email}</p>
-                <div className="flex gap-3 mt-2 text-sm">
+                <p className="text-white/80 text-lg">{userDetail.user.email}</p>
+                <div className="flex flex-wrap gap-2 mt-2 text-sm">
                   <span className="bg-white/20 px-3 py-1 rounded-full">{userDetail.user.role}</span>
                   {userDetail.user.teacher_code && <span className="bg-white/20 px-3 py-1 rounded-full font-mono">{userDetail.user.teacher_code}</span>}
                   {userDetail.user.student_code && <span className="bg-white/20 px-3 py-1 rounded-full font-mono">{userDetail.user.student_code}</span>}
+                  {userDetail.user.is_blocked && <span className="bg-red-500/80 px-3 py-1 rounded-full font-bold">BLOCKED</span>}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -711,6 +893,19 @@ const AdminDashboard = () => {
                 {userDetail.user.grade && <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500">Grade</p><p className="text-sm font-medium text-slate-900">Class {userDetail.user.grade}</p></div>}
                 {(userDetail.user.city || userDetail.user.state) && <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500">Location</p><p className="text-sm font-medium text-slate-900">{[userDetail.user.city, userDetail.user.state, userDetail.user.country].filter(Boolean).join(', ')}</p></div>}
               </div>
+
+              {/* Admin Actions */}
+              {userDetail.user.role !== 'admin' && (
+                <div className="flex gap-2 p-3 bg-slate-50 rounded-xl">
+                  <Button onClick={() => handleBlockUser(userDetail.user.user_id, !userDetail.user.is_blocked)} variant="outline" className={`rounded-full flex-1 text-sm ${userDetail.user.is_blocked ? 'border-emerald-200 text-emerald-600' : 'border-amber-200 text-amber-600'}`} data-testid="detail-block-btn">
+                    <Ban className="w-4 h-4 mr-1" /> {userDetail.user.is_blocked ? 'Unblock Account' : 'Block Account'}
+                  </Button>
+                  <Button onClick={() => handleDeleteUser(userDetail.user.user_id)} variant="outline" className="rounded-full flex-1 text-sm border-red-200 text-red-600" data-testid="detail-delete-btn">
+                    <Trash2 className="w-4 h-4 mr-1" /> Delete Permanently
+                  </Button>
+                </div>
+              )}
+
               {userDetail.assignments?.length > 0 && (
                 <div><p className="text-sm font-semibold text-slate-700 mb-2">Assignments ({userDetail.assignments.length})</p>
                   <div className="space-y-1 max-h-32 overflow-y-auto">{userDetail.assignments.map((a, i) => (

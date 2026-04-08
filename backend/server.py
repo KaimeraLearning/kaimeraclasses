@@ -474,6 +474,10 @@ async def login(credentials: UserLogin, response: Response):
     if not verify_password(credentials.password, user_doc['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
+    # Check if account is blocked
+    if user_doc.get('is_blocked'):
+        raise HTTPException(status_code=403, detail="Your account has been blocked by the administrator. Please contact support.")
+    
     # Create session
     session_token = await create_session(user_doc['user_id'])
     
@@ -873,7 +877,7 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
         "transaction_id": transaction_id,
         "user_id": student['user_id'],
         "type": "auto_booking",
-        "amount": credits_required,
+        "amount": -credits_required,
         "description": f"Auto-enrolled in class: {class_data.title}",
         "status": "completed",
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -1173,11 +1177,12 @@ async def adjust_credits(adjustment: CreditAdjustment, request: Request, authori
     # Create transaction
     transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
     txn_type = "credit_add" if adjustment.action == "add" else "credit_deduct"
+    txn_amount = adjustment.amount if adjustment.action == "add" else -adjustment.amount
     await db.transactions.insert_one({
         "transaction_id": transaction_id,
         "user_id": adjustment.user_id,
         "type": txn_type,
-        "amount": adjustment.amount,
+        "amount": txn_amount,
         "description": description,
         "status": "completed",
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -2798,19 +2803,61 @@ async def search_history(q: str = "", request: Request = None, authorization: Op
     if user.role not in ["admin", "counsellor"]:
         raise HTTPException(status_code=403, detail="Admin or Counsellor access only")
 
-    query = {}
-    if q:
-        query = {"$or": [
-            {"actor_name": {"$regex": q, "$options": "i"}},
-            {"actor_email": {"$regex": q, "$options": "i"}},
-            {"related_student_name": {"$regex": q, "$options": "i"}},
-            {"related_teacher_name": {"$regex": q, "$options": "i"}},
-            {"details": {"$regex": q, "$options": "i"}},
-            {"action": {"$regex": q, "$options": "i"}}
-        ]}
+    results = []
 
-    logs = await db.history_logs.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return logs
+    if not q:
+        return results
+
+    regex_q = {"$regex": q, "$options": "i"}
+
+    # Search history_logs
+    log_query = {"$or": [
+        {"actor_name": regex_q},
+        {"actor_email": regex_q},
+        {"related_student_name": regex_q},
+        {"related_teacher_name": regex_q},
+        {"details": regex_q},
+        {"action": regex_q}
+    ]}
+    logs = await db.history_logs.find(log_query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    results.extend(logs)
+
+    # Also search assignments for student/teacher name matches
+    assign_query = {"$or": [
+        {"student_name": regex_q},
+        {"teacher_name": regex_q},
+        {"student_email": regex_q},
+        {"teacher_email": regex_q}
+    ]}
+    assignments = await db.student_teacher_assignments.find(assign_query, {"_id": 0}).sort("assigned_at", -1).to_list(100)
+    for a in assignments:
+        results.append({
+            "action": f"assignment_{a.get('status', 'unknown')}",
+            "details": f"{a.get('student_name', '')} assigned to {a.get('teacher_name', '')} - Status: {a.get('status', '')}",
+            "created_at": a.get("assigned_at", ""),
+            "actor_name": a.get("student_name", ""),
+            "related_teacher_name": a.get("teacher_name", "")
+        })
+
+    # Search demo requests
+    demo_query = {"$or": [
+        {"student_name": regex_q},
+        {"email": regex_q},
+        {"subject": regex_q}
+    ]}
+    demos = await db.demo_requests.find(demo_query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    for d in demos:
+        results.append({
+            "action": f"demo_{d.get('status', 'pending')}",
+            "details": f"Demo request by {d.get('student_name', d.get('email', ''))} - {d.get('subject', '')} - Status: {d.get('status', '')}",
+            "created_at": d.get("created_at", ""),
+            "actor_name": d.get("student_name", d.get("email", ""))
+        })
+
+    # Sort all by created_at descending
+    results.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+    return results[:200]
 
 
 @api_router.get("/history/student/{student_id}")
@@ -3850,6 +3897,101 @@ async def admin_counsellor_tracking(request: Request, authorization: Optional[st
 
     return result
 
+
+# ==================== ADMIN DELETE/BLOCK USER ====================
+
+@api_router.post("/admin/block-user")
+async def admin_block_user(request: Request, authorization: Optional[str] = Header(None)):
+    """Admin blocks/unblocks a user account"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    body = await request.json()
+    target_id = body.get("user_id")
+    blocked = body.get("blocked", True)
+
+    target = await db.users.find_one({"user_id": target_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target["role"] == "admin":
+        raise HTTPException(status_code=400, detail="Cannot block admin accounts")
+
+    await db.users.update_one({"user_id": target_id}, {"$set": {"is_blocked": blocked}})
+    # If blocked, invalidate all sessions
+    if blocked:
+        await db.user_sessions.delete_many({"user_id": target_id})
+
+    action = "blocked" if blocked else "unblocked"
+    return {"message": f"User {target['name']} {action} successfully"}
+
+
+@api_router.post("/admin/delete-user")
+async def admin_delete_user(request: Request, authorization: Optional[str] = Header(None)):
+    """Admin deletes a user account permanently"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    body = await request.json()
+    target_id = body.get("user_id")
+
+    target = await db.users.find_one({"user_id": target_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target["role"] == "admin":
+        raise HTTPException(status_code=400, detail="Cannot delete admin accounts")
+
+    # Delete user and related sessions
+    await db.users.delete_one({"user_id": target_id})
+    await db.user_sessions.delete_many({"user_id": target_id})
+
+    return {"message": f"User {target['name']} ({target['email']}) deleted permanently"}
+
+
+# ==================== COUNSELLOR DAILY STATS (for admin bar chart) ====================
+
+@api_router.get("/admin/counsellor-daily-stats/{counsellor_id}")
+async def admin_counsellor_daily_stats(counsellor_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Get daily stats for a specific counsellor (leads, allotments, sessions)"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    from collections import defaultdict
+
+    # Get all assignments by this counsellor
+    assignments = await db.student_teacher_assignments.find(
+        {"assigned_by": counsellor_id}, {"_id": 0}
+    ).to_list(1000)
+
+    # Get demo requests handled by counsellor (from history_logs)
+    logs = await db.history_logs.find(
+        {"actor_id": counsellor_id}, {"_id": 0}
+    ).to_list(2000)
+
+    # Group by date
+    daily = defaultdict(lambda: {"leads": 0, "allotments": 0, "sessions": 0})
+
+    for a in assignments:
+        date_str = a.get("assigned_at", "")[:10]
+        if date_str:
+            daily[date_str]["allotments"] += 1
+
+    for log in logs:
+        date_str = log.get("created_at", "")[:10]
+        if date_str:
+            action = log.get("action", "")
+            if "demo" in action:
+                daily[date_str]["leads"] += 1
+            if "session" in action or "class" in action or "proof" in action:
+                daily[date_str]["sessions"] += 1
+
+    # Sort by date, last 30 entries
+    sorted_days = sorted(daily.items(), key=lambda x: x[0])[-30:]
+    result = [{"date": d, **stats} for d, stats in sorted_days]
+
+    return result
 
 
 # Include the router in the main app

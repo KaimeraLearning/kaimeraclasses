@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { ArrowLeft, User, CreditCard, Calendar, MapPin, Target, CalendarClock, Phone } from 'lucide-react';
+import { ArrowLeft, User, CreditCard, Calendar, MapPin, Target, CalendarClock, Phone, Search } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -15,6 +16,7 @@ const CounsellorStudents = () => {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentProfile, setStudentProfile] = useState(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => { fetchStudents(); }, []);
 
@@ -41,6 +43,16 @@ const CounsellorStudents = () => {
     } catch (error) { console.error(error); }
   };
 
+  const filteredStudents = students.filter(s =>
+    !searchQuery ||
+    s.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.student_code?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.phone?.includes(searchQuery) ||
+    s.institute?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.city?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <div className="w-16 h-16 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
@@ -61,8 +73,20 @@ const CounsellorStudents = () => {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Search Bar */}
+        <div className="relative mb-6">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <Input
+            placeholder="Search by name, email, phone, ID, institute, or city..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="pl-10 rounded-xl border-2 border-slate-200 bg-white"
+            data-testid="counsellor-student-search"
+          />
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {students.map(student => (
+          {filteredStudents.map(student => (
             <div key={student.user_id}
               className="bg-white rounded-2xl border-2 border-slate-200 p-6 hover:shadow-lg transition-all cursor-pointer"
               onClick={() => handleViewDetails(student)} data-testid={`student-card-${student.user_id}`}>

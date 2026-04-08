@@ -282,6 +282,17 @@ const CounsellorDashboard = () => {
                     </div>
                     <span className="bg-red-200 text-red-900 px-3 py-1 rounded-full text-xs font-semibold">REJECTED</span>
                   </div>
+                  <Button
+                    onClick={() => {
+                      const student = allStudents.find(s => s.user_id === assignment.student_id);
+                      if (student) { setSelectedStudent(student); setShowAssignDialog(true); }
+                      else { setSelectedStudent({ user_id: assignment.student_id, name: assignment.student_name, email: assignment.student_email }); setShowAssignDialog(true); }
+                    }}
+                    className="w-full mt-2 bg-sky-500 hover:bg-sky-600 text-white rounded-full text-sm"
+                    data-testid={`reassign-rejected-${assignment.assignment_id}`}
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" /> Reassign to Another Teacher
+                  </Button>
                 </div>
               ))}
             </div>
