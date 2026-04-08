@@ -973,11 +973,11 @@ async def adjust_credits(adjustment: CreditAdjustment, request: Request, authori
 
 @api_router.post("/admin/assign-student")
 async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request: Request, authorization: Optional[str] = Header(None)):
-    """Admin assigns student to teacher"""
+    """Admin or Counsellor assigns student to teacher"""
     user = await get_current_user(request, authorization)
     
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access only")
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counsellor access only")
     
     # Get student and teacher details
     student = await db.users.find_one({"user_id": assignment.student_id, "role": "student"}, {"_id": 0})
