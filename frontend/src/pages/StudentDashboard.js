@@ -215,6 +215,15 @@ const StudentDashboard = () => {
                           <XCircle className="w-4 h-4 mr-2" /> Cancel Today's Session ({remaining} left)
                         </Button>
                       )}
+                      {cls.status === 'in_progress' && (
+                        <Button
+                          onClick={() => navigate(`/class/${cls.class_id}`)}
+                          className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold animate-pulse py-5"
+                          data-testid={`join-class-${cls.class_id}`}
+                        >
+                          Join Live Class Now
+                        </Button>
+                      )}
                       {cls.status === 'dismissed' && (
                         <div className="bg-red-50 text-red-700 rounded-xl p-3 text-center font-semibold text-sm">
                           Class Dismissed - Too many cancellations

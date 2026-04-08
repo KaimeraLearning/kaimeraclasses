@@ -783,21 +783,41 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
 
 @api_router.get("/teacher/dashboard")
 async def teacher_dashboard(request: Request, authorization: Optional[str] = Header(None)):
-    """Get teacher dashboard data"""
+    """Get teacher dashboard data with week view"""
     user = await get_current_user(request, authorization)
     
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
     
     # Get all classes by this teacher
-    classes = await db.class_sessions.find(
+    all_classes = await db.class_sessions.find(
         {"teacher_id": user.user_id},
         {"_id": 0}
     ).to_list(1000)
     
-    for cls in classes:
+    for cls in all_classes:
         if isinstance(cls['created_at'], str):
             cls['created_at'] = datetime.fromisoformat(cls['created_at'])
+    
+    # Separate into this week's classes and others
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    # Start of week (Monday)
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    
+    this_week_classes = []
+    other_classes = []
+    
+    for cls in all_classes:
+        cls_date = datetime.fromisoformat(cls['date']).date() if isinstance(cls['date'], str) else cls['date']
+        cls_end = datetime.fromisoformat(cls.get('end_date', cls['date'])).date() if isinstance(cls.get('end_date', cls['date']), str) else cls.get('end_date', cls_date)
+        
+        # Class overlaps with this week if its range intersects [week_start, week_end]
+        if cls_date <= week_end and cls_end >= week_start and cls.get('status') != 'completed':
+            this_week_classes.append(cls)
+        else:
+            other_classes.append(cls)
     
     # Get pending student assignments
     pending_assignments = await db.student_teacher_assignments.find(
@@ -819,7 +839,8 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
     
     return {
         "is_approved": user.is_approved,
-        "classes": classes,
+        "classes": this_week_classes,
+        "other_classes": other_classes,
         "pending_assignments": pending_assignments,
         "approved_students": approved_students
     }
@@ -870,25 +891,6 @@ async def approve_student_assignment(approval: TeacherApprovalRequest, request: 
     
     action = "approved" if approval.approved else "rejected"
     return {"message": f"Student assignment {action}"}
-
-@api_router.post("/classes/start/{class_id}")
-async def start_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Start a class"""
-    user = await get_current_user(request, authorization)
-    
-    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
-    if not cls:
-        raise HTTPException(status_code=404, detail="Class not found")
-    
-    if cls['teacher_id'] != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your class")
-    
-    await db.class_sessions.update_one(
-        {" class_id": class_id},
-        {"$set": {"status": "in_progress"}}
-    )
-    
-    return {"message": "Class started"}
 
 @api_router.delete("/classes/delete/{class_id}")
 async def delete_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
@@ -1439,7 +1441,7 @@ async def get_payment_status(session_id: str, request: Request, authorization: O
 
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
-    """Handle Stripe webhooks"""
+    """Handle Stripe webhooks - credits user account on successful payment"""
     body = await request.body()
     signature = request.headers.get("Stripe-Signature")
     
@@ -1451,6 +1453,11 @@ async def stripe_webhook(request: Request):
     try:
         webhook_response = await stripe_checkout.handle_webhook(body, signature)
         
+        # Find payment transaction
+        payment_doc = await db.payment_transactions.find_one(
+            {"session_id": webhook_response.session_id}, {"_id": 0}
+        )
+        
         # Update payment transaction
         await db.payment_transactions.update_one(
             {"session_id": webhook_response.session_id},
@@ -1461,8 +1468,33 @@ async def stripe_webhook(request: Request):
             }}
         )
         
+        # If paid, credit the user
+        if webhook_response.payment_status == "paid" and payment_doc and payment_doc['payment_status'] != "paid":
+            user_id = payment_doc.get('user_id')
+            credits = float(payment_doc['metadata'].get('credits', 0))
+            
+            if user_id and credits > 0:
+                await db.users.update_one(
+                    {"user_id": user_id},
+                    {"$inc": {"credits": credits}}
+                )
+                
+                transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+                await db.transactions.insert_one({
+                    "transaction_id": transaction_id,
+                    "user_id": user_id,
+                    "type": "purchase",
+                    "amount": credits,
+                    "description": f"Purchased {credits} credits via Stripe",
+                    "status": "completed",
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                })
+                
+                logging.info(f"Webhook: Credited {credits} to user {user_id}")
+        
         return {"received": True}
     except Exception as e:
+        logging.error(f"Stripe webhook error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 # ==================== COUNSELLOR ENDPOINTS ====================
@@ -2026,6 +2058,102 @@ async def mark_all_notifications_read(request: Request, authorization: Optional[
         {"$set": {"read": True}}
     )
     return {"message": "All notifications marked as read"}
+
+# ==================== CLASS LIFECYCLE ENDPOINTS ====================
+
+@api_router.post("/classes/start/{class_id}")
+async def start_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher starts a class session - opens the video room"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if cls['teacher_id'] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not your class")
+    if cls['status'] not in ['scheduled', 'in_progress']:
+        raise HTTPException(status_code=400, detail=f"Cannot start class with status: {cls['status']}")
+    
+    room_id = f"kaimera-{class_id}"
+    
+    await db.class_sessions.update_one(
+        {"class_id": class_id},
+        {"$set": {
+            "status": "in_progress",
+            "room_id": room_id,
+            "last_started_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    # Notify enrolled students
+    for student in cls.get('enrolled_students', []):
+        notif_id = f"notif_{uuid.uuid4().hex[:12]}"
+        await db.notifications.insert_one({
+            "notification_id": notif_id,
+            "user_id": student['user_id'],
+            "type": "class_started",
+            "title": "Class Started!",
+            "message": f"'{cls['title']}' has started. Join now!",
+            "read": False,
+            "related_id": class_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    
+    return {"message": "Class started", "room_id": room_id}
+
+@api_router.post("/classes/end/{class_id}")
+async def end_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher ends a class session"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if cls['teacher_id'] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not your class")
+    
+    # Check if today is the last day or past end_date
+    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    end_date_str = cls.get('end_date', cls['date'])
+    
+    if today_str >= end_date_str:
+        new_status = "completed"
+    else:
+        new_status = "scheduled"
+    
+    await db.class_sessions.update_one(
+        {"class_id": class_id},
+        {"$set": {
+            "status": new_status,
+            "room_id": None,
+            "last_ended_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {"message": f"Class ended. Status: {new_status}", "status": new_status}
+
+@api_router.get("/classes/status/{class_id}")
+async def get_class_status(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Get class current status and room info"""
+    user = await get_current_user(request, authorization)
+    
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    
+    return {
+        "class_id": cls['class_id'],
+        "title": cls['title'],
+        "status": cls['status'],
+        "room_id": cls.get('room_id'),
+        "teacher_id": cls['teacher_id'],
+        "teacher_name": cls['teacher_name'],
+        "is_in_progress": cls['status'] == 'in_progress'
+    }
 
 # ==================== TEACHER STUDENT COMPLAINTS ====================
 

@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, CheckCircle } from 'lucide-react';
+import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -14,7 +14,8 @@ const API = `${BACKEND_URL}/api`;
 const TeacherDashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
-  const [classes, setClasses] = useState([]);
+  const [thisWeekClasses, setThisWeekClasses] = useState([]);
+  const [otherClasses, setOtherClasses] = useState([]);
   const [pendingAssignments, setPendingAssignments] = useState([]);
   const [approvedStudents, setApprovedStudents] = useState([]);
   const [proofs, setProofs] = useState([]);
@@ -24,6 +25,7 @@ const TeacherDashboard = () => {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showProofDialog, setShowProofDialog] = useState(false);
   const [showNotifDialog, setShowNotifDialog] = useState(false);
+  const [showOtherClasses, setShowOtherClasses] = useState(false);
   const [selectedClassForProof, setSelectedClassForProof] = useState(null);
   const [formData, setFormData] = useState({
     title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '',
@@ -47,7 +49,8 @@ const TeacherDashboard = () => {
       if (!userRes.ok || !dashboardRes.ok) throw new Error('Failed to fetch data');
       setUser(await userRes.json());
       const dashboardData = await dashboardRes.json();
-      setClasses(dashboardData.classes);
+      setThisWeekClasses(dashboardData.classes || []);
+      setOtherClasses(dashboardData.other_classes || []);
       setPendingAssignments(dashboardData.pending_assignments || []);
       setApprovedStudents(dashboardData.approved_students || []);
       if (proofsRes.ok) setProofs(await proofsRes.json());
@@ -137,11 +140,52 @@ const TeacherDashboard = () => {
   const getProofStatus = (classId) => proofs.find(p => p.class_id === classId);
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="w-16 h-16 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
-    </div>
-  );
+  const renderClassCard = (cls) => {
+    const proof = getProofStatus(cls.class_id);
+    const cancellations = cls.cancellation_count || 0;
+    const isLive = cls.status === 'in_progress';
+    return (
+      <div key={cls.class_id} className={`bg-white rounded-3xl border-2 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)] p-6 ${isLive ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-slate-200'}`} data-testid={`class-card-${cls.class_id}`}>
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex gap-2 flex-wrap">
+            <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-semibold">{cls.subject}</span>
+            {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-3 py-1 rounded-full text-xs font-semibold">DEMO</span>}
+            {isLive && <span className="bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-semibold animate-pulse">LIVE</span>}
+            {cls.status === 'dismissed' && <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-semibold">DISMISSED</span>}
+          </div>
+        </div>
+        <h3 className="text-xl font-bold text-slate-900 mb-2">{cls.title}</h3>
+        <div className="space-y-1 mb-3 text-sm text-slate-600">
+          <div className="flex items-center gap-2"><Calendar className="w-4 h-4" /><span>{format(parseISO(cls.date), 'MMM dd')} - {cls.end_date ? format(parseISO(cls.end_date), 'MMM dd') : ''}</span></div>
+          <div className="flex items-center gap-2"><Users className="w-4 h-4" /><span>{cls.duration_days}d | {cls.start_time}-{cls.end_time}</span></div>
+        </div>
+        {cancellations > 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mb-3 text-xs text-amber-800 font-semibold">Student cancelled {cancellations}/{cls.max_cancellations || 3} sessions</div>}
+        {proof && <div className={`rounded-lg p-2 mb-3 text-center text-sm font-semibold ${proof.status === 'pending' ? 'bg-amber-50 text-amber-800' : proof.status === 'verified' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}><ShieldCheck className="w-4 h-4 inline mr-1" /> Proof: {proof.status}</div>}
+        <div className="space-y-2">
+          {cls.status === 'scheduled' && (
+            <>
+              <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold" data-testid={`start-class-${cls.class_id}`}>
+                <Play className="w-4 h-4 mr-2" /> Start Class
+              </Button>
+              <Button onClick={() => handleDeleteClass(cls.class_id)} variant="outline" className="w-full border-2 border-red-200 hover:bg-red-50 text-red-600 rounded-full" data-testid={`delete-class-${cls.class_id}`}>Delete</Button>
+            </>
+          )}
+          {isLive && (
+            <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold animate-pulse" data-testid={`rejoin-class-${cls.class_id}`}>
+              <Play className="w-4 h-4 mr-2" /> Rejoin Live Class
+            </Button>
+          )}
+          {!proof && cls.status !== 'dismissed' && (
+            <Button onClick={() => { setSelectedClassForProof(cls); setShowProofDialog(true); }} variant="outline" className="w-full border-2 border-sky-200 text-sky-600 rounded-full" data-testid={`submit-proof-${cls.class_id}`}>
+              <Upload className="w-4 h-4 mr-2" /> Submit Proof
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="w-16 h-16 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div></div>;
 
   if (!user?.is_approved) return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center" data-testid="teacher-pending-approval">
@@ -161,36 +205,25 @@ const TeacherDashboard = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <GraduationCap className="w-10 h-10 text-sky-500" strokeWidth={2.5} />
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900">Teacher Dashboard</h1>
-                <p className="text-sm text-slate-600">Wallet: {user?.credits || 0} credits</p>
-              </div>
+              <div><h1 className="text-2xl font-bold text-slate-900">Teacher Dashboard</h1><p className="text-sm text-slate-600">Wallet: {user?.credits || 0} credits</p></div>
             </div>
             <div className="flex items-center gap-4">
-              {/* Notification Bell */}
-              <button onClick={() => setShowNotifDialog(true)} className="relative p-2 rounded-full hover:bg-slate-100 transition-colors" data-testid="notifications-bell">
+              <button onClick={() => setShowNotifDialog(true)} className="relative p-2 rounded-full hover:bg-slate-100" data-testid="notifications-bell">
                 <Bell className="w-6 h-6 text-slate-700" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{unreadCount}</span>
-                )}
+                {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{unreadCount}</span>}
               </button>
-              <div className="text-right">
-                <p className="text-sm text-slate-600">Welcome,</p>
-                <p className="font-semibold text-slate-900">{user?.name}</p>
-              </div>
-              <Button onClick={handleLogout} variant="outline" className="rounded-full" data-testid="logout-button">
-                <LogOut className="w-4 h-4 mr-2" /> Logout
-              </Button>
+              <div className="text-right"><p className="text-sm text-slate-600">Welcome,</p><p className="font-semibold text-slate-900">{user?.name}</p></div>
+              <Button onClick={handleLogout} variant="outline" className="rounded-full" data-testid="logout-button"><LogOut className="w-4 h-4 mr-2" /> Logout</Button>
             </div>
           </div>
         </div>
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Student Complaints Section */}
+        {/* Student Complaints */}
         {studentComplaints.length > 0 && (
           <div className="mb-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-4">Student Complaints ({studentComplaints.length})</h2>
+            <h2 className="text-xl font-bold text-red-700 mb-4">Student Complaints ({studentComplaints.length})</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {studentComplaints.map(c => (
                 <div key={c.complaint_id} className="bg-red-50 rounded-2xl border-2 border-red-200 p-5">
@@ -214,10 +247,7 @@ const TeacherDashboard = () => {
               {pendingAssignments.map(a => (
                 <div key={a.assignment_id} className="bg-amber-50 rounded-2xl border-2 border-amber-200 p-5">
                   <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="font-bold text-slate-900">{a.student_name}</h3>
-                      <p className="text-sm text-slate-600">{a.student_email}</p>
-                    </div>
+                    <div><h3 className="font-bold text-slate-900">{a.student_name}</h3><p className="text-sm text-slate-600">{a.student_email}</p></div>
                     <span className="bg-amber-200 text-amber-900 px-3 py-1 rounded-full text-xs font-semibold">PENDING</span>
                   </div>
                   <div className="flex gap-2">
@@ -230,7 +260,7 @@ const TeacherDashboard = () => {
           </div>
         )}
 
-        {/* Approved Students */}
+        {/* My Students */}
         {approvedStudents.length > 0 && (
           <div className="mb-8">
             <h2 className="text-xl font-bold text-slate-900 mb-4">My Students</h2>
@@ -248,68 +278,35 @@ const TeacherDashboard = () => {
 
         {/* Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
-          <Button onClick={() => setShowCreateDialog(true)} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full px-6 py-3 font-bold" data-testid="create-class-button">
-            <Plus className="w-5 h-5 mr-2" /> Create New Class
-          </Button>
-          <Button onClick={() => navigate('/teacher-classes')} variant="outline" className="rounded-full px-6 py-3 font-bold">View All Classes</Button>
-          <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full px-6 py-3 font-bold">
-            <MessageSquare className="w-4 h-4 mr-2" /> My Complaints
-          </Button>
+          <Button onClick={() => setShowCreateDialog(true)} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full px-6 py-3 font-bold" data-testid="create-class-button"><Plus className="w-5 h-5 mr-2" /> Create New Class</Button>
+          <Button onClick={() => navigate('/teacher-classes')} variant="outline" className="rounded-full px-6 py-3 font-bold">All Classes</Button>
+          <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full px-6 py-3 font-bold"><MessageSquare className="w-4 h-4 mr-2" /> My Complaints</Button>
         </div>
 
-        {/* Recent Classes */}
-        <h2 className="text-xl font-bold text-slate-900 mb-4">Recent Classes</h2>
-        {classes.length === 0 ? (
-          <div className="bg-white rounded-3xl p-12 border-2 border-slate-100 text-center">
-            <p className="text-slate-600">No classes created yet.</p>
+        {/* This Week's Classes */}
+        <h2 className="text-xl font-bold text-slate-900 mb-4">This Week's Classes ({thisWeekClasses.length})</h2>
+        {thisWeekClasses.length === 0 ? (
+          <div className="bg-white rounded-3xl p-12 border-2 border-slate-100 text-center mb-8">
+            <p className="text-slate-600">No classes this week. Create one!</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {classes.slice(0, 6).map(cls => {
-              const proof = getProofStatus(cls.class_id);
-              const cancellations = cls.cancellation_count || 0;
-              return (
-                <div key={cls.class_id} className="bg-white rounded-3xl border-2 border-slate-200 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)] p-6" data-testid={`class-card-${cls.class_id}`}>
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex gap-2 flex-wrap">
-                      <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-semibold">{cls.subject}</span>
-                      {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-3 py-1 rounded-full text-xs font-semibold">DEMO</span>}
-                      {cls.status === 'dismissed' && <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-semibold">DISMISSED</span>}
-                    </div>
-                    <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-xs font-semibold">{cls.status}</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-900 mb-2">{cls.title}</h3>
-                  <div className="space-y-2 mb-3">
-                    <div className="flex items-center gap-2 text-slate-600">
-                      <Calendar className="w-4 h-4" /><span className="text-sm">{format(parseISO(cls.date), 'MMM dd')} - {cls.end_date ? format(parseISO(cls.end_date), 'MMM dd') : ''}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-slate-600">
-                      <Users className="w-4 h-4" /><span className="text-sm">{cls.duration_days} days | {cls.enrolled_students.length} students</span>
-                    </div>
-                  </div>
-                  {cancellations > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mb-3 text-xs text-amber-800 font-semibold">
-                      Student cancelled {cancellations}/{cls.max_cancellations || 3} sessions
-                    </div>
-                  )}
-                  {proof && (
-                    <div className={`rounded-lg p-2 mb-3 text-center text-sm font-semibold ${proof.status === 'pending' ? 'bg-amber-50 text-amber-800' : proof.status === 'verified' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}>
-                      <ShieldCheck className="w-4 h-4 inline mr-1" /> Proof: {proof.status}
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    {cls.status === 'scheduled' && (
-                      <Button onClick={() => handleDeleteClass(cls.class_id)} variant="outline" className="w-full border-2 border-red-200 hover:bg-red-50 text-red-600 rounded-full font-bold" data-testid={`delete-class-${cls.class_id}`}>Delete</Button>
-                    )}
-                    {!proof && (
-                      <Button onClick={() => { setSelectedClassForProof(cls); setShowProofDialog(true); }} variant="outline" className="w-full border-2 border-sky-200 text-sky-600 rounded-full font-bold" data-testid={`submit-proof-${cls.class_id}`}>
-                        <Upload className="w-4 h-4 mr-2" /> Submit Proof
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            {thisWeekClasses.map(cls => renderClassCard(cls))}
+          </div>
+        )}
+
+        {/* Other Classes (collapsible) */}
+        {otherClasses.length > 0 && (
+          <div>
+            <button onClick={() => setShowOtherClasses(!showOtherClasses)} className="flex items-center gap-2 text-lg font-bold text-slate-700 mb-4 hover:text-slate-900 transition-colors" data-testid="toggle-other-classes">
+              {showOtherClasses ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              Other Classes ({otherClasses.length})
+            </button>
+            {showOtherClasses && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {otherClasses.map(cls => renderClassCard(cls))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -320,7 +317,7 @@ const TeacherDashboard = () => {
           <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Create New Class</DialogTitle></DialogHeader>
           <form onSubmit={handleCreateClass} className="space-y-4 mt-4">
             <div className="flex items-center gap-3 bg-violet-50 rounded-xl p-4 border-2 border-violet-200">
-              <input type="checkbox" id="is_demo" checked={formData.is_demo} onChange={e => setFormData({ ...formData, is_demo: e.target.checked })} className="w-5 h-5 text-violet-600 rounded" data-testid="demo-toggle" />
+              <input type="checkbox" id="is_demo" checked={formData.is_demo} onChange={e => setFormData({ ...formData, is_demo: e.target.checked })} className="w-5 h-5 rounded" data-testid="demo-toggle" />
               <label htmlFor="is_demo" className="font-semibold text-violet-800">Demo Session</label>
               <span className="text-xs text-violet-600 ml-auto">Uses demo pricing</span>
             </div>
@@ -346,13 +343,10 @@ const TeacherDashboard = () => {
           <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Submit Class Proof</DialogTitle></DialogHeader>
           {selectedClassForProof && (
             <div className="space-y-4 mt-4">
-              <div className="bg-slate-50 rounded-xl p-3">
-                <p className="font-semibold text-slate-900">{selectedClassForProof.title}</p>
-                <p className="text-sm text-slate-600">{selectedClassForProof.subject} | {selectedClassForProof.date}</p>
-              </div>
-              <div><Label>Student Performance *</Label><select value={proofData.student_performance} onChange={e => setProofData({ ...proofData, student_performance: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="performance-select"><option value="excellent">Excellent</option><option value="good">Good</option><option value="average">Average</option><option value="needs_improvement">Needs Improvement</option></select></div>
-              <div><Label>Topics Covered *</Label><textarea value={proofData.topics_covered} onChange={e => setProofData({ ...proofData, topics_covered: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={3} placeholder="List topics..." data-testid="topics-covered-input" /></div>
-              <div><Label>Feedback *</Label><textarea value={proofData.feedback_text} onChange={e => setProofData({ ...proofData, feedback_text: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={3} placeholder="Session feedback..." data-testid="feedback-text-input" /></div>
+              <div className="bg-slate-50 rounded-xl p-3"><p className="font-semibold text-slate-900">{selectedClassForProof.title}</p><p className="text-sm text-slate-600">{selectedClassForProof.subject} | {selectedClassForProof.date}</p></div>
+              <div><Label>Performance *</Label><select value={proofData.student_performance} onChange={e => setProofData({ ...proofData, student_performance: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="performance-select"><option value="excellent">Excellent</option><option value="good">Good</option><option value="average">Average</option><option value="needs_improvement">Needs Improvement</option></select></div>
+              <div><Label>Topics Covered *</Label><textarea value={proofData.topics_covered} onChange={e => setProofData({ ...proofData, topics_covered: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={3} data-testid="topics-covered-input" /></div>
+              <div><Label>Feedback *</Label><textarea value={proofData.feedback_text} onChange={e => setProofData({ ...proofData, feedback_text: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={3} data-testid="feedback-text-input" /></div>
               <div><Label>Screenshot (optional, max 2MB)</Label><input type="file" accept="image/*" onChange={handleScreenshotUpload} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="screenshot-upload" />{proofData.screenshot_base64 && <p className="text-xs text-emerald-600 mt-1">Attached</p>}</div>
               <Button onClick={handleSubmitProof} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="submit-proof-confirm-button"><Upload className="w-5 h-5 mr-2" /> Submit Proof</Button>
             </div>
@@ -370,22 +364,14 @@ const TeacherDashboard = () => {
             </div>
           </DialogHeader>
           <div className="space-y-3 mt-4">
-            {notifications.length === 0 ? (
-              <p className="text-slate-500 text-center py-8">No notifications</p>
-            ) : (
-              notifications.map(n => (
-                <div key={n.notification_id} className={`rounded-xl p-4 border-2 ${n.read ? 'bg-slate-50 border-slate-200' : 'bg-sky-50 border-sky-200'}`} data-testid={`notif-${n.notification_id}`}>
-                  <div className="flex items-start gap-3">
-                    {!n.read && <div className="w-2 h-2 rounded-full bg-sky-500 mt-2 flex-shrink-0"></div>}
-                    <div className="flex-1">
-                      <p className="font-semibold text-slate-900 text-sm">{n.title}</p>
-                      <p className="text-slate-600 text-sm">{n.message}</p>
-                      <p className="text-xs text-slate-400 mt-1">{new Date(n.created_at).toLocaleString()}</p>
-                    </div>
-                  </div>
+            {notifications.length === 0 ? <p className="text-slate-500 text-center py-8">No notifications</p> : notifications.map(n => (
+              <div key={n.notification_id} className={`rounded-xl p-4 border-2 ${n.read ? 'bg-slate-50 border-slate-200' : 'bg-sky-50 border-sky-200'}`} data-testid={`notif-${n.notification_id}`}>
+                <div className="flex items-start gap-3">
+                  {!n.read && <div className="w-2 h-2 rounded-full bg-sky-500 mt-2 flex-shrink-0"></div>}
+                  <div className="flex-1"><p className="font-semibold text-slate-900 text-sm">{n.title}</p><p className="text-slate-600 text-sm">{n.message}</p><p className="text-xs text-slate-400 mt-1">{new Date(n.created_at).toLocaleString()}</p></div>
                 </div>
-              ))
-            )}
+              </div>
+            ))}
           </div>
         </DialogContent>
       </Dialog>
