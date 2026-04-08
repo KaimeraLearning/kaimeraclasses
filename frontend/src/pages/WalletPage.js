@@ -161,28 +161,33 @@ const WalletPage = () => {
             <p className="text-center text-slate-400 py-8">No transactions yet</p>
           ) : (
             <div className="space-y-3 max-h-96 overflow-y-auto">
-              {wallet.transactions.map((txn, i) => (
-                <div key={i} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors border border-slate-100" data-testid={`txn-${i}`}>
-                  <div className="flex items-center gap-3">
-                    {txn.type === 'earning' || txn.type === 'credit_purchase' ? (
-                      <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
-                        <ArrowDownLeft className="w-5 h-5 text-emerald-600" />
+              {wallet.transactions.map((txn, i) => {
+                const isCredit = ['earning', 'credit_purchase', 'credit', 'admin_add', 'add', 'proof_approved'].includes(txn.type) || txn.amount > 0;
+                const isDebit = ['debit', 'deduct', 'admin_deduct', 'payment', 'booking'].includes(txn.type) || txn.amount < 0;
+                const showGreen = isCredit && !isDebit;
+                return (
+                  <div key={i} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors border border-slate-100" data-testid={`txn-${i}`}>
+                    <div className="flex items-center gap-3">
+                      {showGreen ? (
+                        <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                          <ArrowDownLeft className="w-5 h-5 text-emerald-600" />
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
+                          <ArrowUpRight className="w-5 h-5 text-red-600" />
+                        </div>
+                      )}
+                      <div>
+                        <p className="font-medium text-slate-900 text-sm">{txn.description}</p>
+                        <p className="text-xs text-slate-400">{formatDate(txn.created_at)}</p>
                       </div>
-                    ) : (
-                      <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
-                        <ArrowUpRight className="w-5 h-5 text-red-600" />
-                      </div>
-                    )}
-                    <div>
-                      <p className="font-medium text-slate-900 text-sm">{txn.description}</p>
-                      <p className="text-xs text-slate-400">{formatDate(txn.created_at)}</p>
                     </div>
+                    <span className={`font-bold text-sm ${showGreen ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {showGreen ? '+' : '-'}{Math.abs(txn.amount)}
+                    </span>
                   </div>
-                  <span className={`font-bold text-sm ${txn.type === 'earning' || txn.type === 'credit_purchase' ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {txn.type === 'earning' || txn.type === 'credit_purchase' ? '+' : '-'}{txn.amount}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays } from 'lucide-react';
+import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -136,6 +136,21 @@ const TeacherDashboard = () => {
     fetchDashboardData();
   };
 
+  const handleSendFeedback = async () => {
+    if (!feedbackForm.feedback_text) { toast.error('Please enter feedback'); return; }
+    try {
+      const response = await fetch(`${API}/teacher/feedback-to-student`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ student_id: feedbackTarget.student_id, ...feedbackForm })
+      });
+      if (!response.ok) throw new Error((await response.json()).detail);
+      toast.success('Feedback sent!');
+      setShowFeedbackDialog(false);
+      setFeedbackTarget(null);
+      setFeedbackForm({ feedback_text: '', performance_rating: 'good' });
+    } catch (error) { toast.error(error.message); }
+  };
+
   const handleLogout = async () => {
     try { await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' }); navigate('/login'); } catch {}
   };
@@ -143,44 +158,49 @@ const TeacherDashboard = () => {
   const getProofStatus = (classId) => proofs.find(p => p.class_id === classId);
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const renderClassCard = (cls) => {
+  // Filter students by search
+  const filteredStudents = groupedData.by_student.filter(s =>
+    !studentSearch || s.student_name?.toLowerCase().includes(studentSearch.toLowerCase())
+  );
+
+  const renderClassCard = (cls, compact) => {
     const proof = getProofStatus(cls.class_id);
     const cancellations = cls.cancellation_count || 0;
     const isLive = cls.status === 'in_progress';
     return (
-      <div key={cls.class_id} className={`bg-white rounded-3xl border-2 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)] p-6 ${isLive ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-slate-200'}`} data-testid={`class-card-${cls.class_id}`}>
-        <div className="flex items-start justify-between mb-3">
+      <div key={cls.class_id} className={`bg-white rounded-2xl border-2 shadow-sm p-4 ${isLive ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-slate-200'} ${compact ? '' : 'shadow-[4px_4px_0px_0px_rgba(226,232,240,1)]'}`} data-testid={`class-card-${cls.class_id}`}>
+        <div className="flex items-start justify-between mb-2">
           <div className="flex gap-2 flex-wrap">
-            <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-semibold">{cls.subject}</span>
-            {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-3 py-1 rounded-full text-xs font-semibold">DEMO</span>}
-            {isLive && <span className="bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-semibold animate-pulse">LIVE</span>}
-            {cls.status === 'dismissed' && <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-semibold">DISMISSED</span>}
+            <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-xs font-semibold">{cls.subject}</span>
+            {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full text-xs font-semibold">DEMO</span>}
+            {isLive && <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-xs font-semibold animate-pulse">LIVE</span>}
+            {cls.status === 'dismissed' && <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded-full text-xs font-semibold">DISMISSED</span>}
           </div>
         </div>
-        <h3 className="text-xl font-bold text-slate-900 mb-2">{cls.title}</h3>
-        <div className="space-y-1 mb-3 text-sm text-slate-600">
-          <div className="flex items-center gap-2"><Calendar className="w-4 h-4" /><span>{format(parseISO(cls.date), 'MMM dd')} - {cls.end_date ? format(parseISO(cls.end_date), 'MMM dd') : ''}</span></div>
-          <div className="flex items-center gap-2"><Users className="w-4 h-4" /><span>{cls.duration_days}d | {cls.start_time}-{cls.end_time}</span></div>
+        <h3 className="text-base font-bold text-slate-900 mb-1">{cls.title}</h3>
+        <div className="space-y-0.5 mb-2 text-xs text-slate-600">
+          <div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" /><span>{cls.date ? format(parseISO(cls.date), 'MMM dd') : ''}{cls.end_date ? ` - ${format(parseISO(cls.end_date), 'MMM dd')}` : ''}</span></div>
+          <div className="flex items-center gap-1.5"><Users className="w-3 h-3" /><span>{cls.duration_days}d | {cls.start_time}-{cls.end_time}</span></div>
         </div>
-        {cancellations > 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mb-3 text-xs text-amber-800 font-semibold">Student cancelled {cancellations}/{cls.max_cancellations || 3} sessions</div>}
-        {proof && <div className={`rounded-lg p-2 mb-3 text-center text-sm font-semibold ${proof.status === 'pending' ? 'bg-amber-50 text-amber-800' : proof.status === 'verified' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}><ShieldCheck className="w-4 h-4 inline mr-1" /> Proof: {proof.status}</div>}
-        <div className="space-y-2">
+        {cancellations > 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-1.5 mb-2 text-xs text-amber-800 font-semibold">Cancelled {cancellations}/{cls.max_cancellations || 3} sessions</div>}
+        {proof && <div className={`rounded-lg p-1.5 mb-2 text-center text-xs font-semibold ${proof.status === 'pending' ? 'bg-amber-50 text-amber-800' : proof.status === 'verified' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}><ShieldCheck className="w-3 h-3 inline mr-1" /> Proof: {proof.status}</div>}
+        <div className="space-y-1.5">
           {cls.status === 'scheduled' && (
             <>
-              <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold" data-testid={`start-class-${cls.class_id}`}>
-                <Play className="w-4 h-4 mr-2" /> Start Class
+              <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8" data-testid={`start-class-${cls.class_id}`}>
+                <Play className="w-3 h-3 mr-1" /> Start Class
               </Button>
-              <Button onClick={() => handleDeleteClass(cls.class_id)} variant="outline" className="w-full border-2 border-red-200 hover:bg-red-50 text-red-600 rounded-full" data-testid={`delete-class-${cls.class_id}`}>Delete</Button>
+              <Button onClick={() => handleDeleteClass(cls.class_id)} variant="outline" className="w-full border border-red-200 hover:bg-red-50 text-red-600 rounded-full text-xs h-7" data-testid={`delete-class-${cls.class_id}`}>Delete</Button>
             </>
           )}
           {isLive && (
-            <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold animate-pulse" data-testid={`rejoin-class-${cls.class_id}`}>
-              <Play className="w-4 h-4 mr-2" /> Rejoin Live Class
+            <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8 animate-pulse" data-testid={`rejoin-class-${cls.class_id}`}>
+              <Play className="w-3 h-3 mr-1" /> Rejoin Live
             </Button>
           )}
           {!proof && cls.status !== 'dismissed' && (
-            <Button onClick={() => { setSelectedClassForProof(cls); setShowProofDialog(true); }} variant="outline" className="w-full border-2 border-sky-200 text-sky-600 rounded-full" data-testid={`submit-proof-${cls.class_id}`}>
-              <Upload className="w-4 h-4 mr-2" /> Submit Proof
+            <Button onClick={() => { setSelectedClassForProof(cls); setShowProofDialog(true); }} variant="outline" className="w-full border border-sky-200 text-sky-600 rounded-full text-xs h-7" data-testid={`submit-proof-${cls.class_id}`}>
+              <Upload className="w-3 h-3 mr-1" /> Submit Proof
             </Button>
           )}
         </div>
@@ -263,59 +283,115 @@ const TeacherDashboard = () => {
           </div>
         )}
 
-        {/* My Students */}
-        {approvedStudents.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-4">My Students</h2>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {approvedStudents.map(a => (
-                <div key={a.assignment_id} className="bg-emerald-50 rounded-2xl border-2 border-emerald-200 p-4">
-                  <h3 className="font-bold text-slate-900">{a.student_name}</h3>
-                  <p className="text-xs text-slate-600">{a.student_email}</p>
-                  <p className="text-sm text-emerald-600 mt-2 font-semibold">{a.credit_price}/class</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
           <Button onClick={() => setShowCreateDialog(true)} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full px-6 py-3 font-bold" data-testid="create-class-button"><Plus className="w-5 h-5 mr-2" /> Create New Class</Button>
           <Button onClick={() => navigate('/demo-live-sheet')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-6 py-3 font-bold" data-testid="demo-live-sheet-button"><Zap className="w-4 h-4 mr-2" /> Demo Live Sheet</Button>
           <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="wallet-button"><CreditCard className="w-4 h-4 mr-2" /> Wallet</Button>
-          <Button onClick={() => navigate('/teacher-calendar')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="calendar-button"><CalendarDays className="w-4 h-4 mr-2" /> Content Planner</Button>
+          <Button onClick={() => navigate('/teacher-calendar')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="calendar-button"><CalendarDays className="w-4 h-4 mr-2" /> Schedule Planner</Button>
           <Button onClick={() => navigate('/learning-kit')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="learning-kit-button"><BookOpen className="w-4 h-4 mr-2" /> Learning Kit</Button>
-          <Button onClick={() => navigate('/teacher-classes')} variant="outline" className="rounded-full px-6 py-3 font-bold">All Classes</Button>
-          <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full px-6 py-3 font-bold"><MessageSquare className="w-4 h-4 mr-2" /> My Complaints</Button>
+          <Button onClick={() => navigate('/teacher-classes')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="all-classes-button">All Classes</Button>
+          <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="complaints-button"><MessageSquare className="w-4 h-4 mr-2" /> My Complaints</Button>
         </div>
 
-        {/* This Week's Classes */}
-        <h2 className="text-xl font-bold text-slate-900 mb-4">This Week's Classes ({thisWeekClasses.length})</h2>
-        {thisWeekClasses.length === 0 ? (
-          <div className="bg-white rounded-3xl p-12 border-2 border-slate-100 text-center mb-8">
-            <p className="text-slate-600">No classes this week. Create one!</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-            {thisWeekClasses.map(cls => renderClassCard(cls))}
-          </div>
-        )}
+        {/* Classes of the Day */}
+        <div className="mb-8">
+          <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-sky-500" /> Classes of the Day ({groupedData.today.length})
+          </h2>
+          {groupedData.today.length === 0 ? (
+            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
+              <p className="text-slate-500">No classes scheduled for today</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {groupedData.today.map(cls => renderClassCard(cls, false))}
+            </div>
+          )}
+        </div>
 
-        {/* Other Classes (collapsible) */}
-        {otherClasses.length > 0 && (
-          <div>
-            <button onClick={() => setShowOtherClasses(!showOtherClasses)} className="flex items-center gap-2 text-lg font-bold text-slate-700 mb-4 hover:text-slate-900 transition-colors" data-testid="toggle-other-classes">
-              {showOtherClasses ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-              Other Classes ({otherClasses.length})
-            </button>
-            {showOtherClasses && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {otherClasses.map(cls => renderClassCard(cls))}
-              </div>
+        {/* Students & Their Classes (Grouped View) */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <Users className="w-5 h-5 text-amber-500" /> My Students ({groupedData.by_student.length})
+            </h2>
+            {groupedData.ended_count > 0 && (
+              <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full">{groupedData.ended_count} ended classes in history</span>
             )}
           </div>
-        )}
+          {/* Student Search */}
+          <div className="relative mb-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Input
+              placeholder="Search students by name..."
+              value={studentSearch}
+              onChange={e => setStudentSearch(e.target.value)}
+              className="pl-10 rounded-xl border-2 border-slate-200 bg-white"
+              data-testid="student-search-input"
+            />
+          </div>
+          {filteredStudents.length === 0 ? (
+            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
+              <p className="text-slate-500">{studentSearch ? 'No students match your search' : 'No active students yet'}</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredStudents.map(studentGroup => {
+                const isExpanded = expandedStudent === studentGroup.student_id;
+                const details = studentGroup.student_details || {};
+                return (
+                  <div key={studentGroup.student_id} className="bg-white rounded-2xl border-2 border-slate-200 overflow-hidden" data-testid={`student-group-${studentGroup.student_id}`}>
+                    {/* Student Header (Clickable) */}
+                    <button
+                      onClick={() => setExpandedStudent(isExpanded ? null : studentGroup.student_id)}
+                      className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors text-left"
+                      data-testid={`toggle-student-${studentGroup.student_id}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-sky-400 to-sky-500 rounded-xl flex items-center justify-center text-white font-bold text-sm">
+                          {studentGroup.student_name?.charAt(0) || '?'}
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-900">{studentGroup.student_name}</p>
+                          <p className="text-xs text-slate-500">
+                            {details.email || ''} {details.student_code ? `| ${details.student_code}` : ''}
+                            {details.grade ? ` | Class ${details.grade}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="bg-sky-100 text-sky-700 px-3 py-1 rounded-full text-xs font-semibold">{studentGroup.classes.length} classes</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="rounded-full"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFeedbackTarget(studentGroup);
+                            setShowFeedbackDialog(true);
+                          }}
+                          data-testid={`feedback-btn-${studentGroup.student_id}`}
+                        >
+                          <Star className="w-4 h-4 text-amber-500" />
+                        </Button>
+                        {isExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                      </div>
+                    </button>
+                    {/* Expanded: Student's Classes */}
+                    {isExpanded && (
+                      <div className="border-t border-slate-100 p-4 bg-slate-50">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {studentGroup.classes.map(cls => renderClassCard(cls, true))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Create Class Dialog */}
@@ -356,6 +432,36 @@ const TeacherDashboard = () => {
               <div><Label>Feedback *</Label><textarea value={proofData.feedback_text} onChange={e => setProofData({ ...proofData, feedback_text: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={3} data-testid="feedback-text-input" /></div>
               <div><Label>Screenshot (optional, max 2MB)</Label><input type="file" accept="image/*" onChange={handleScreenshotUpload} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="screenshot-upload" />{proofData.screenshot_base64 && <p className="text-xs text-emerald-600 mt-1">Attached</p>}</div>
               <Button onClick={handleSubmitProof} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="submit-proof-confirm-button"><Upload className="w-5 h-5 mr-2" /> Submit Proof</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Feedback Dialog */}
+      <Dialog open={showFeedbackDialog} onOpenChange={setShowFeedbackDialog}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Send Feedback</DialogTitle></DialogHeader>
+          {feedbackTarget && (
+            <div className="space-y-4 mt-4">
+              <div className="bg-slate-50 rounded-xl p-3">
+                <p className="font-semibold text-slate-900">To: {feedbackTarget.student_name}</p>
+              </div>
+              <div>
+                <Label>Rating</Label>
+                <select value={feedbackForm.performance_rating} onChange={e => setFeedbackForm({ ...feedbackForm, performance_rating: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="feedback-rating-select">
+                  <option value="excellent">Excellent</option>
+                  <option value="good">Good</option>
+                  <option value="average">Average</option>
+                  <option value="needs_improvement">Needs Improvement</option>
+                </select>
+              </div>
+              <div>
+                <Label>Feedback Message *</Label>
+                <textarea value={feedbackForm.feedback_text} onChange={e => setFeedbackForm({ ...feedbackForm, feedback_text: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={4} data-testid="feedback-message-input" />
+              </div>
+              <Button onClick={handleSendFeedback} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="send-feedback-button">
+                <Star className="w-5 h-5 mr-2" /> Send Feedback
+              </Button>
             </div>
           )}
         </DialogContent>

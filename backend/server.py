@@ -3809,6 +3809,49 @@ async def get_teacher_schedule(request: Request, authorization: Optional[str] = 
     return classes
 
 
+
+# ==================== ADMIN COUNSELLOR TRACKING ====================
+
+@api_router.get("/admin/counsellor-tracking")
+async def admin_counsellor_tracking(request: Request, authorization: Optional[str] = Header(None)):
+    """Admin gets tracking data for all counsellors"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    counsellors = await db.users.find(
+        {"role": "counsellor"},
+        {"_id": 0, "password_hash": 0}
+    ).sort("name", 1).to_list(100)
+
+    result = []
+    for c in counsellors:
+        cid = c["user_id"]
+        assignments = await db.student_teacher_assignments.find(
+            {"assigned_by": cid}, {"_id": 0}
+        ).to_list(1000)
+
+        active_count = sum(1 for a in assignments if a.get("status") == "approved")
+        pending_count = sum(1 for a in assignments if a.get("status") == "pending")
+        rejected_count = sum(1 for a in assignments if a.get("status") == "rejected")
+
+        result.append({
+            "user_id": cid,
+            "name": c.get("name", ""),
+            "email": c.get("email", ""),
+            "phone": c.get("phone", ""),
+            "badges": c.get("badges", []),
+            "total_assignments": len(assignments),
+            "active_assignments": active_count,
+            "pending_assignments": pending_count,
+            "rejected_assignments": rejected_count,
+            "created_at": c.get("created_at", "")
+        })
+
+    return result
+
+
+
 # Include the router in the main app
 app.include_router(api_router)
 
