@@ -18,6 +18,8 @@ import DemoLiveSheet from './pages/DemoLiveSheet';
 import DemoFeedback from './pages/DemoFeedback';
 import HistoryPage from './pages/HistoryPage';
 import WalletPage from './pages/WalletPage';
+import LearningKit from './pages/LearningKit';
+import TeacherCalendar from './pages/TeacherCalendar';
 import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from './components/ui/sonner';
 import './App.css';
@@ -109,6 +111,16 @@ function AppRouter() {
         <Route path="/wallet" element={
           <ProtectedRoute>
             <WalletPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/learning-kit" element={
+          <ProtectedRoute>
+            <LearningKit />
+          </ProtectedRoute>
+        } />
+        <Route path="/teacher-calendar" element={
+          <ProtectedRoute requiredRole="teacher">
+            <TeacherCalendar />
           </ProtectedRoute>
         } />
         <Route path="/class/:classId" element={

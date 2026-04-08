@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, CreditCard, Calendar, Clock, Users, User, MessageSquare, Save, XCircle, Zap, Star } from 'lucide-react';
+import { GraduationCap, LogOut, CreditCard, Calendar, Clock, Users, User, MessageSquare, Save, XCircle, Zap, Star, BookOpen, AlertTriangle } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -20,6 +20,7 @@ const StudentDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
   const [profileData, setProfileData] = useState({ institute: '', goal: '', preferred_time_slot: '', phone: '', state: '', city: '', country: '', grade: '' });
+  const [nagData, setNagData] = useState(null);
 
   useEffect(() => { fetchDashboardData(); }, []);
 
@@ -42,6 +43,9 @@ const StudentDashboard = () => {
         state: userData.state || '', city: userData.city || '',
         country: userData.country || '', grade: userData.grade || ''
       });
+      // Check nag screen
+      const nagRes = await fetch(`${API}/student/nag-check`, { credentials: 'include' });
+      if (nagRes.ok) setNagData(await nagRes.json());
       setLoading(false);
     } catch (error) {
       toast.error('Failed to load dashboard');
@@ -140,6 +144,37 @@ const StudentDashboard = () => {
           </div>
         </div>
 
+        {/* Nag Screen - Start Regular Classes */}
+        {nagData?.show_nag && (
+          <div className="mb-6 bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 rounded-3xl p-6 text-white shadow-[0_4px_20px_rgba(245,158,11,0.3)] relative overflow-hidden" data-testid="nag-screen">
+            <div className="absolute inset-0 opacity-10" style={{
+              backgroundImage: `radial-gradient(circle at 20% 50%, white 1px, transparent 1px), radial-gradient(circle at 80% 20%, white 1px, transparent 1px)`,
+              backgroundSize: '30px 30px'
+            }} />
+            <div className="relative z-10 flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center">
+                  <AlertTriangle className="w-8 h-8" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold mb-1" style={{ fontFamily: 'Fredoka, sans-serif' }}>Start Your Regular Classes!</h3>
+                  <p className="text-amber-100 text-sm">
+                    {nagData.demo_count > 0
+                      ? `You've had ${nagData.demo_count} demo session${nagData.demo_count > 1 ? 's' : ''}. It's time to begin your learning journey with a dedicated teacher!`
+                      : "You haven't been assigned a teacher yet. Book a demo or contact us to get started!"
+                    }
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <Button onClick={() => navigate('/book-demo')} className="bg-white text-amber-600 hover:bg-amber-50 rounded-full px-6 font-bold shadow-lg" data-testid="nag-book-demo">
+                  <Zap className="w-4 h-4 mr-2" /> Book a Demo
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Quick Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
           <Button onClick={() => navigate('/browse-classes')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-6 py-5 font-bold" data-testid="browse-classes-button">
@@ -150,6 +185,9 @@ const StudentDashboard = () => {
           </Button>
           <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full px-6 py-5 font-bold" data-testid="wallet-button">
             <CreditCard className="w-4 h-4 mr-2" /> Wallet
+          </Button>
+          <Button onClick={() => navigate('/learning-kit')} variant="outline" className="rounded-full px-6 py-5 font-bold" data-testid="learning-kit-button">
+            <BookOpen className="w-4 h-4 mr-2" /> Learning Kit
           </Button>
           <Button onClick={() => navigate('/demo-feedback')} variant="outline" className="rounded-full px-6 py-5 font-bold" data-testid="demo-feedback-button">
             <Star className="w-4 h-4 mr-2" /> Demo Feedback

@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap, Clock, History, Search, Shield, Award, Filter } from 'lucide-react';
+import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap, Clock, History, Search, Shield, Award, Filter, BookOpen } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -257,6 +257,9 @@ const AdminDashboard = () => {
           </Button>
           <Button onClick={() => navigate('/history')} className="bg-violet-500 hover:bg-violet-600 text-white rounded-full font-bold" data-testid="admin-history-link">
             <History className="w-4 h-4 mr-2" /> History & Search
+          </Button>
+          <Button onClick={() => navigate('/learning-kit')} variant="outline" className="rounded-full font-bold" data-testid="admin-learning-kit-link">
+            <BookOpen className="w-4 h-4 mr-2" /> Learning Kit
           </Button>
         </div>
 

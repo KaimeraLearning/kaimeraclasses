@@ -1,10 +1,11 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Header
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Header, UploadFile, File, Form
+from fastapi.responses import JSONResponse, FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
@@ -12,6 +13,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import bcrypt
 import requests
+import resend
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
 
 ROOT_DIR = Path(__file__).parent
@@ -24,6 +26,13 @@ db = client[os.environ['DB_NAME']]
 
 # Stripe setup
 stripe_api_key = os.environ['STRIPE_API_KEY']
+
+# Resend setup
+resend.api_key = os.environ.get('RESEND_API_KEY', '')
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
+
+UPLOADS_DIR = ROOT_DIR / 'uploads' / 'learning_kits'
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -286,6 +295,23 @@ async def generate_teacher_code():
     )
     doc = await db.counters.find_one({"counter_id": "teacher_code"}, {"_id": 0})
     return f"KL-T{doc['seq']:04d}"
+
+
+async def send_email(to_email: str, subject: str, html_content: str):
+    """Send email via Resend (non-blocking)"""
+    try:
+        params = {
+            "from": SENDER_EMAIL,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_content
+        }
+        result = await asyncio.to_thread(resend.Emails.send, params)
+        logger.info(f"Email sent to {to_email}: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Email send failed to {to_email}: {e}")
+        return None
 
 def hash_password(password: str) -> str:
     """Hash password using bcrypt"""
@@ -2435,6 +2461,29 @@ async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str
         "created_at": datetime.now(timezone.utc).isoformat()
     })
 
+    # Email notification to student
+    await send_email(
+        demo["email"],
+        "Your Demo Session is Confirmed! - Kaimera Learning",
+        f"""<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+        <div style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6);padding:30px;border-radius:16px;color:#fff;text-align:center;">
+            <h1 style="margin:0;font-size:24px;">Demo Confirmed!</h1>
+        </div>
+        <div style="padding:20px;background:#f8fafc;border-radius:0 0 16px 16px;">
+            <p>Hi <strong>{demo['name']}</strong>,</p>
+            <p>Great news! Your demo session has been accepted by <strong>{teacher_name}</strong>.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Date</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:bold;">{demo['preferred_date']}</td></tr>
+                <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Time</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:bold;">{preferred_time}</td></tr>
+                <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Teacher</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:bold;">{teacher_name}</td></tr>
+            </table>
+            {f'<p style="background:#fef3c7;padding:12px;border-radius:8px;">Your login: <strong>{demo["email"]}</strong> / <strong>{temp_password}</strong></p>' if temp_password else ''}
+            <p style="color:#64748b;font-size:14px;">Log in to your dashboard to join the class when it's time.</p>
+        </div>
+        <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:16px;">Kaimera Learning</p>
+        </div>"""
+    )
+
     return class_id, student_id, temp_password
 
 
@@ -3150,6 +3199,27 @@ async def teacher_feedback_to_student(data: TeacherFeedbackToStudent, request: R
         "created_at": datetime.now(timezone.utc).isoformat()
     })
 
+    # Email notification to student
+    await send_email(
+        student["email"],
+        f"Performance Feedback from {user.name} - Kaimera Learning",
+        f"""<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+        <div style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6);padding:30px;border-radius:16px;color:#fff;text-align:center;">
+            <h1 style="margin:0;font-size:24px;">Teacher Feedback</h1>
+        </div>
+        <div style="padding:20px;background:#f8fafc;border-radius:0 0 16px 16px;">
+            <p>Hi <strong>{student['name']}</strong>,</p>
+            <p>Your teacher <strong>{user.name}</strong> has shared feedback about your performance:</p>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:16px 0;">
+                <p style="color:#0ea5e9;font-weight:bold;margin:0 0 8px;">Rating: {data.performance_rating.replace('_', ' ').title()}</p>
+                <p style="margin:0;color:#334155;">{data.feedback_text}</p>
+            </div>
+            <p style="color:#64748b;font-size:14px;">Keep up the great work! Log in to your dashboard for more details.</p>
+        </div>
+        <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:16px;">Kaimera Learning</p>
+        </div>"""
+    )
+
     return {"message": "Feedback sent to student"}
 
 
@@ -3306,6 +3376,206 @@ async def get_my_renewal_meetings(request: Request, authorization: Optional[str]
         meetings = await db.renewal_meetings.find({}, {"_id": 0}).sort("meeting_date", -1).to_list(100)
 
     return meetings
+
+
+# ==================== LEARNING KIT ENDPOINTS ====================
+
+@api_router.post("/admin/learning-kit/upload")
+async def upload_learning_kit(
+    title: str = Form(...),
+    grade: str = Form(...),
+    description: str = Form(""),
+    file: UploadFile = File(...),
+    request: Request = None,
+    authorization: Optional[str] = Header(None)
+):
+    """Admin uploads a learning kit file (PDF/doc) for a specific grade"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    allowed_types = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.txt', '.jpg', '.png']
+    ext = Path(file.filename).suffix.lower()
+    if ext not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"File type {ext} not allowed. Allowed: {', '.join(allowed_types)}")
+
+    kit_id = f"kit_{uuid.uuid4().hex[:12]}"
+    safe_filename = f"{kit_id}{ext}"
+    file_path = UPLOADS_DIR / safe_filename
+
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    kit_doc = {
+        "kit_id": kit_id,
+        "title": title,
+        "grade": grade,
+        "description": description,
+        "file_name": file.filename,
+        "stored_name": safe_filename,
+        "file_type": ext,
+        "file_size": len(content),
+        "uploaded_by": user.user_id,
+        "uploaded_by_name": user.name,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    insert_doc = kit_doc.copy()
+    await db.learning_kits.insert_one(insert_doc)
+
+    return {"message": f"Learning kit '{title}' uploaded for Grade {grade}", "kit_id": kit_id}
+
+
+@api_router.get("/learning-kit")
+async def list_learning_kits(grade: Optional[str] = None, request: Request = None, authorization: Optional[str] = Header(None)):
+    """Get learning kits, optionally filtered by grade"""
+    user = await get_current_user(request, authorization)
+
+    query = {}
+    if grade:
+        query["grade"] = grade
+    elif user.role == "student":
+        query["grade"] = getattr(user, "grade", None) or ""
+
+    kits = await db.learning_kits.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return kits
+
+
+@api_router.get("/learning-kit/download/{kit_id}")
+async def download_learning_kit(kit_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Download a learning kit file"""
+    user = await get_current_user(request, authorization)
+
+    kit = await db.learning_kits.find_one({"kit_id": kit_id}, {"_id": 0})
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found")
+
+    file_path = UPLOADS_DIR / kit["stored_name"]
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on server")
+
+    return FileResponse(
+        path=str(file_path),
+        filename=kit["file_name"],
+        media_type="application/octet-stream"
+    )
+
+
+@api_router.delete("/admin/learning-kit/{kit_id}")
+async def delete_learning_kit(kit_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin deletes a learning kit"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    kit = await db.learning_kits.find_one({"kit_id": kit_id}, {"_id": 0})
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found")
+
+    file_path = UPLOADS_DIR / kit["stored_name"]
+    if file_path.exists():
+        file_path.unlink()
+
+    await db.learning_kits.delete_one({"kit_id": kit_id})
+    return {"message": "Learning kit deleted"}
+
+
+@api_router.get("/learning-kit/grades")
+async def get_available_grades(request: Request, authorization: Optional[str] = Header(None)):
+    """Get all grades that have learning kits"""
+    user = await get_current_user(request, authorization)
+    grades = await db.learning_kits.distinct("grade")
+    return sorted(grades)
+
+
+# ==================== TEACHER CALENDAR ENDPOINTS ====================
+
+@api_router.post("/teacher/calendar")
+async def add_calendar_entry(request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher adds a content plan entry to their calendar"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    body = await request.json()
+    entry_id = f"cal_{uuid.uuid4().hex[:12]}"
+    entry_doc = {
+        "entry_id": entry_id,
+        "teacher_id": user.user_id,
+        "teacher_name": user.name,
+        "date": body.get("date"),
+        "title": body.get("title", ""),
+        "description": body.get("description", ""),
+        "subject": body.get("subject", ""),
+        "color": body.get("color", "#0ea5e9"),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    insert_entry = entry_doc.copy()
+    await db.teacher_calendar.insert_one(insert_entry)
+    return {"message": "Calendar entry added", "entry_id": entry_id}
+
+
+@api_router.get("/teacher/calendar")
+async def get_calendar_entries(month: Optional[str] = None, request: Request = None, authorization: Optional[str] = Header(None)):
+    """Get teacher's calendar entries, optionally by month (YYYY-MM)"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    query = {"teacher_id": user.user_id}
+    if month:
+        query["date"] = {"$regex": f"^{month}"}
+
+    entries = await db.teacher_calendar.find(query, {"_id": 0}).sort("date", 1).to_list(500)
+    return entries
+
+
+@api_router.delete("/teacher/calendar/{entry_id}")
+async def delete_calendar_entry(entry_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher removes a calendar entry"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    result = await db.teacher_calendar.delete_one({"entry_id": entry_id, "teacher_id": user.user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"message": "Calendar entry deleted"}
+
+
+# ==================== NAG SCREEN CHECK ====================
+
+@api_router.get("/student/nag-check")
+async def student_nag_check(request: Request, authorization: Optional[str] = Header(None)):
+    """Check if student needs nag screen (unassigned to regular teacher)"""
+    user = await get_current_user(request, authorization)
+    if user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only")
+
+    # Check for any active/approved assignment
+    active_assignment = await db.student_teacher_assignments.find_one(
+        {"student_id": user.user_id, "status": "approved"},
+        {"_id": 0}
+    )
+
+    # Check for any upcoming regular classes
+    regular_classes = await db.class_sessions.find(
+        {"enrolled_students.user_id": user.user_id, "is_demo": {"$ne": True}, "status": {"$in": ["scheduled", "in_progress"]}},
+        {"_id": 0}
+    ).to_list(10)
+
+    # Check demo count
+    demo_count = await db.demo_requests.count_documents(
+        {"$or": [{"student_user_id": user.user_id}, {"email": user.email}]}
+    )
+
+    show_nag = not active_assignment and len(regular_classes) == 0
+    return {
+        "show_nag": show_nag,
+        "has_assignment": active_assignment is not None,
+        "regular_class_count": len(regular_classes),
+        "demo_count": demo_count
+    }
 
 
 # Include the router in the main app
