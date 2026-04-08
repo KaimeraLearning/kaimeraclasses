@@ -11,6 +11,7 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
 - Auth: Session-based + Emergent Google OAuth
 - Payments: Stripe (test key, webhook handling)
 - Video: Jitsi Meet (free, CDN-loaded)
+- Email: Resend API (transactional emails)
 
 ## Implemented Features
 
@@ -21,66 +22,68 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
 - Teacher: approve students, create classes, weekly view, submit proofs
 - Student: view classes, cancel sessions, edit profile (state/city/country/grade), file complaints
 
-### Teacher ID System (DONE - Apr 8, 2026)
-- Auto-generated teacher codes on registration (KL-T0001 format)
-- Searchable by name, ID, or email in Counsellor + Admin dashboards
-- Teachers shown in searchable list format (not cards)
+### Teacher ID System (DONE)
+- Auto-generated teacher codes (KL-T0001 format)
+- Searchable by name/ID in Counsellor + Admin dashboards
 
-### Student Location & Grade (DONE - Apr 8, 2026)
-- Students have state, city, country, grade (class level) fields
-- Filterable by teachers via API
-- Visible in counsellor/admin student cards
+### Student Location & Grade (DONE)
+- Students have state, city, country, grade fields
+- Filterable by location/grade across dashboards
 
-### Admin Global Pricing (DONE - Apr 8, 2026)
+### Admin Global Pricing (DONE)
 - Per demo + per class amounts set globally by admin
-- Counsellor CANNOT override pricing during assignment
-- System pricing auto-applied to all assignments
+- Counsellor cannot override pricing during assignment
 
-### Proof Workflow Pipeline (DONE - Apr 8, 2026)
-- Teacher submits proof -> Counsellor verifies -> Auto-forwards to Admin
-- Admin sees clickable proof cards with full class/student/teacher details
-- Proofs filterable by date range
-- Admin approves -> Amount auto-credited to teacher wallet
-- Admin can reject with notes
+### Proof Workflow Pipeline (DONE)
+- Teacher submits -> Counsellor verifies -> Admin reviews (date-filterable) -> Auto-credits teacher wallet
 
-### Wallet & Credit System (DONE - Apr 8, 2026)
-- Dedicated /wallet page for teachers and students
-- Teacher bank details (account name, number, bank, IFSC) in profile
-- Transaction history with credit/debit display
-- Pending earnings shown for teachers (proofs awaiting admin approval)
-- Auto-credit on admin proof approval
+### Wallet & Credit System (DONE)
+- Dedicated /wallet page for teachers (bank details) and students
+- Transaction history, pending earnings display
 
-### Class Filtration (DONE - Apr 8, 2026)
-- Filter by: type (demo/regular), status (scheduled/in_progress/completed), search keyword
-- Available in Admin + Counsellor dashboards
-- Student filter by grade, city, state, country
+### Class Filtration (DONE)
+- Filter by type (demo/regular), status, search keyword
+- Student filter by grade, city, state
 
-### Badge System (DONE - Apr 8, 2026)
+### Badge System (DONE)
 - Admin assigns badges to teachers/counsellors
-- Badges displayed on profile cards and search results
-- Badge management tab in Admin dashboard
 
-### Renewal Detection (DONE - Apr 8, 2026)
-- 80% completion threshold detection
-- Alerts to counsellor, student, teacher
-- Clickable renewal -> schedule meeting with student
-- Meeting reflected on student dashboard
+### Renewal Detection (DONE)
+- 80% completion threshold alerts
+- Clickable → schedule meeting with student
 
-### Teacher Feedback to Student (DONE - Apr 8, 2026)
-- Performance rating + feedback text
-- In-app notification to student
+### Teacher Feedback (DONE)
+- Performance feedback to students (in-app notification + email)
 
-### Demo Booking Flow (DONE - Apr 8, 2026)
-- Public /book-demo form
-- Live sheet for teachers/counsellors
-- Auto-creates class + student account on acceptance
-- Post-demo feedback with preferred teacher selection
-- Max 3 demos per email, admin can grant 1 extra
+### Demo Booking Flow (DONE)
+- Public /book-demo form, live sheet, auto-class creation, post-demo feedback, demo limits
 
 ### Video Integration - Jitsi Meet (DONE)
-- Teacher starts class -> Jitsi room auto-created
-- Student joins when teacher starts
-- Screenshot capture functionality
+- Teacher starts class -> Jitsi room auto-created, student joins when started
+
+### Learning Kit System (DONE - Apr 8, 2026)
+- Admin uploads PDF/doc materials by grade level
+- Students see only their grade's materials
+- Teachers see all materials with grade filter
+- Download functionality for both roles
+- Admin can delete kits
+
+### Teacher Content Planning Calendar (DONE - Apr 8, 2026)
+- Monthly calendar view with content planning entries
+- Color-coded entries by subject/topic
+- Add/delete entries by clicking on calendar days
+- Month navigation (prev/next)
+
+### Nag Screens (DONE - Apr 8, 2026)
+- Prominent banner on student dashboard for unassigned students
+- "Start your regular classes" with demo count tracking
+- Automatically hidden when student has active teacher assignment
+
+### Email Notifications (DONE - Apr 8, 2026)
+- Resend integration for transactional emails
+- Demo acceptance email (with class details, credentials if new student)
+- Teacher feedback email (with rating and feedback content)
+- Note: Resend free tier requires domain verification for external recipients
 
 ### Other Completed Features
 - Cancel class day (max 3, day extension)
@@ -88,29 +91,29 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
 - Notification system with bell icon
 - Stripe payment webhook handling
 
-## API Endpoints
-### Auth: /api/auth/register, /api/auth/login, /api/auth/session, /api/auth/me, /api/auth/logout
-### Demo: /api/demo/request, /api/demo/live-sheet, /api/demo/accept/{id}, /api/demo/assign, /api/demo/feedback
-### Search: /api/search/teachers?q=, /api/filter/classes, /api/filter/students
-### Wallet: /api/wallet/summary
-### Proof Pipeline: /api/teacher/submit-proof -> /api/counsellor/verify-proof -> /api/admin/approved-proofs -> /api/admin/approve-proof
-### Badges: /api/admin/assign-badge, /api/admin/remove-badge
-### Renewal: /api/renewal/check, /api/renewal/schedule-meeting, /api/renewal/my-meetings
-### Teacher: /api/teacher/feedback-to-student, /api/teacher/update-profile (bank_details)
-### History: /api/history/search, /api/history/student/{id}, /api/history/teacher/{id}, /api/history/users
+## Key API Endpoints
+- Auth: /api/auth/register, login, session, me, logout
+- Demo: /api/demo/request, live-sheet, accept, assign, feedback
+- Search: /api/search/teachers, /api/filter/classes, /api/filter/students
+- Wallet: /api/wallet/summary
+- Proof Pipeline: teacher/submit-proof -> counsellor/verify-proof -> admin/approved-proofs -> admin/approve-proof
+- Badges: /api/admin/assign-badge, remove-badge
+- Renewal: /api/renewal/check, schedule-meeting, my-meetings
+- Learning Kit: /api/admin/learning-kit/upload, /api/learning-kit, /api/learning-kit/download/{id}, /api/learning-kit/grades
+- Calendar: /api/teacher/calendar (GET, POST, DELETE)
+- Nag: /api/student/nag-check
+- Feedback: /api/teacher/feedback-to-student
 
 ## DB Collections
-- users, user_sessions, class_sessions, student_teacher_assignments, transactions, payment_transactions
-- complaints, class_proofs, feedback, notifications, system_pricing
-- demo_requests, demo_extras, demo_feedback, history_logs
-- teacher_student_feedback, renewal_meetings, counters (new)
+users, user_sessions, class_sessions, student_teacher_assignments, transactions, payment_transactions,
+complaints, class_proofs, feedback, notifications, system_pricing,
+demo_requests, demo_extras, demo_feedback, history_logs,
+teacher_student_feedback, renewal_meetings, counters,
+learning_kits, teacher_calendar
 
 ## Remaining Backlog
-- P1: Learning Kit system (admin uploads by grade, students/teachers download PDFs)
-- P1: Teacher content planning calendar
-- P2: Nag screens/popups for unassigned students
-- P2: Email notifications (for demo acceptance, teacher feedback)
 - P2: Jitsi screenshot fix (use captureLargeVideoScreenshot API)
-- P2: Advanced admin dashboard (manage all features from one place)
+- P2: Verify Resend domain for production email delivery
 - P3: Complete migration of server.py into modular route files
 - P3: Real-time notifications (WebSocket push)
+- P3: Student progress reports (PDF generation)
