@@ -17,6 +17,7 @@ import BookDemo from './pages/BookDemo';
 import DemoLiveSheet from './pages/DemoLiveSheet';
 import DemoFeedback from './pages/DemoFeedback';
 import HistoryPage from './pages/HistoryPage';
+import WalletPage from './pages/WalletPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from './components/ui/sonner';
 import './App.css';
@@ -103,6 +104,11 @@ function AppRouter() {
         <Route path="/history" element={
           <ProtectedRoute>
             <HistoryPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/wallet" element={
+          <ProtectedRoute>
+            <WalletPage />
           </ProtectedRoute>
         } />
         <Route path="/class/:classId" element={

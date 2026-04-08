@@ -42,11 +42,18 @@ class User(BaseModel):
     picture: Optional[str] = None
     password_hash: Optional[str] = None
     is_approved: bool = True  # For teacher approval
-    phone: Optional[str] = None  # Only for students and counsellors, NOT teachers
+    phone: Optional[str] = None
     bio: Optional[str] = None  # Teacher profile bio
     institute: Optional[str] = None  # Student's institute
     goal: Optional[str] = None  # Student's goal
     preferred_time_slot: Optional[str] = None  # Student's preferred time
+    state: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    grade: Optional[str] = None  # Class level e.g. "9", "10", "12"
+    teacher_code: Optional[str] = None  # Auto-generated for teachers e.g. KL-T0001
+    bank_details: Optional[dict] = None  # {account_name, account_number, bank_name, ifsc_code}
+    badges: Optional[list] = None  # Admin-assigned badges
     created_at: datetime
 
 class UserRegister(BaseModel):
@@ -58,6 +65,10 @@ class UserRegister(BaseModel):
     goal: Optional[str] = None
     preferred_time_slot: Optional[str] = None
     phone: Optional[str] = None
+    state: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    grade: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -139,7 +150,6 @@ class StudentTeacherAssignment(BaseModel):
 class AssignStudentToTeacher(BaseModel):
     student_id: str
     teacher_id: str
-    credit_price: float
 
 class TeacherApprovalRequest(BaseModel):
     assignment_id: str
@@ -159,6 +169,7 @@ class CreateTeacherAccount(BaseModel):
 class UpdateTeacherProfile(BaseModel):
     bio: Optional[str] = None
     picture: Optional[str] = None
+    bank_details: Optional[dict] = None  # {account_name, account_number, bank_name, ifsc_code}
 
 class CreditAdjustment(BaseModel):
     user_id: str
@@ -186,6 +197,10 @@ class StudentProfileUpdate(BaseModel):
     goal: Optional[str] = None
     preferred_time_slot: Optional[str] = None
     phone: Optional[str] = None
+    state: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    grade: Optional[str] = None
 
 class ClassProofSubmit(BaseModel):
     class_id: str
@@ -217,6 +232,10 @@ class CreateStudentAccount(BaseModel):
     goal: Optional[str] = None
     preferred_time_slot: Optional[str] = None
     phone: Optional[str] = None
+    state: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    grade: Optional[str] = None
 
 class DemoRequestCreate(BaseModel):
     name: str
@@ -241,7 +260,32 @@ class DemoFeedbackCreate(BaseModel):
     feedback_text: str
     preferred_teacher_id: Optional[str] = None
 
+class TeacherFeedbackToStudent(BaseModel):
+    student_id: str
+    class_id: Optional[str] = None
+    feedback_text: str
+    performance_rating: str  # excellent, good, average, needs_improvement
+
+class BadgeAssign(BaseModel):
+    user_id: str
+    badge_name: str
+
+class AdminProofApproval(BaseModel):
+    proof_id: str
+    approved: bool
+    admin_notes: Optional[str] = None
+
 # ==================== HELPER FUNCTIONS ====================
+
+async def generate_teacher_code():
+    """Auto-generate unique teacher ID like KL-T0001"""
+    await db.counters.update_one(
+        {"counter_id": "teacher_code"},
+        {"$inc": {"seq": 1}},
+        upsert=True
+    )
+    doc = await db.counters.find_one({"counter_id": "teacher_code"}, {"_id": 0})
+    return f"KL-T{doc['seq']:04d}"
 
 def hash_password(password: str) -> str:
     """Hash password using bcrypt"""
@@ -983,6 +1027,8 @@ async def update_teacher_profile(profile_data: UpdateTeacherProfile, request: Re
         update_fields['bio'] = profile_data.bio
     if profile_data.picture is not None:
         update_fields['picture'] = profile_data.picture
+    if profile_data.bank_details is not None:
+        update_fields['bank_details'] = profile_data.bank_details
     
     if update_fields:
         await db.users.update_one(
@@ -1127,6 +1173,10 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
     
     # Rejected assignments don't block - student can be reassigned to a different teacher
     
+    # Get system pricing (admin-set, counsellor cannot override)
+    pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+    credit_price = pricing.get("class_price_student", 0) if pricing else 0
+    
     assignment_id = f"assign_{uuid.uuid4().hex[:12]}"
     assigned_at = datetime.now(timezone.utc)
     expires_at = assigned_at + timedelta(hours=24)
@@ -1140,7 +1190,7 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         "teacher_name": teacher['name'],
         "teacher_email": teacher['email'],
         "status": "pending",
-        "credit_price": assignment.credit_price,
+        "credit_price": credit_price,
         "assigned_at": assigned_at.isoformat(),
         "approved_at": None,
         "expires_at": expires_at.isoformat(),
@@ -1235,6 +1285,7 @@ async def create_teacher_account(teacher_data: CreateTeacherAccount, request: Re
     # Create teacher
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     password_hash = hash_password(teacher_data.password)
+    teacher_code = await generate_teacher_code()
     
     teacher_doc = {
         "user_id": user_id,
@@ -1245,14 +1296,17 @@ async def create_teacher_account(teacher_data: CreateTeacherAccount, request: Re
         "picture": None,
         "password_hash": password_hash,
         "is_approved": True,  # Admin-created teachers are auto-approved
-        "phone": None,  # Teachers cannot add phone
+        "phone": None,
         "bio": None,
+        "teacher_code": teacher_code,
+        "bank_details": None,
+        "badges": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
     await db.users.insert_one(teacher_doc)
     
-    return {"message": "Teacher account created successfully", "user_id": user_id, "email": teacher_data.email}
+    return {"message": "Teacher account created successfully", "user_id": user_id, "email": teacher_data.email, "teacher_code": teacher_code}
 
 @api_router.post("/admin/create-counsellor")
 async def create_counsellor_account(counsellor_data: CreateTeacherAccount, request: Request, authorization: Optional[str] = Header(None)):
@@ -1578,6 +1632,14 @@ async def update_student_profile(profile: StudentProfileUpdate, request: Request
         update_fields['preferred_time_slot'] = profile.preferred_time_slot
     if profile.phone is not None:
         update_fields['phone'] = profile.phone
+    if profile.state is not None:
+        update_fields['state'] = profile.state
+    if profile.city is not None:
+        update_fields['city'] = profile.city
+    if profile.country is not None:
+        update_fields['country'] = profile.country
+    if profile.grade is not None:
+        update_fields['grade'] = profile.grade
     
     if update_fields:
         await db.users.update_one({"user_id": user.user_id}, {"$set": update_fields})
@@ -1702,7 +1764,7 @@ async def get_all_proofs(request: Request, authorization: Optional[str] = Header
 
 @api_router.post("/counsellor/verify-proof")
 async def verify_class_proof(verification: ProofVerification, request: Request, authorization: Optional[str] = Header(None)):
-    """Counsellor verifies a class proof"""
+    """Counsellor verifies a class proof - if approved, forwards to Admin"""
     user = await get_current_user(request, authorization)
     if user.role not in ["counsellor", "admin"]:
         raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
@@ -1715,14 +1777,19 @@ async def verify_class_proof(verification: ProofVerification, request: Request, 
     
     new_status = "verified" if verification.approved else "rejected"
     
+    update_data = {
+        "status": new_status,
+        "reviewed_by": user.user_id,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        "reviewer_notes": verification.reviewer_notes
+    }
+    # If counsellor approves, set admin_status to pending for admin review
+    if verification.approved:
+        update_data["admin_status"] = "pending"
+    
     await db.class_proofs.update_one(
         {"proof_id": verification.proof_id},
-        {"$set": {
-            "status": new_status,
-            "reviewed_by": user.user_id,
-            "reviewed_at": datetime.now(timezone.utc).isoformat(),
-            "reviewer_notes": verification.reviewer_notes
-        }}
+        {"$set": update_data}
     )
     
     # Update class verification status
@@ -1731,34 +1798,22 @@ async def verify_class_proof(verification: ProofVerification, request: Request, 
         {"$set": {"verification_status": new_status}}
     )
     
-    # If approved, add credits to teacher's wallet
+    # If counsellor approved, notify admin(s) for final approval
     if verification.approved:
-        pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
-        if pricing:
-            cls = await db.class_sessions.find_one({"class_id": proof['class_id']}, {"_id": 0})
-            if cls and cls.get('is_demo'):
-                earning = pricing.get('demo_earning_teacher', 0)
-            else:
-                earning = pricing.get('class_earning_teacher', 0)
-            
-            if earning > 0:
-                await db.users.update_one(
-                    {"user_id": proof['teacher_id']},
-                    {"$inc": {"credits": earning}}
-                )
-                
-                txn_id = f"txn_{uuid.uuid4().hex[:12]}"
-                await db.transactions.insert_one({
-                    "transaction_id": txn_id,
-                    "user_id": proof['teacher_id'],
-                    "type": "earning",
-                    "amount": earning,
-                    "description": f"Class verified: {proof['class_title']}",
-                    "status": "completed",
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                })
+        admins = await db.users.find({"role": "admin"}, {"_id": 0}).to_list(10)
+        for admin in admins:
+            await db.notifications.insert_one({
+                "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+                "user_id": admin["user_id"],
+                "type": "proof_for_admin_review",
+                "title": "Proof Awaiting Your Approval",
+                "message": f"Counsellor {user.name} approved proof for class '{proof.get('class_title', '')}'. Credit pending your approval.",
+                "read": False,
+                "related_id": verification.proof_id,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
     
-    action = "approved" if verification.approved else "rejected"
+    action = "approved (forwarded to Admin)" if verification.approved else "rejected"
     return {"message": f"Proof {action} successfully"}
 
 # ==================== COMPLAINT ENDPOINTS ====================
@@ -2034,6 +2089,10 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
         "institute": student_data.institute,
         "goal": student_data.goal,
         "preferred_time_slot": student_data.preferred_time_slot,
+        "state": student_data.state,
+        "city": student_data.city,
+        "country": student_data.country,
+        "grade": student_data.grade,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -2792,6 +2851,463 @@ async def get_all_users_for_history(request: Request, authorization: Optional[st
     return {"students": students, "teachers": teachers}
 
 
+# ==================== ADMIN PROOF REVIEW ENDPOINTS ====================
+
+@api_router.get("/admin/approved-proofs")
+async def get_admin_pending_proofs(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    request: Request = None,
+    authorization: Optional[str] = Header(None)
+):
+    """Get proofs approved by counsellor, pending admin approval. Filterable by date."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    query = {"status": "verified", "admin_status": "pending"}
+    if date_from:
+        query["submitted_at"] = query.get("submitted_at", {})
+        query["submitted_at"]["$gte"] = date_from
+    if date_to:
+        if "submitted_at" not in query:
+            query["submitted_at"] = {}
+        query["submitted_at"]["$lte"] = date_to + "T23:59:59"
+
+    proofs = await db.class_proofs.find(query, {"_id": 0}).sort("submitted_at", -1).to_list(500)
+
+    # Enrich with class and student details
+    for proof in proofs:
+        cls = await db.class_sessions.find_one({"class_id": proof.get("class_id")}, {"_id": 0})
+        if cls:
+            proof["class_details"] = {
+                "title": cls.get("title"),
+                "subject": cls.get("subject"),
+                "date": cls.get("date"),
+                "end_date": cls.get("end_date"),
+                "is_demo": cls.get("is_demo", False),
+                "start_time": cls.get("start_time"),
+                "end_time": cls.get("end_time"),
+                "enrolled_students": cls.get("enrolled_students", [])
+            }
+        student = await db.users.find_one({"user_id": proof.get("student_id")}, {"_id": 0, "password_hash": 0})
+        if student:
+            proof["student_details"] = {"name": student.get("name"), "email": student.get("email"), "grade": student.get("grade")}
+        teacher = await db.users.find_one({"user_id": proof.get("teacher_id")}, {"_id": 0, "password_hash": 0})
+        if teacher:
+            proof["teacher_details"] = {"name": teacher.get("name"), "email": teacher.get("email"), "teacher_code": teacher.get("teacher_code")}
+
+    return proofs
+
+
+@api_router.post("/admin/approve-proof")
+async def admin_approve_proof(data: AdminProofApproval, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin final approval on proof - auto-credits teacher wallet"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    proof = await db.class_proofs.find_one({"proof_id": data.proof_id}, {"_id": 0})
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    if proof.get("admin_status") != "pending":
+        raise HTTPException(status_code=400, detail="Proof not pending admin approval")
+
+    new_status = "approved" if data.approved else "rejected"
+    await db.class_proofs.update_one(
+        {"proof_id": data.proof_id},
+        {"$set": {
+            "admin_status": new_status,
+            "admin_reviewed_by": user.user_id,
+            "admin_reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "admin_notes": data.admin_notes
+        }}
+    )
+
+    # If approved, auto-credit teacher wallet
+    if data.approved:
+        pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+        if pricing:
+            cls = await db.class_sessions.find_one({"class_id": proof['class_id']}, {"_id": 0})
+            earning = pricing.get('demo_earning_teacher', 0) if cls and cls.get('is_demo') else pricing.get('class_earning_teacher', 0)
+
+            if earning > 0:
+                await db.users.update_one(
+                    {"user_id": proof['teacher_id']},
+                    {"$inc": {"credits": earning}}
+                )
+                await db.transactions.insert_one({
+                    "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+                    "user_id": proof['teacher_id'],
+                    "type": "earning",
+                    "amount": earning,
+                    "description": f"Admin approved: {proof.get('class_title', 'Class')}",
+                    "proof_id": data.proof_id,
+                    "status": "completed",
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                })
+                # Notify teacher about credit
+                await db.notifications.insert_one({
+                    "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+                    "user_id": proof['teacher_id'],
+                    "type": "credit_earned",
+                    "title": "Credits Earned!",
+                    "message": f"{earning} credits added to your wallet for '{proof.get('class_title', 'Class')}'.",
+                    "read": False,
+                    "related_id": data.proof_id,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                })
+
+    action = "approved & teacher credited" if data.approved else "rejected"
+    return {"message": f"Proof {action} by admin"}
+
+
+# ==================== SEARCH & FILTER ENDPOINTS ====================
+
+@api_router.get("/search/teachers")
+async def search_teachers(q: str = "", request: Request = None, authorization: Optional[str] = Header(None)):
+    """Search teachers by name or teacher_code"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counsellor access only")
+
+    if not q.strip():
+        teachers = await db.users.find(
+            {"role": "teacher"},
+            {"_id": 0, "password_hash": 0}
+        ).sort("name", 1).to_list(1000)
+    else:
+        teachers = await db.users.find(
+            {"role": "teacher", "$or": [
+                {"name": {"$regex": q, "$options": "i"}},
+                {"teacher_code": {"$regex": q, "$options": "i"}},
+                {"email": {"$regex": q, "$options": "i"}}
+            ]},
+            {"_id": 0, "password_hash": 0}
+        ).sort("name", 1).to_list(1000)
+
+    return teachers
+
+
+@api_router.get("/filter/classes")
+async def filter_classes(
+    grade: Optional[str] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    is_demo: Optional[str] = None,
+    status: Optional[str] = None,
+    teacher_id: Optional[str] = None,
+    search: Optional[str] = None,
+    request: Request = None,
+    authorization: Optional[str] = Header(None)
+):
+    """Filter classes by grade, location, type, status. Admin/Counsellor only."""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counsellor access only")
+
+    query = {}
+    if is_demo is not None:
+        query["is_demo"] = is_demo.lower() == "true"
+    if status:
+        query["status"] = status
+    if teacher_id:
+        query["teacher_id"] = teacher_id
+    if search:
+        query["$or"] = [
+            {"title": {"$regex": search, "$options": "i"}},
+            {"class_id": {"$regex": search, "$options": "i"}},
+            {"subject": {"$regex": search, "$options": "i"}},
+            {"teacher_name": {"$regex": search, "$options": "i"}}
+        ]
+
+    classes = await db.class_sessions.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+
+    # Filter by student location/grade if specified
+    if grade or city or state:
+        student_query = {"role": "student"}
+        if grade:
+            student_query["grade"] = grade
+        if city:
+            student_query["city"] = {"$regex": city, "$options": "i"}
+        if state:
+            student_query["state"] = {"$regex": state, "$options": "i"}
+        matching_students = await db.users.find(student_query, {"_id": 0}).to_list(10000)
+        matching_ids = set(s["user_id"] for s in matching_students)
+        classes = [c for c in classes if any(e["user_id"] in matching_ids for e in c.get("enrolled_students", []))]
+
+    return classes
+
+
+@api_router.get("/filter/students")
+async def filter_students(
+    grade: Optional[str] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    country: Optional[str] = None,
+    search: Optional[str] = None,
+    request: Request = None,
+    authorization: Optional[str] = Header(None)
+):
+    """Filter students by location, grade, search. Teacher/Counsellor/Admin."""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["admin", "counsellor", "teacher"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    query = {"role": "student"}
+    if grade:
+        query["grade"] = grade
+    if city:
+        query["city"] = {"$regex": city, "$options": "i"}
+    if state:
+        query["state"] = {"$regex": state, "$options": "i"}
+    if country:
+        query["country"] = {"$regex": country, "$options": "i"}
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+            {"institute": {"$regex": search, "$options": "i"}}
+        ]
+
+    students = await db.users.find(query, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(1000)
+    return students
+
+
+# ==================== WALLET ENDPOINTS ====================
+
+@api_router.get("/wallet/summary")
+async def get_wallet_summary(request: Request, authorization: Optional[str] = Header(None)):
+    """Get wallet balance and transaction history"""
+    user = await get_current_user(request, authorization)
+
+    transactions = await db.transactions.find(
+        {"user_id": user.user_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+
+    # Get pending earnings (proofs pending admin approval)
+    pending_earnings = 0
+    if user.role == "teacher":
+        pending_proofs = await db.class_proofs.find(
+            {"teacher_id": user.user_id, "status": "verified", "admin_status": "pending"},
+            {"_id": 0}
+        ).to_list(100)
+        pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+        if pricing:
+            for p in pending_proofs:
+                cls = await db.class_sessions.find_one({"class_id": p.get("class_id")}, {"_id": 0})
+                if cls and cls.get("is_demo"):
+                    pending_earnings += pricing.get("demo_earning_teacher", 0)
+                else:
+                    pending_earnings += pricing.get("class_earning_teacher", 0)
+
+    return {
+        "balance": user.credits,
+        "pending_earnings": pending_earnings,
+        "bank_details": getattr(user, "bank_details", None),
+        "transactions": transactions
+    }
+
+
+# ==================== TEACHER FEEDBACK TO STUDENT ====================
+
+@api_router.post("/teacher/feedback-to-student")
+async def teacher_feedback_to_student(data: TeacherFeedbackToStudent, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher sends performance feedback to student (in-app notification)"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    student = await db.users.find_one({"user_id": data.student_id}, {"_id": 0})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    feedback_id = f"tfb_{uuid.uuid4().hex[:12]}"
+    feedback_doc = {
+        "feedback_id": feedback_id,
+        "teacher_id": user.user_id,
+        "teacher_name": user.name,
+        "student_id": data.student_id,
+        "student_name": student["name"],
+        "class_id": data.class_id,
+        "feedback_text": data.feedback_text,
+        "performance_rating": data.performance_rating,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    insert_fb = feedback_doc.copy()
+    await db.teacher_student_feedback.insert_one(insert_fb)
+
+    # In-app notification to student
+    await db.notifications.insert_one({
+        "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+        "user_id": data.student_id,
+        "type": "teacher_feedback",
+        "title": f"Feedback from {user.name}",
+        "message": f"Performance: {data.performance_rating.replace('_', ' ').title()}. {data.feedback_text}",
+        "read": False,
+        "related_id": feedback_id,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    return {"message": "Feedback sent to student"}
+
+
+# ==================== BADGE SYSTEM ====================
+
+@api_router.post("/admin/assign-badge")
+async def assign_badge(data: BadgeAssign, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin assigns a badge to a teacher or counsellor"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    target = await db.users.find_one({"user_id": data.user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target["role"] not in ["teacher", "counsellor"]:
+        raise HTTPException(status_code=400, detail="Badges can only be assigned to teachers or counsellors")
+
+    await db.users.update_one(
+        {"user_id": data.user_id},
+        {"$addToSet": {"badges": data.badge_name}}
+    )
+
+    await db.notifications.insert_one({
+        "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+        "user_id": data.user_id,
+        "type": "badge_assigned",
+        "title": "New Badge Earned!",
+        "message": f"You've been awarded the '{data.badge_name}' badge by admin.",
+        "read": False,
+        "related_id": data.badge_name,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    return {"message": f"Badge '{data.badge_name}' assigned to {target['name']}"}
+
+
+@api_router.delete("/admin/remove-badge")
+async def remove_badge(user_id: str, badge_name: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin removes a badge from a user"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$pull": {"badges": badge_name}}
+    )
+
+    return {"message": f"Badge '{badge_name}' removed"}
+
+
+# ==================== RENEWAL CHECK ====================
+
+@api_router.get("/renewal/check")
+async def check_renewals(request: Request, authorization: Optional[str] = Header(None)):
+    """Check for classes nearing 80% completion - triggers renewal alerts"""
+    user = await get_current_user(request, authorization)
+
+    query = {"status": {"$in": ["scheduled", "in_progress"]}}
+    if user.role == "teacher":
+        query["teacher_id"] = user.user_id
+    elif user.role == "student":
+        query["enrolled_students.user_id"] = user.user_id
+    elif user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    classes = await db.class_sessions.find(query, {"_id": 0}).to_list(1000)
+    renewal_needed = []
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for cls in classes:
+        try:
+            start = datetime.strptime(cls.get("date", today_str), "%Y-%m-%d")
+            end = datetime.strptime(cls.get("end_date", cls.get("date", today_str)), "%Y-%m-%d")
+            total_days = max((end - start).days, 1)
+            today_dt = datetime.strptime(today_str, "%Y-%m-%d")
+            elapsed = max((today_dt - start).days, 0)
+            pct = (elapsed / total_days) * 100 if total_days > 0 else 0
+            remaining_pct = 100 - pct
+            if pct >= 80 and remaining_pct > 0:
+                cls["completion_pct"] = round(pct, 1)
+                cls["remaining_pct"] = round(remaining_pct, 1)
+                cls["days_remaining"] = max((end - today_dt).days, 0)
+                renewal_needed.append(cls)
+        except Exception:
+            pass
+
+    return renewal_needed
+
+
+@api_router.post("/renewal/schedule-meeting")
+async def schedule_renewal_meeting(class_id: str, meeting_date: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Counsellor/Teacher schedules a renewal meeting with student"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "teacher", "admin"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    meeting_id = f"meet_{uuid.uuid4().hex[:12]}"
+    student_ids = [s["user_id"] for s in cls.get("enrolled_students", [])]
+
+    meeting_doc = {
+        "meeting_id": meeting_id,
+        "class_id": class_id,
+        "class_title": cls.get("title", ""),
+        "teacher_id": cls.get("teacher_id"),
+        "teacher_name": cls.get("teacher_name"),
+        "student_ids": student_ids,
+        "scheduled_by": user.user_id,
+        "scheduled_by_name": user.name,
+        "meeting_date": meeting_date,
+        "status": "scheduled",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    insert_meeting = meeting_doc.copy()
+    await db.renewal_meetings.insert_one(insert_meeting)
+
+    # Notify students
+    for sid in student_ids:
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": sid,
+            "type": "renewal_meeting",
+            "title": "Renewal Meeting Scheduled",
+            "message": f"A renewal meeting for '{cls.get('title', '')}' has been scheduled for {meeting_date} by {user.name}.",
+            "read": False,
+            "related_id": meeting_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    return {"message": "Renewal meeting scheduled", "meeting_id": meeting_id}
+
+
+@api_router.get("/renewal/my-meetings")
+async def get_my_renewal_meetings(request: Request, authorization: Optional[str] = Header(None)):
+    """Get renewal meetings for current user"""
+    user = await get_current_user(request, authorization)
+
+    if user.role == "student":
+        meetings = await db.renewal_meetings.find(
+            {"student_ids": user.user_id},
+            {"_id": 0}
+        ).sort("meeting_date", -1).to_list(100)
+    elif user.role == "teacher":
+        meetings = await db.renewal_meetings.find(
+            {"teacher_id": user.user_id},
+            {"_id": 0}
+        ).sort("meeting_date", -1).to_list(100)
+    else:
+        meetings = await db.renewal_meetings.find({}, {"_id": 0}).sort("meeting_date", -1).to_list(100)
+
+    return meetings
+
+
 # Include the router in the main app
 app.include_router(api_router)
 
@@ -2813,6 +3329,15 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup_event():
     await seed_admin()
+    # Backfill teacher_code for existing teachers without one
+    teachers_without_code = await db.users.find(
+        {"role": "teacher", "$or": [{"teacher_code": None}, {"teacher_code": {"$exists": False}}]},
+        {"_id": 0}
+    ).to_list(1000)
+    for t in teachers_without_code:
+        code = await generate_teacher_code()
+        await db.users.update_one({"user_id": t["user_id"]}, {"$set": {"teacher_code": code}})
+        logger.info(f"Backfilled teacher_code {code} for {t['name']}")
     logger.info("Kaimera Learning API started")
 
 @app.on_event("shutdown")

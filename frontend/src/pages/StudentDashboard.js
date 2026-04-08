@@ -19,7 +19,7 @@ const StudentDashboard = () => {
   const [pastClasses, setPastClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
-  const [profileData, setProfileData] = useState({ institute: '', goal: '', preferred_time_slot: '', phone: '' });
+  const [profileData, setProfileData] = useState({ institute: '', goal: '', preferred_time_slot: '', phone: '', state: '', city: '', country: '', grade: '' });
 
   useEffect(() => { fetchDashboardData(); }, []);
 
@@ -38,7 +38,9 @@ const StudentDashboard = () => {
       setPastClasses(dashboardData.past_classes);
       setProfileData({
         institute: userData.institute || '', goal: userData.goal || '',
-        preferred_time_slot: userData.preferred_time_slot || '', phone: userData.phone || ''
+        preferred_time_slot: userData.preferred_time_slot || '', phone: userData.phone || '',
+        state: userData.state || '', city: userData.city || '',
+        country: userData.country || '', grade: userData.grade || ''
       });
       setLoading(false);
     } catch (error) {
@@ -145,6 +147,9 @@ const StudentDashboard = () => {
           </Button>
           <Button onClick={() => navigate('/book-demo')} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full px-6 py-5 font-bold" data-testid="book-demo-button">
             <Zap className="w-4 h-4 mr-2" /> Book a Demo
+          </Button>
+          <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full px-6 py-5 font-bold" data-testid="wallet-button">
+            <CreditCard className="w-4 h-4 mr-2" /> Wallet
           </Button>
           <Button onClick={() => navigate('/demo-feedback')} variant="outline" className="rounded-full px-6 py-5 font-bold" data-testid="demo-feedback-button">
             <Star className="w-4 h-4 mr-2" /> Demo Feedback
@@ -267,15 +272,44 @@ const StudentDashboard = () => {
             <DialogTitle className="text-2xl font-bold text-slate-900">Edit Profile</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
-            <div>
-              <Label>Phone Number</Label>
-              <Input value={profileData.phone} onChange={e => setProfileData({ ...profileData, phone: e.target.value })}
-                className="rounded-xl" placeholder="Your phone number" data-testid="profile-phone-input" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Phone Number</Label>
+                <Input value={profileData.phone} onChange={e => setProfileData({ ...profileData, phone: e.target.value })}
+                  className="rounded-xl" placeholder="Your phone number" data-testid="profile-phone-input" />
+              </div>
+              <div>
+                <Label>Grade/Class</Label>
+                <select value={profileData.grade} onChange={e => setProfileData({ ...profileData, grade: e.target.value })}
+                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 bg-white h-10 text-sm" data-testid="profile-grade-input">
+                  <option value="">Select class...</option>
+                  {['1','2','3','4','5','6','7','8','9','10','11','12','UG','PG','Other'].map(g => (
+                    <option key={g} value={g}>{g === 'UG' || g === 'PG' || g === 'Other' ? g : `Class ${g}`}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div>
               <Label>Institute</Label>
               <Input value={profileData.institute} onChange={e => setProfileData({ ...profileData, institute: e.target.value })}
                 className="rounded-xl" placeholder="Your school/college/institute" data-testid="profile-institute-input" />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>City</Label>
+                <Input value={profileData.city} onChange={e => setProfileData({ ...profileData, city: e.target.value })}
+                  className="rounded-xl" placeholder="City" data-testid="profile-city-input" />
+              </div>
+              <div>
+                <Label>State</Label>
+                <Input value={profileData.state} onChange={e => setProfileData({ ...profileData, state: e.target.value })}
+                  className="rounded-xl" placeholder="State" data-testid="profile-state-input" />
+              </div>
+              <div>
+                <Label>Country</Label>
+                <Input value={profileData.country} onChange={e => setProfileData({ ...profileData, country: e.target.value })}
+                  className="rounded-xl" placeholder="Country" data-testid="profile-country-input" />
+              </div>
             </div>
             <div>
               <Label>Goal</Label>

@@ -28,7 +28,9 @@ const CounsellorDashboard = () => {
   const [studentProfile, setStudentProfile] = useState(null);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [selectedTeacherForAssign, setSelectedTeacherForAssign] = useState('');
-  const [customPrice, setCustomPrice] = useState('100');
+  const [teacherSearch, setTeacherSearch] = useState('');
+  const [teacherSearchResults, setTeacherSearchResults] = useState([]);
+  const [renewalClasses, setRenewalClasses] = useState([]);
 
   useEffect(() => { fetchDashboardData(); }, []);
 
@@ -60,6 +62,9 @@ const CounsellorDashboard = () => {
       if (expiredRes.ok) {
         setExpiredClasses(await expiredRes.json());
       }
+      // Check renewals
+      const renewalRes = await fetch(`${API}/renewal/check`, { credentials: 'include' });
+      if (renewalRes.ok) setRenewalClasses(await renewalRes.json());
       setLoading(false);
     } catch (error) {
       console.error(error);
@@ -80,8 +85,7 @@ const CounsellorDashboard = () => {
         credentials: 'include',
         body: JSON.stringify({
           student_id: selectedStudent.user_id,
-          teacher_id: selectedTeacherForAssign,
-          credit_price: parseFloat(customPrice)
+          teacher_id: selectedTeacherForAssign
         })
       });
       if (!response.ok) throw new Error((await response.json()).detail);
@@ -132,6 +136,26 @@ const CounsellorDashboard = () => {
       await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
       navigate('/login');
     } catch (error) { console.error(error); }
+  };
+
+  const handleTeacherSearch = async (query) => {
+    setTeacherSearch(query);
+    try {
+      const res = await fetch(`${API}/search/teachers?q=${encodeURIComponent(query)}`, { credentials: 'include' });
+      if (res.ok) setTeacherSearchResults(await res.json());
+    } catch { /* ignore */ }
+  };
+
+  const handleScheduleRenewal = async (classId) => {
+    const meetingDate = prompt('Enter meeting date (YYYY-MM-DD):');
+    if (!meetingDate) return;
+    try {
+      const res = await fetch(`${API}/renewal/schedule-meeting?class_id=${classId}&meeting_date=${meetingDate}`, {
+        method: 'POST', credentials: 'include'
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success('Renewal meeting scheduled!');
+    } catch (err) { toast.error(err.message); }
   };
 
   if (loading) return (
@@ -282,9 +306,11 @@ const CounsellorDashboard = () => {
                       <h3 className="font-bold text-slate-900 hover:text-sky-600 transition-colors">{student.name}</h3>
                       <p className="text-sm text-slate-600">{student.email}</p>
                       <div className="flex flex-wrap gap-2 mt-2">
+                        {student.grade && <span className="bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full text-xs font-medium">Class {student.grade}</span>}
                         {student.institute && <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-xs"><MapPin className="w-3 h-3 inline mr-1" />{student.institute}</span>}
-                        {student.goal && <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full text-xs"><Target className="w-3 h-3 inline mr-1" />{student.goal}</span>}
-                        {student.preferred_time_slot && <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full text-xs"><CalendarClock className="w-3 h-3 inline mr-1" />{student.preferred_time_slot}</span>}
+                        {student.city && <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full text-xs">{student.city}{student.state ? `, ${student.state}` : ''}</span>}
+                        {student.goal && <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full text-xs"><Target className="w-3 h-3 inline mr-1" />{student.goal}</span>}
+                        {student.preferred_time_slot && <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full text-xs"><CalendarClock className="w-3 h-3 inline mr-1" />{student.preferred_time_slot}</span>}
                       </div>
                       <p className="text-sm text-slate-500 mt-2">Credits: {student.credits}</p>
                     </div>
@@ -302,25 +328,77 @@ const CounsellorDashboard = () => {
           )}
         </div>
 
-        {/* Teachers List */}
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 mb-4">Teachers</h2>
-          {teachers.length === 0 ? (
-            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
-              <p className="text-slate-600">No teachers available</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {teachers.map(teacher => (
-                <div key={teacher.user_id} className="bg-white rounded-2xl border-2 border-slate-200 p-4 cursor-pointer hover:shadow-lg transition-all"
-                  onClick={() => handleViewTeacher(teacher)} data-testid={`teacher-card-${teacher.user_id}`}>
-                  <h3 className="font-bold text-slate-900">{teacher.name}</h3>
-                  <p className="text-sm text-slate-600">{teacher.email}</p>
-                  <p className="text-sm text-emerald-600 mt-2 font-semibold">Wallet: {teacher.credits}</p>
+        {/* Renewal Alerts */}
+        {renewalClasses.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-amber-500" /> Renewal Needed
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {renewalClasses.map(cls => (
+                <div key={cls.class_id} className="bg-amber-50 rounded-2xl border-2 border-amber-200 p-5">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h3 className="font-bold text-slate-900">{cls.title}</h3>
+                      <p className="text-sm text-slate-600">Teacher: {cls.teacher_name}</p>
+                    </div>
+                    <span className="bg-amber-200 text-amber-900 px-3 py-1 rounded-full text-xs font-semibold">
+                      {cls.completion_pct}% Done
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mb-3">{cls.days_remaining} days remaining</p>
+                  <Button onClick={() => handleScheduleRenewal(cls.class_id)} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full text-sm">
+                    Schedule Renewal Meeting
+                  </Button>
                 </div>
               ))}
             </div>
-          )}
+          </div>
+        )}
+
+        {/* Teachers Search */}
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 mb-4">Find Teacher</h2>
+          <div className="bg-white rounded-3xl p-6 border-2 border-slate-100">
+            <Input
+              placeholder="Search by teacher name, ID (KL-T...), or email..."
+              value={teacherSearch}
+              onChange={e => handleTeacherSearch(e.target.value)}
+              className="bg-slate-50 border-2 border-slate-200 rounded-xl mb-4"
+              data-testid="teacher-search-input"
+            />
+            {(teacherSearch ? teacherSearchResults : teachers).length === 0 ? (
+              <p className="text-slate-400 text-center py-4">No teachers found</p>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {(teacherSearch ? teacherSearchResults : teachers).map(teacher => (
+                  <div key={teacher.user_id}
+                    className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer border border-slate-100"
+                    onClick={() => handleViewTeacher(teacher)} data-testid={`teacher-row-${teacher.user_id}`}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-gradient-to-br from-amber-400 to-amber-500 rounded-xl flex items-center justify-center text-white font-bold text-sm">
+                        {teacher.name?.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900">{teacher.name}</p>
+                        <p className="text-xs text-slate-500">{teacher.email}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full text-xs font-medium">{teacher.teacher_code || '—'}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${teacher.is_approved ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {teacher.is_approved ? 'Approved' : 'Pending'}
+                      </span>
+                      {teacher.badges?.length > 0 && teacher.badges.map((b, i) => (
+                        <span key={i} className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs">{b}</span>
+                      ))}
+                      <span className="text-emerald-600 font-semibold text-sm">{teacher.credits} cr</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -341,13 +419,10 @@ const CounsellorDashboard = () => {
                 <select value={selectedTeacherForAssign} onChange={e => setSelectedTeacherForAssign(e.target.value)}
                   className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="teacher-select">
                   <option value="">Choose a teacher...</option>
-                  {teachers.map(t => <option key={t.user_id} value={t.user_id}>{t.name}</option>)}
+                  {teachers.map(t => <option key={t.user_id} value={t.user_id}>{t.name} ({t.teacher_code || t.email})</option>)}
                 </select>
               </div>
-              <div>
-                <Label>Credits per Class</Label>
-                <Input type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} className="rounded-xl" data-testid="custom-price-input" />
-              </div>
+              <p className="text-xs text-slate-500 bg-slate-50 rounded-lg p-2">Price per class is set globally by Admin. System pricing will apply.</p>
               <Button onClick={handleAssignStudent} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="confirm-assign-button">
                 Assign Student
               </Button>
@@ -372,6 +447,7 @@ const CounsellorDashboard = () => {
                   <div>
                     <h3 className="text-2xl font-bold">{selectedTeacher.name}</h3>
                     <p className="text-amber-100">{selectedTeacher.email}</p>
+                    {selectedTeacher.teacher_code && <p className="text-amber-200 font-mono text-sm mt-1">ID: {selectedTeacher.teacher_code}</p>}
                   </div>
                 </div>
               </div>
@@ -385,6 +461,13 @@ const CounsellorDashboard = () => {
                   <p className="text-2xl font-bold text-slate-900">{selectedTeacher.is_approved ? 'Approved' : 'Pending'}</p>
                 </div>
               </div>
+              {selectedTeacher.badges?.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedTeacher.badges.map((b, i) => (
+                    <span key={i} className="bg-violet-100 text-violet-700 px-3 py-1 rounded-full text-sm font-medium">{b}</span>
+                  ))}
+                </div>
+              )}
               <Button onClick={() => { setShowTeacherDialog(false); navigate(`/counsellor/teacher-schedule/${selectedTeacher.user_id}`); }}
                 className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold text-lg">
                 <CalendarClock className="w-5 h-5 mr-2" /> View Schedule Calendar
@@ -431,6 +514,20 @@ const CounsellorDashboard = () => {
                   <p className="text-sm text-slate-600 mb-1"><Target className="w-3 h-3 inline mr-1" />Goal</p>
                   <p className="text-lg font-semibold text-slate-900" data-testid="student-profile-goal">{selectedStudent.goal || 'Not provided'}</p>
                 </div>
+                {selectedStudent.grade && (
+                  <div className="bg-slate-50 rounded-xl p-4">
+                    <p className="text-sm text-slate-600 mb-1">Grade/Class</p>
+                    <p className="text-lg font-semibold text-slate-900">Class {selectedStudent.grade}</p>
+                  </div>
+                )}
+                {(selectedStudent.city || selectedStudent.state || selectedStudent.country) && (
+                  <div className="bg-slate-50 rounded-xl p-4">
+                    <p className="text-sm text-slate-600 mb-1">Location</p>
+                    <p className="text-lg font-semibold text-slate-900">
+                      {[selectedStudent.city, selectedStudent.state, selectedStudent.country].filter(Boolean).join(', ')}
+                    </p>
+                  </div>
+                )}
                 <div className="bg-slate-50 rounded-xl p-4 col-span-2">
                   <p className="text-sm text-slate-600 mb-1"><CalendarClock className="w-3 h-3 inline mr-1" />Preferred Time Slot</p>
                   <p className="text-lg font-semibold text-slate-900" data-testid="student-profile-timeslot">{selectedStudent.preferred_time_slot || 'Not provided'}</p>

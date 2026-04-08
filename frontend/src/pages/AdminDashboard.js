@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap, Clock, History } from 'lucide-react';
+import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap, Clock, History, Search, Shield, Award, Filter } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -26,8 +26,17 @@ const AdminDashboard = () => {
   const [creditAmount, setCreditAmount] = useState('');
   const [creditAction, setCreditAction] = useState('add');
   const [newStudent, setNewStudent] = useState({
-    name: '', email: '', password: '', institute: '', goal: '', preferred_time_slot: '', phone: ''
+    name: '', email: '', password: '', institute: '', goal: '', preferred_time_slot: '', phone: '', state: '', city: '', country: '', grade: ''
   });
+  const [pendingProofs, setPendingProofs] = useState([]);
+  const [teacherSearch, setTeacherSearch] = useState('');
+  const [teacherSearchResults, setTeacherSearchResults] = useState([]);
+  const [classFilter, setClassFilter] = useState({ search: '', is_demo: '', status: '' });
+  const [filteredClasses, setFilteredClasses] = useState([]);
+  const [badgeTarget, setBadgeTarget] = useState('');
+  const [badgeName, setBadgeName] = useState('');
+  const [proofDateFrom, setProofDateFrom] = useState('');
+  const [proofDateTo, setProofDateTo] = useState('');
 
   useEffect(() => {
     fetchDashboardData();
@@ -56,6 +65,10 @@ const AdminDashboard = () => {
       setClasses(classesData);
       setTransactions(transactionsData);
       setComplaints(complaintsData);
+      setFilteredClasses(classesData);
+      // Fetch pending proofs for admin
+      const proofsRes = await fetch(`${API}/admin/approved-proofs`, { credentials: 'include' });
+      if (proofsRes.ok) setPendingProofs(await proofsRes.json());
       setLoading(false);
     } catch (error) {
       console.error(error);
@@ -115,6 +128,64 @@ const AdminDashboard = () => {
     } catch (error) { console.error(error); }
   };
 
+  const handleTeacherSearch = async (query) => {
+    setTeacherSearch(query);
+    try {
+      const res = await fetch(`${API}/search/teachers?q=${encodeURIComponent(query)}`, { credentials: 'include' });
+      if (res.ok) setTeacherSearchResults(await res.json());
+    } catch { /* ignore */ }
+  };
+
+  const handleFilterClasses = async () => {
+    const params = new URLSearchParams();
+    if (classFilter.search) params.set('search', classFilter.search);
+    if (classFilter.is_demo) params.set('is_demo', classFilter.is_demo);
+    if (classFilter.status) params.set('status', classFilter.status);
+    try {
+      const res = await fetch(`${API}/filter/classes?${params}`, { credentials: 'include' });
+      if (res.ok) setFilteredClasses(await res.json());
+    } catch { /* ignore */ }
+  };
+
+  const handleApproveProof = async (proofId, approved) => {
+    const notes = approved ? '' : (prompt('Reason for rejection:') || '');
+    try {
+      const res = await fetch(`${API}/admin/approve-proof`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proof_id: proofId, approved, admin_notes: notes })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success(approved ? 'Proof approved & teacher credited!' : 'Proof rejected');
+      fetchDashboardData();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleFilterProofs = async () => {
+    const params = new URLSearchParams();
+    if (proofDateFrom) params.set('date_from', proofDateFrom);
+    if (proofDateTo) params.set('date_to', proofDateTo);
+    try {
+      const res = await fetch(`${API}/admin/approved-proofs?${params}`, { credentials: 'include' });
+      if (res.ok) setPendingProofs(await res.json());
+    } catch { /* ignore */ }
+  };
+
+  const handleAssignBadge = async () => {
+    if (!badgeTarget || !badgeName) { toast.error('Select user and badge name'); return; }
+    try {
+      const res = await fetch(`${API}/admin/assign-badge`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: badgeTarget, badge_name: badgeName })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success('Badge assigned!');
+      setBadgeName('');
+      fetchDashboardData();
+    } catch (err) { toast.error(err.message); }
+  };
+
   const handleCreateStudent = async (e) => {
     e.preventDefault();
     if (!newStudent.name || !newStudent.email || !newStudent.password) {
@@ -132,7 +203,7 @@ const AdminDashboard = () => {
       const data = await response.json();
       toast.success('Student account created!');
       setShowCredsResult(data.credentials);
-      setNewStudent({ name: '', email: '', password: '', institute: '', goal: '', preferred_time_slot: '', phone: '' });
+      setNewStudent({ name: '', email: '', password: '', institute: '', goal: '', preferred_time_slot: '', phone: '', state: '', city: '', country: '', grade: '' });
       fetchDashboardData();
     } catch (error) { toast.error(error.message); }
   };
@@ -190,79 +261,61 @@ const AdminDashboard = () => {
         </div>
 
         <Tabs defaultValue="teachers" className="w-full">
-          <TabsList className="mb-8">
+          <TabsList className="mb-8 flex-wrap">
             <TabsTrigger value="teachers" data-testid="teachers-tab">Teachers</TabsTrigger>
             <TabsTrigger value="students" data-testid="students-tab">Add Student</TabsTrigger>
             <TabsTrigger value="classes" data-testid="classes-tab">Classes</TabsTrigger>
+            <TabsTrigger value="proofs" data-testid="proofs-tab">Proofs ({pendingProofs.length})</TabsTrigger>
             <TabsTrigger value="transactions" data-testid="transactions-tab">Transactions</TabsTrigger>
             <TabsTrigger value="complaints" data-testid="complaints-tab">Complaints ({complaints.length})</TabsTrigger>
+            <TabsTrigger value="badges" data-testid="badges-tab">Badges</TabsTrigger>
           </TabsList>
 
           <TabsContent value="teachers">
-            <h2 className="text-2xl font-bold text-slate-900 mb-4">Teacher Approvals</h2>
-            {teachers.length === 0 ? (
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">Teachers Management</h2>
+            <Input placeholder="Search by name, ID (KL-T...), or email..." value={teacherSearch}
+              onChange={e => handleTeacherSearch(e.target.value)}
+              className="mb-4 bg-white border-2 border-slate-200 rounded-xl" data-testid="admin-teacher-search" />
+            {(teacherSearch ? teacherSearchResults : teachers).length === 0 ? (
               <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
-                <p className="text-slate-600">No teachers to display</p>
+                <p className="text-slate-600">No teachers found</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {teachers.map((teacher) => (
-                  <div
-                    key={teacher.user_id}
-                    className="bg-white rounded-2xl border-2 border-slate-200 p-6"
-                    data-testid={`teacher-card-${teacher.user_id}`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <h3 className="font-bold text-slate-900">{teacher.name}</h3>
-                        <p className="text-sm text-slate-600">{teacher.email}</p>
-                        <p className="text-sm text-slate-500 mt-2">Credits: {teacher.credits}</p>
+              <div className="space-y-3">
+                {(teacherSearch ? teacherSearchResults : teachers).map(teacher => (
+                  <div key={teacher.user_id} className="bg-white rounded-2xl border-2 border-slate-100 p-5 flex items-center justify-between" data-testid={`admin-teacher-${teacher.user_id}`}>
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-amber-400 to-amber-500 rounded-xl flex items-center justify-center text-white font-bold">
+                        {teacher.name?.charAt(0)}
                       </div>
                       <div>
-                        {teacher.is_approved ? (
-                          <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-xs font-semibold">
-                            Approved
-                          </span>
-                        ) : (
-                          <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-semibold">
-                            Pending
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-slate-900">{teacher.name}</h3>
+                          <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full text-xs font-mono">{teacher.teacher_code || '—'}</span>
+                          {teacher.badges?.map((b, i) => (
+                            <span key={i} className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs">{b}</span>
+                          ))}
+                        </div>
+                        <p className="text-sm text-slate-500">{teacher.email}</p>
+                        <p className="text-xs text-emerald-600 font-semibold">Wallet: {teacher.credits} credits</p>
                       </div>
                     </div>
-                    <div className="flex gap-2 mt-4">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${teacher.is_approved ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {teacher.is_approved ? 'Approved' : 'Pending'}
+                      </span>
                       {!teacher.is_approved && (
                         <>
-                          <Button
-                            onClick={() => handleApproveTeacher(teacher.user_id, true)}
-                            className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full"
-                            data-testid={`approve-teacher-button-${teacher.user_id}`}
-                          >
-                            <Check className="w-4 h-4 mr-2" />
-                            Approve
+                          <Button onClick={() => handleApproveTeacher(teacher.user_id, true)} size="sm" className="bg-emerald-500 text-white rounded-full" data-testid={`approve-${teacher.user_id}`}>
+                            <Check className="w-4 h-4" />
                           </Button>
-                          <Button
-                            onClick={() => handleApproveTeacher(teacher.user_id, false)}
-                            variant="outline"
-                            className="flex-1 rounded-full"
-                            data-testid={`reject-teacher-button-${teacher.user_id}`}
-                          >
-                            <X className="w-4 h-4 mr-2" />
-                            Reject
+                          <Button onClick={() => handleApproveTeacher(teacher.user_id, false)} size="sm" variant="outline" className="rounded-full border-red-200 text-red-600" data-testid={`reject-${teacher.user_id}`}>
+                            <X className="w-4 h-4" />
                           </Button>
                         </>
                       )}
-                      <Button
-                        onClick={() => {
-                          setSelectedUser(teacher.user_id);
-                          setShowCreditsDialog(true);
-                        }}
-                        variant="outline"
-                        className="rounded-full"
-                        data-testid={`adjust-credits-button-${teacher.user_id}`}
-                      >
-                        <DollarSign className="w-4 h-4 mr-2" />
-                        Adjust Credits
+                      <Button onClick={() => { setSelectedUser(teacher.user_id); setShowCreditsDialog(true); }} size="sm" variant="outline" className="rounded-full">
+                        <DollarSign className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
@@ -300,7 +353,19 @@ const AdminDashboard = () => {
                     <div><Label>Email *</Label><Input type="email" value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} className="rounded-xl" required data-testid="student-email-input" /></div>
                     <div><Label>Password *</Label><Input value={newStudent.password} onChange={e => setNewStudent({...newStudent, password: e.target.value})} className="rounded-xl" required data-testid="student-password-input" /></div>
                     <div><Label>Phone</Label><Input value={newStudent.phone} onChange={e => setNewStudent({...newStudent, phone: e.target.value})} className="rounded-xl" data-testid="student-phone-input" /></div>
+                    <div><Label>Grade/Class</Label>
+                      <select value={newStudent.grade} onChange={e => setNewStudent({...newStudent, grade: e.target.value})}
+                        className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 bg-white h-10 text-sm" data-testid="student-grade-input">
+                        <option value="">Select class...</option>
+                        {['1','2','3','4','5','6','7','8','9','10','11','12','UG','PG','Other'].map(g => (
+                          <option key={g} value={g}>{g === 'UG' || g === 'PG' || g === 'Other' ? g : `Class ${g}`}</option>
+                        ))}
+                      </select>
+                    </div>
                     <div><Label>Institute</Label><Input value={newStudent.institute} onChange={e => setNewStudent({...newStudent, institute: e.target.value})} className="rounded-xl" data-testid="student-institute-input" /></div>
+                    <div><Label>City</Label><Input value={newStudent.city} onChange={e => setNewStudent({...newStudent, city: e.target.value})} className="rounded-xl" placeholder="City" data-testid="student-city-input" /></div>
+                    <div><Label>State</Label><Input value={newStudent.state} onChange={e => setNewStudent({...newStudent, state: e.target.value})} className="rounded-xl" placeholder="State" data-testid="student-state-input" /></div>
+                    <div><Label>Country</Label><Input value={newStudent.country} onChange={e => setNewStudent({...newStudent, country: e.target.value})} className="rounded-xl" placeholder="Country" data-testid="student-country-input" /></div>
                     <div><Label>Goal</Label><Input value={newStudent.goal} onChange={e => setNewStudent({...newStudent, goal: e.target.value})} className="rounded-xl" data-testid="student-goal-input" /></div>
                     <div className="col-span-2"><Label>Preferred Time Slot</Label><Input value={newStudent.preferred_time_slot} onChange={e => setNewStudent({...newStudent, preferred_time_slot: e.target.value})} className="rounded-xl" placeholder="e.g., Weekdays 5-7 PM" data-testid="student-timeslot-input" /></div>
                   </div>
@@ -314,26 +379,62 @@ const AdminDashboard = () => {
 
           <TabsContent value="classes">
             <h2 className="text-2xl font-bold text-slate-900 mb-4">All Classes</h2>
-            {classes.length === 0 ? (
+            {/* Filters */}
+            <div className="bg-white rounded-2xl border-2 border-slate-100 p-4 mb-4 flex flex-wrap gap-3 items-end">
+              <div className="flex-1 min-w-[200px]">
+                <Label className="text-xs text-slate-500">Search</Label>
+                <Input placeholder="Name, ID, subject..." value={classFilter.search}
+                  onChange={e => setClassFilter({...classFilter, search: e.target.value})}
+                  className="rounded-xl text-sm" data-testid="class-search-input" />
+              </div>
+              <div>
+                <Label className="text-xs text-slate-500">Type</Label>
+                <select value={classFilter.is_demo} onChange={e => setClassFilter({...classFilter, is_demo: e.target.value})}
+                  className="rounded-xl border-2 border-slate-200 px-3 py-2 text-sm h-10" data-testid="class-type-filter">
+                  <option value="">All</option>
+                  <option value="true">Demo</option>
+                  <option value="false">Regular</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs text-slate-500">Status</Label>
+                <select value={classFilter.status} onChange={e => setClassFilter({...classFilter, status: e.target.value})}
+                  className="rounded-xl border-2 border-slate-200 px-3 py-2 text-sm h-10" data-testid="class-status-filter">
+                  <option value="">All</option>
+                  <option value="scheduled">Scheduled</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </div>
+              <Button onClick={handleFilterClasses} className="bg-sky-500 hover:bg-sky-600 text-white rounded-xl h-10 px-4" data-testid="apply-class-filter">
+                <Filter className="w-4 h-4 mr-1" /> Filter
+              </Button>
+            </div>
+            {filteredClasses.length === 0 ? (
               <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
-                <p className="text-slate-600">No classes created yet</p>
+                <p className="text-slate-600">No classes found</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {classes.map((cls) => (
-                  <div
-                    key={cls.class_id}
-                    className="bg-white rounded-2xl border-2 border-slate-200 p-4"
-                    data-testid={`class-card-${cls.class_id}`}
-                  >
-                    <h3 className="font-bold text-slate-900">{cls.title}</h3>
-                    <p className="text-sm text-slate-600">{cls.teacher_name}</p>
-                    <p className="text-xs text-slate-500 mt-2">
-                      {cls.enrolled_students.length} / {cls.max_students} students
-                    </p>
-                    <span className="inline-block mt-2 bg-sky-100 text-sky-800 px-2 py-1 rounded-full text-xs font-semibold">
-                      {cls.status}
-                    </span>
+              <div className="space-y-2">
+                {filteredClasses.map(cls => (
+                  <div key={cls.class_id} className="bg-white rounded-2xl border border-slate-100 p-4 flex items-center justify-between hover:bg-slate-50 transition-colors" data-testid={`class-row-${cls.class_id}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${cls.is_demo ? 'bg-violet-500' : 'bg-sky-500'}`} />
+                      <div>
+                        <p className="font-semibold text-slate-900 text-sm">{cls.title}</p>
+                        <p className="text-xs text-slate-500">Teacher: {cls.teacher_name} | {cls.date} - {cls.end_date || cls.date}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500">{cls.class_id}</span>
+                      {cls.is_demo && <span className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-xs">Demo</span>}
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        cls.status === 'scheduled' ? 'bg-sky-100 text-sky-700' :
+                        cls.status === 'in_progress' ? 'bg-emerald-100 text-emerald-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>{cls.status}</span>
+                      <span className="text-xs text-slate-600">{cls.enrolled_students?.length || 0}/{cls.max_students} students</span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -406,6 +507,128 @@ const AdminDashboard = () => {
             <Button onClick={() => navigate('/complaints')} className="mt-4 bg-sky-500 hover:bg-sky-600 text-white rounded-full">
               <MessageSquare className="w-4 h-4 mr-2" /> Manage Complaints
             </Button>
+          </TabsContent>
+
+          <TabsContent value="proofs">
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">Proof Approvals (Counsellor-Verified)</h2>
+            <div className="flex flex-wrap gap-3 items-end mb-4">
+              <div>
+                <Label className="text-xs text-slate-500">Date From</Label>
+                <Input type="date" value={proofDateFrom} onChange={e => setProofDateFrom(e.target.value)}
+                  className="rounded-xl text-sm w-44" data-testid="proof-date-from" />
+              </div>
+              <div>
+                <Label className="text-xs text-slate-500">Date To</Label>
+                <Input type="date" value={proofDateTo} onChange={e => setProofDateTo(e.target.value)}
+                  className="rounded-xl text-sm w-44" data-testid="proof-date-to" />
+              </div>
+              <Button onClick={handleFilterProofs} className="bg-sky-500 hover:bg-sky-600 text-white rounded-xl h-10 px-4" data-testid="filter-proofs-btn">
+                <Filter className="w-4 h-4 mr-1" /> Filter
+              </Button>
+            </div>
+            {pendingProofs.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
+                <Shield className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-600">No proofs pending your approval</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {pendingProofs.map(proof => (
+                  <div key={proof.proof_id} className="bg-white rounded-2xl border-2 border-slate-100 p-5" data-testid={`proof-${proof.proof_id}`}>
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <h3 className="font-bold text-slate-900">{proof.class_title || proof.class_details?.title || 'Class'}</h3>
+                        <p className="text-sm text-slate-500">Submitted: {proof.submitted_at ? new Date(proof.submitted_at).toLocaleDateString() : '—'}</p>
+                      </div>
+                      <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-semibold">
+                        Awaiting Admin
+                      </span>
+                    </div>
+                    {proof.class_details && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                        <div className="bg-slate-50 rounded-lg p-2 text-xs">
+                          <p className="text-slate-500">Subject</p>
+                          <p className="font-medium text-slate-800">{proof.class_details.subject}</p>
+                        </div>
+                        <div className="bg-slate-50 rounded-lg p-2 text-xs">
+                          <p className="text-slate-500">Date</p>
+                          <p className="font-medium text-slate-800">{proof.class_details.date}</p>
+                        </div>
+                        <div className="bg-slate-50 rounded-lg p-2 text-xs">
+                          <p className="text-slate-500">Type</p>
+                          <p className="font-medium text-slate-800">{proof.class_details.is_demo ? 'Demo' : 'Regular'}</p>
+                        </div>
+                        <div className="bg-slate-50 rounded-lg p-2 text-xs">
+                          <p className="text-slate-500">Time</p>
+                          <p className="font-medium text-slate-800">{proof.class_details.start_time} - {proof.class_details.end_time}</p>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-4 mb-3 text-sm">
+                      {proof.teacher_details && (
+                        <span className="text-slate-600">Teacher: <strong>{proof.teacher_details.name}</strong> ({proof.teacher_details.teacher_code || '—'})</span>
+                      )}
+                      {proof.student_details && (
+                        <span className="text-slate-600">Student: <strong>{proof.student_details.name}</strong></span>
+                      )}
+                    </div>
+                    {proof.description && <p className="text-sm text-slate-600 bg-slate-50 rounded-lg p-3 mb-3">{proof.description}</p>}
+                    <div className="flex gap-2">
+                      <Button onClick={() => handleApproveProof(proof.proof_id, true)} className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-full flex-1" data-testid={`approve-proof-${proof.proof_id}`}>
+                        <Check className="w-4 h-4 mr-1" /> Approve & Credit Teacher
+                      </Button>
+                      <Button onClick={() => handleApproveProof(proof.proof_id, false)} variant="outline" className="rounded-full border-red-200 text-red-600 flex-1" data-testid={`reject-proof-${proof.proof_id}`}>
+                        <X className="w-4 h-4 mr-1" /> Reject
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="badges">
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">Badge Management</h2>
+            <div className="bg-white rounded-3xl border-2 border-slate-100 p-6 max-w-xl mb-6">
+              <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><Award className="w-5 h-5 text-violet-500" /> Assign Badge</h3>
+              <div className="space-y-3">
+                <div>
+                  <Label>Select Teacher/Counsellor</Label>
+                  <select value={badgeTarget} onChange={e => setBadgeTarget(e.target.value)}
+                    className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="badge-user-select">
+                    <option value="">Choose...</option>
+                    <optgroup label="Teachers">
+                      {teachers.map(t => <option key={t.user_id} value={t.user_id}>{t.name} ({t.teacher_code || t.email})</option>)}
+                    </optgroup>
+                  </select>
+                </div>
+                <div>
+                  <Label>Badge Name</Label>
+                  <Input value={badgeName} onChange={e => setBadgeName(e.target.value)}
+                    placeholder="e.g., Star Teacher, Top Performer, Mentor"
+                    className="rounded-xl" data-testid="badge-name-input" />
+                </div>
+                <Button onClick={handleAssignBadge} className="bg-violet-500 hover:bg-violet-600 text-white rounded-full" data-testid="assign-badge-btn">
+                  <Award className="w-4 h-4 mr-2" /> Assign Badge
+                </Button>
+              </div>
+            </div>
+            {/* Show users with badges */}
+            <div className="space-y-2">
+              {teachers.filter(t => t.badges?.length > 0).map(t => (
+                <div key={t.user_id} className="bg-white rounded-xl border border-slate-100 p-3 flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900 text-sm">{t.name}</p>
+                    <p className="text-xs text-slate-500">{t.teacher_code || t.email}</p>
+                  </div>
+                  <div className="flex gap-1">
+                    {t.badges.map((b, i) => (
+                      <span key={i} className="bg-violet-100 text-violet-700 px-3 py-1 rounded-full text-xs font-medium">{b}</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </TabsContent>
         </Tabs>
       </div>
