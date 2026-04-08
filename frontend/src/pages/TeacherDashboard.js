@@ -362,10 +362,10 @@ const TeacherDashboard = () => {
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="bg-sky-100 text-sky-700 px-3 py-1 rounded-full text-xs font-semibold">{studentGroup.classes.length} classes</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="rounded-full"
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className="rounded-full p-1.5 hover:bg-slate-100 transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             setFeedbackTarget(studentGroup);
@@ -374,7 +374,7 @@ const TeacherDashboard = () => {
                           data-testid={`feedback-btn-${studentGroup.student_id}`}
                         >
                           <Star className="w-4 h-4 text-amber-500" />
-                        </Button>
+                        </span>
                         {isExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
                       </div>
                     </button>
