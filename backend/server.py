@@ -51,6 +51,10 @@ class UserRegister(BaseModel):
     password: str
     name: str
     role: str = "student"
+    institute: Optional[str] = None
+    goal: Optional[str] = None
+    preferred_time_slot: Optional[str] = None
+    phone: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -85,6 +89,7 @@ class ClassSessionCreate(BaseModel):
     max_students: int
     assigned_student_id: str  # REQUIRED - Teacher must select which student
     duration_days: int  # How many days this class will run
+    is_demo: bool = False  # Whether this is a demo session
 
 class BookingRequest(BaseModel):
     class_id: str
@@ -172,6 +177,34 @@ class PaymentTransaction(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
+
+class StudentProfileUpdate(BaseModel):
+    institute: Optional[str] = None
+    goal: Optional[str] = None
+    preferred_time_slot: Optional[str] = None
+    phone: Optional[str] = None
+
+class ClassProofSubmit(BaseModel):
+    class_id: str
+    feedback_text: str
+    student_performance: str  # excellent, good, average, needs_improvement
+    topics_covered: str
+    screenshot_base64: Optional[str] = None
+
+class ProofVerification(BaseModel):
+    proof_id: str
+    approved: bool
+    reviewer_notes: Optional[str] = None
+
+class ComplaintCreate(BaseModel):
+    subject: str
+    description: str
+    related_class_id: Optional[str] = None
+
+class ComplaintResolve(BaseModel):
+    complaint_id: str
+    resolution: str
+    status: str  # resolved or closed
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -288,8 +321,11 @@ async def register(user_data: UserRegister):
         "picture": None,
         "password_hash": password_hash,
         "is_approved": True,
-        "phone": None,
+        "phone": user_data.phone,
         "bio": None,
+        "institute": user_data.institute,
+        "goal": user_data.goal,
+        "preferred_time_slot": user_data.preferred_time_slot,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -661,8 +697,11 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     if not pricing:
         raise HTTPException(status_code=500, detail="System pricing not configured")
     
-    # Use custom price for this student from assignment
-    credits_required = assignment['credit_price']
+    # Use demo price or custom assignment price
+    if class_data.is_demo:
+        credits_required = pricing.get('demo_price_student', 0)
+    else:
+        credits_required = assignment['credit_price']
     
     # Calculate end date based on duration
     start_date = datetime.fromisoformat(class_data.date)
@@ -677,6 +716,7 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
         "title": class_data.title,
         "subject": class_data.subject,
         "class_type": class_data.class_type,
+        "is_demo": class_data.is_demo,
         "date": class_data.date,
         "end_date": end_date.isoformat().split('T')[0],  # End date
         "duration_days": class_data.duration_days,
@@ -687,6 +727,7 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
         "assigned_student_id": class_data.assigned_student_id,  # Class created for specific student
         "enrolled_students": [],  # Will auto-enroll student after creation
         "status": "scheduled",
+        "verification_status": "pending",  # pending, submitted, verified, rejected
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -954,8 +995,8 @@ async def get_all_classes(request: Request, authorization: Optional[str] = Heade
     """Get all classes"""
     user = await get_current_user(request, authorization)
     
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access only")
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counsellor access only")
     
     classes = await db.class_sessions.find({}, {"_id": 0}).to_list(1000)
     
@@ -1448,6 +1489,330 @@ async def counsellor_dashboard(request: Request, authorization: Optional[str] = 
         "active_assignments": active_assignments,
         "rejected_assignments": rejected_assignments
     }
+
+# ==================== STUDENT PROFILE ENDPOINTS ====================
+
+@api_router.post("/student/update-profile")
+async def update_student_profile(profile: StudentProfileUpdate, request: Request, authorization: Optional[str] = Header(None)):
+    """Student updates their profile details"""
+    user = await get_current_user(request, authorization)
+    if user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only")
+    
+    update_fields = {}
+    if profile.institute is not None:
+        update_fields['institute'] = profile.institute
+    if profile.goal is not None:
+        update_fields['goal'] = profile.goal
+    if profile.preferred_time_slot is not None:
+        update_fields['preferred_time_slot'] = profile.preferred_time_slot
+    if profile.phone is not None:
+        update_fields['phone'] = profile.phone
+    
+    if update_fields:
+        await db.users.update_one({"user_id": user.user_id}, {"$set": update_fields})
+    
+    return {"message": "Profile updated successfully"}
+
+@api_router.get("/counsellor/student-profile/{student_id}")
+async def get_student_profile(student_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Get detailed student profile for counsellor view"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+    
+    student = await db.users.find_one({"user_id": student_id, "role": "student"}, {"_id": 0, "password_hash": 0})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    
+    # Get assignment info
+    assignment = await db.student_teacher_assignments.find_one(
+        {"student_id": student_id, "status": {"$in": ["pending", "approved"]}},
+        {"_id": 0}
+    )
+    
+    # Get class history
+    classes = await db.class_sessions.find(
+        {"enrolled_students.user_id": student_id},
+        {"_id": 0}
+    ).to_list(100)
+    
+    return {
+        "student": student,
+        "current_assignment": assignment,
+        "class_history": classes
+    }
+
+# ==================== CLASS PROOF/VERIFICATION ENDPOINTS ====================
+
+@api_router.post("/teacher/submit-proof")
+async def submit_class_proof(proof: ClassProofSubmit, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher submits proof after completing a class"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    
+    cls = await db.class_sessions.find_one({"class_id": proof.class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if cls['teacher_id'] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not your class")
+    
+    # Check if proof already submitted
+    existing = await db.class_proofs.find_one({"class_id": proof.class_id}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Proof already submitted for this class")
+    
+    proof_id = f"proof_{uuid.uuid4().hex[:12]}"
+    proof_doc = {
+        "proof_id": proof_id,
+        "class_id": proof.class_id,
+        "class_title": cls['title'],
+        "teacher_id": user.user_id,
+        "teacher_name": user.name,
+        "student_id": cls.get('assigned_student_id', ''),
+        "feedback_text": proof.feedback_text,
+        "student_performance": proof.student_performance,
+        "topics_covered": proof.topics_covered,
+        "screenshot_base64": proof.screenshot_base64,
+        "status": "pending",
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "reviewer_notes": None
+    }
+    
+    await db.class_proofs.insert_one(proof_doc)
+    
+    # Update class verification status
+    await db.class_sessions.update_one(
+        {"class_id": proof.class_id},
+        {"$set": {"verification_status": "submitted"}}
+    )
+    
+    return {"message": "Proof submitted successfully", "proof_id": proof_id}
+
+@api_router.get("/teacher/my-proofs")
+async def get_teacher_proofs(request: Request, authorization: Optional[str] = Header(None)):
+    """Get all proofs submitted by this teacher"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    
+    proofs = await db.class_proofs.find(
+        {"teacher_id": user.user_id},
+        {"_id": 0, "screenshot_base64": 0}
+    ).to_list(1000)
+    
+    return proofs
+
+@api_router.get("/counsellor/pending-proofs")
+async def get_pending_proofs(request: Request, authorization: Optional[str] = Header(None)):
+    """Get all pending class proofs for counsellor verification"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+    
+    proofs = await db.class_proofs.find(
+        {"status": "pending"},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    return proofs
+
+@api_router.get("/counsellor/all-proofs")
+async def get_all_proofs(request: Request, authorization: Optional[str] = Header(None)):
+    """Get all class proofs"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+    
+    proofs = await db.class_proofs.find({}, {"_id": 0}).to_list(1000)
+    return proofs
+
+@api_router.post("/counsellor/verify-proof")
+async def verify_class_proof(verification: ProofVerification, request: Request, authorization: Optional[str] = Header(None)):
+    """Counsellor verifies a class proof"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+    
+    proof = await db.class_proofs.find_one({"proof_id": verification.proof_id}, {"_id": 0})
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    if proof['status'] != "pending":
+        raise HTTPException(status_code=400, detail="Proof already processed")
+    
+    new_status = "verified" if verification.approved else "rejected"
+    
+    await db.class_proofs.update_one(
+        {"proof_id": verification.proof_id},
+        {"$set": {
+            "status": new_status,
+            "reviewed_by": user.user_id,
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "reviewer_notes": verification.reviewer_notes
+        }}
+    )
+    
+    # Update class verification status
+    await db.class_sessions.update_one(
+        {"class_id": proof['class_id']},
+        {"$set": {"verification_status": new_status}}
+    )
+    
+    # If approved, add credits to teacher's wallet
+    if verification.approved:
+        pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+        if pricing:
+            cls = await db.class_sessions.find_one({"class_id": proof['class_id']}, {"_id": 0})
+            if cls and cls.get('is_demo'):
+                earning = pricing.get('demo_earning_teacher', 0)
+            else:
+                earning = pricing.get('class_earning_teacher', 0)
+            
+            if earning > 0:
+                await db.users.update_one(
+                    {"user_id": proof['teacher_id']},
+                    {"$inc": {"credits": earning}}
+                )
+                
+                txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+                await db.transactions.insert_one({
+                    "transaction_id": txn_id,
+                    "user_id": proof['teacher_id'],
+                    "type": "earning",
+                    "amount": earning,
+                    "description": f"Class verified: {proof['class_title']}",
+                    "status": "completed",
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                })
+    
+    action = "approved" if verification.approved else "rejected"
+    return {"message": f"Proof {action} successfully"}
+
+# ==================== COMPLAINT ENDPOINTS ====================
+
+@api_router.post("/complaints/create")
+async def create_complaint(complaint: ComplaintCreate, request: Request, authorization: Optional[str] = Header(None)):
+    """Create a new complaint"""
+    user = await get_current_user(request, authorization)
+    if user.role == "admin":
+        raise HTTPException(status_code=403, detail="Admin cannot create complaints")
+    
+    complaint_id = f"complaint_{uuid.uuid4().hex[:12]}"
+    complaint_doc = {
+        "complaint_id": complaint_id,
+        "raised_by": user.user_id,
+        "raised_by_name": user.name,
+        "raised_by_role": user.role,
+        "subject": complaint.subject,
+        "description": complaint.description,
+        "related_class_id": complaint.related_class_id,
+        "status": "open",
+        "resolution": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "resolved_at": None
+    }
+    
+    await db.complaints.insert_one(complaint_doc)
+    return {"message": "Complaint submitted successfully", "complaint_id": complaint_id}
+
+@api_router.get("/complaints/my")
+async def get_my_complaints(request: Request, authorization: Optional[str] = Header(None)):
+    """Get complaints raised by current user"""
+    user = await get_current_user(request, authorization)
+    complaints = await db.complaints.find(
+        {"raised_by": user.user_id},
+        {"_id": 0}
+    ).to_list(1000)
+    return complaints
+
+@api_router.get("/admin/complaints")
+async def get_all_complaints(request: Request, authorization: Optional[str] = Header(None)):
+    """Admin views all complaints"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    complaints = await db.complaints.find({}, {"_id": 0}).to_list(1000)
+    return complaints
+
+@api_router.post("/admin/resolve-complaint")
+async def resolve_complaint(resolution: ComplaintResolve, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin resolves a complaint"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    
+    complaint = await db.complaints.find_one({"complaint_id": resolution.complaint_id}, {"_id": 0})
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    
+    await db.complaints.update_one(
+        {"complaint_id": resolution.complaint_id},
+        {"$set": {
+            "status": resolution.status,
+            "resolution": resolution.resolution,
+            "resolved_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {"message": f"Complaint {resolution.status}"}
+
+# ==================== AUTO-REASSIGNMENT ENDPOINTS ====================
+
+@api_router.get("/counsellor/expired-classes")
+async def get_expired_classes(request: Request, authorization: Optional[str] = Header(None)):
+    """Get classes whose duration has ended for reassignment decisions"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+    
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime('%Y-%m-%d')
+    
+    # Find classes with end_date in the past
+    all_classes = await db.class_sessions.find(
+        {"status": "scheduled"},
+        {"_id": 0}
+    ).to_list(10000)
+    
+    expired_classes = []
+    for cls in all_classes:
+        end_date_str = cls.get('end_date', cls['date'])
+        if end_date_str < today_str:
+            # Calculate days since expiry
+            end_date = datetime.fromisoformat(end_date_str)
+            days_since = (now - end_date.replace(tzinfo=timezone.utc)).days
+            cls['days_since_expiry'] = days_since
+            cls['can_rebook'] = days_since <= 3  # Within 3 working days
+            expired_classes.append(cls)
+    
+    return expired_classes
+
+@api_router.post("/counsellor/reassign-student")
+async def reassign_student(data: Dict[str, Any], request: Request, authorization: Optional[str] = Header(None)):
+    """Counsellor reassigns or releases a student after class duration ends"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+    
+    student_id = data.get('student_id')
+    action = data.get('action')  # 'rebook' or 'release'
+    
+    if action == "release":
+        # Set current assignment to expired, making student available for reassignment
+        await db.student_teacher_assignments.update_many(
+            {"student_id": student_id, "status": "approved"},
+            {"$set": {"status": "completed"}}
+        )
+        return {"message": "Student released for reassignment"}
+    elif action == "rebook":
+        # Keep the current assignment active (no change needed)
+        return {"message": "Student kept with current teacher for rebooking"}
+    
+    raise HTTPException(status_code=400, detail="Invalid action")
 
 # Include the router in the main app
 app.include_router(api_router)

@@ -3,11 +3,16 @@ import Login from './pages/Login';
 import AuthCallback from './pages/AuthCallback';
 import StudentDashboard from './pages/StudentDashboard';
 import TeacherDashboard from './pages/TeacherDashboard';
+import TeacherClasses from './pages/TeacherClasses';
 import AdminDashboard from './pages/AdminDashboard';
 import CounsellorDashboard from './pages/CounsellorDashboard';
+import CounsellorStudents from './pages/CounsellorStudents';
+import CounsellorProofs from './pages/CounsellorProofs';
+import TeacherSchedule from './pages/TeacherSchedule';
 import BrowseClasses from './pages/BrowseClasses';
 import VideoClass from './pages/VideoClass';
 import PaymentSuccess from './pages/PaymentSuccess';
+import ComplaintsPage from './pages/ComplaintsPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from './components/ui/sonner';
 import './App.css';
@@ -44,11 +49,31 @@ function AppRouter() {
             <TeacherDashboard />
           </ProtectedRoute>
         } />
+        <Route path="/teacher-classes" element={
+          <ProtectedRoute requiredRole="teacher">
+            <TeacherClasses />
+          </ProtectedRoute>
+        } />
         
         {/* Counsellor Routes */}
         <Route path="/counsellor-dashboard" element={
           <ProtectedRoute requiredRole="counsellor">
             <CounsellorDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/counsellor/students" element={
+          <ProtectedRoute requiredRole="counsellor">
+            <CounsellorStudents />
+          </ProtectedRoute>
+        } />
+        <Route path="/counsellor/proofs" element={
+          <ProtectedRoute requiredRole="counsellor">
+            <CounsellorProofs />
+          </ProtectedRoute>
+        } />
+        <Route path="/counsellor/teacher-schedule/:teacherId" element={
+          <ProtectedRoute requiredRole="counsellor">
+            <TeacherSchedule />
           </ProtectedRoute>
         } />
         
@@ -63,6 +88,12 @@ function AppRouter() {
         <Route path="/class/:classId" element={
           <ProtectedRoute>
             <VideoClass />
+          </ProtectedRoute>
+        } />
+        
+        <Route path="/complaints" element={
+          <ProtectedRoute>
+            <ComplaintsPage />
           </ProtectedRoute>
         } />
         

@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Check, X, DollarSign } from 'lucide-react';
+import { GraduationCap, LogOut, Check, X, DollarSign, MessageSquare } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -17,6 +17,7 @@ const AdminDashboard = () => {
   const [teachers, setTeachers] = useState([]);
   const [classes, setClasses] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreditsDialog, setShowCreditsDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -29,11 +30,12 @@ const AdminDashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
-      const [userRes, teachersRes, classesRes, transactionsRes] = await Promise.all([
+      const [userRes, teachersRes, classesRes, transactionsRes, complaintsRes] = await Promise.all([
         fetch(`${API}/auth/me`, { credentials: 'include' }),
         fetch(`${API}/admin/teachers`, { credentials: 'include' }),
         fetch(`${API}/admin/classes`, { credentials: 'include' }),
-        fetch(`${API}/admin/transactions`, { credentials: 'include' })
+        fetch(`${API}/admin/transactions`, { credentials: 'include' }),
+        fetch(`${API}/admin/complaints`, { credentials: 'include' })
       ]);
 
       if (!userRes.ok) throw new Error('Failed to fetch data');
@@ -42,11 +44,13 @@ const AdminDashboard = () => {
       const teachersData = teachersRes.ok ? await teachersRes.json() : [];
       const classesData = classesRes.ok ? await classesRes.json() : [];
       const transactionsData = transactionsRes.ok ? await transactionsRes.json() : [];
+      const complaintsData = complaintsRes.ok ? await complaintsRes.json() : [];
 
       setUser(userData);
       setTeachers(teachersData);
       setClasses(classesData);
       setTransactions(transactionsData);
+      setComplaints(complaintsData);
       setLoading(false);
     } catch (error) {
       console.error(error);
@@ -151,6 +155,7 @@ const AdminDashboard = () => {
             <TabsTrigger value="teachers" data-testid="teachers-tab">Teachers</TabsTrigger>
             <TabsTrigger value="classes" data-testid="classes-tab">Classes</TabsTrigger>
             <TabsTrigger value="transactions" data-testid="transactions-tab">Transactions</TabsTrigger>
+            <TabsTrigger value="complaints" data-testid="complaints-tab">Complaints ({complaints.length})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="teachers">
@@ -288,6 +293,38 @@ const AdminDashboard = () => {
                 </table>
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="complaints">
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">Complaints</h2>
+            {complaints.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
+                <p className="text-slate-600">No complaints received</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {complaints.map(c => (
+                  <div key={c.complaint_id} className="bg-white rounded-2xl border-2 border-slate-200 p-6" data-testid={`complaint-${c.complaint_id}`}>
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <h3 className="font-bold text-slate-900">{c.subject}</h3>
+                        <p className="text-sm text-slate-500">By: {c.raised_by_name} ({c.raised_by_role})</p>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        c.status === 'open' ? 'bg-amber-100 text-amber-800' :
+                        c.status === 'resolved' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-800'
+                      }`}>{c.status.toUpperCase()}</span>
+                    </div>
+                    <p className="text-slate-600 text-sm mb-2">{c.description}</p>
+                    {c.resolution && <p className="text-sm text-emerald-700 bg-emerald-50 p-2 rounded-lg">Resolution: {c.resolution}</p>}
+                    <p className="text-xs text-slate-400 mt-2">{new Date(c.created_at).toLocaleDateString()}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Button onClick={() => navigate('/complaints')} className="mt-4 bg-sky-500 hover:bg-sky-600 text-white rounded-full">
+              <MessageSquare className="w-4 h-4 mr-2" /> Manage Complaints
+            </Button>
           </TabsContent>
         </Tabs>
       </div>
