@@ -5,7 +5,7 @@ Complete EdTech CRM/Management Platform with 4 roles: Admin, Counsellor, Teacher
 Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class -> Video (Jitsi) -> Proofs -> Admin approves & credits teacher.
 
 ## Tech Stack
-- Frontend: React + Shadcn/UI + Tailwind CSS
+- Frontend: React + Shadcn/UI + Tailwind CSS + Recharts (charts)
 - Backend: FastAPI (Python)
 - Database: MongoDB (Motor async driver)
 - Auth: Session-based + Emergent Google OAuth
@@ -17,93 +17,85 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
 
 ### Core CRM (DONE)
 - 4-role system with session auth + Google OAuth
-- Admin: create teachers/counsellors/students (with location/grade), set global pricing, approve teachers, adjust credits
-- Counsellor: assign students (using admin's global pricing), view profiles, verify proofs, manage complaints
+- Admin: create teachers/counsellors/students, set global pricing, approve teachers, adjust credits
+- Counsellor: assign students, view profiles, verify proofs, manage complaints
 - Teacher: approve students, create classes, grouped student view, submit proofs
-- Student: view classes, cancel sessions, edit profile (state/city/country/grade), file complaints
+- Student: view classes, cancel sessions, edit profile, file complaints
+
+### Admin Credential Management (DONE - Apr 8, 2026)
+- **Create Teacher Login**: Name/email/password form, shows credentials + teacher_code after creation
+- **Create Counsellor Login**: Name/email/password form, shows credentials after creation
+- **Reset Password**: Admin resets any user's password by email
+- **Block/Unblock Users**: Admin can block accounts (blocked users get 403 on login, sessions invalidated)
+- **Delete Users**: Permanent deletion with double-confirm (admin accounts protected)
+- **User Search**: Search all users by name/email/ID with Block/Delete inline actions
+- **User Detail Dialog**: Shows email prominently, assignments, classes, transactions, Block/Delete actions
+
+### Counsellor Tracking with Bar Chart (DONE - Apr 8, 2026)
+- Counsellor tracking tab shows assignment statistics per counsellor
+- "View Daily Stats" button expands a Recharts bar chart showing:
+  - Daily leads/demos handled
+  - Daily allotments made
+  - Daily sessions/proofs processed
+- Backend endpoint `/admin/counsellor-daily-stats/{id}` aggregates data from assignments and history_logs
+
+### Wallet Color Fix (DONE - Apr 8, 2026)
+- Transaction amounts now stored with correct sign: positive for credits, negative for debits
+- WalletPage uses `amount > 0` for green `+`, negative for red `-`
+- admin credit_add = positive, credit_deduct = negative, auto_booking = negative
+
+### History Search Fix (DONE - Apr 8, 2026)
+- `/api/history/search` now searches across `history_logs`, `student_teacher_assignments`, and `demo_requests`
+- Returns combined results sorted by date
+
+### Counsellor Rejected Student Reassignment (DONE - Apr 8, 2026)
+- Rejected assignment cards now show "Reassign to Another Teacher" button
+- Opens the assign dialog pre-filled with the student
+
+### Counsellor "All Students" Search (DONE - Apr 8, 2026)
+- Added search bar to CounsellorStudents.js
+- Filters by name, email, student_code, phone, institute, city
 
 ### Teacher Dashboard UI Overhaul (DONE - Apr 8, 2026)
-- "Classes of the Day" section showing today's active classes
-- Grouped-by-student view replacing weekly view
-- Clickable student groups that expand to show their classes
-- Student search filter by name
-- Feedback button on each student group
-- "Schedule Planner" button (renamed from Content Planner)
-- Ended classes separated into history count
+- "Classes of the Day" section, grouped-by-student view, student search, "Schedule Planner"
 
-### Admin Dashboard Enhancements (DONE - Apr 8, 2026)
-- **Credentials Tab**: Password reset for any user by email, global user search with clickable profiles opening full detail dialog
-- **Counsellors Tab**: Counsellor tracking showing assignment statistics (total, active, pending, rejected)
-- **Badge Templates**: Create/delete badge templates, assign from dropdown or custom name
-- User detail dialog showing profile, assignments, classes, transactions
+### Badge Templates (DONE - Apr 8, 2026)
+- Create/delete badge templates, assign from dropdown
 
-### Wallet UI Color Fix (DONE - Apr 8, 2026)
-- Credits show as green "+" (earnings, admin adds, proof approved)
-- Debits show as red "-" (payments, deductions)
-- Smart type detection for transaction direction
-
-### Teacher ID System (DONE)
-- Auto-generated teacher codes (KL-T0001 format)
-- Searchable by name/ID in Counsellor + Admin dashboards
-
-### Student Location & Grade (DONE)
-- Students have state, city, country, grade fields
-- Filterable by location/grade across dashboards
-
-### Admin Global Pricing (DONE)
-- Per demo + per class amounts set globally by admin
-
-### Proof Workflow Pipeline (DONE)
-- Teacher submits -> Counsellor verifies -> Admin reviews (date-filterable) -> Auto-credits teacher wallet
-
-### Wallet & Credit System (DONE)
-- Dedicated /wallet page for teachers (bank details) and students
-- Transaction history with correct color-coded amounts
-
-### Badge System (DONE)
-- Admin creates badge templates for reuse
-- Assigns from dropdown or custom name
-- Badge templates manageable (create/delete)
-
-### Demo Booking Flow (DONE)
-- Public /book-demo form, live sheet, auto-class creation, post-demo feedback, demo limits
-
-### Video Integration - Jitsi Meet (DONE)
-- Teacher starts class -> Jitsi room auto-created, student joins when started
-
-### Learning Kit System (DONE)
-- Admin uploads PDF/doc materials by grade level
-- Students see only their grade's materials, teachers see all
-
-### Teacher Content Planning Calendar (DONE)
-- Monthly calendar view with content planning entries
-
-### Nag Screens (DONE)
-- Prominent banner on student dashboard for unassigned students
-
-### Email Notifications (DONE)
-- Resend integration for demo acceptance and teacher feedback emails
+### Per-Class Student Wallet Deduction (DONE - existing)
+- `class_price_student` set by admin in system pricing
+- Auto-deducted from student wallet when teacher creates a class for them
 
 ### Other Completed Features
+- Demo Booking Flow (live sheet, feedback, auto-class creation)
+- Video Integration (Jitsi Meet)
+- Learning Kit System (grade-based PDFs)
+- Email Notifications (Resend)
+- Teacher Calendar / Schedule Planner
+- Nag Screens for unassigned students
+- Auto teacher_code / student_code generation
+- Proof Pipeline: Teacher -> Counsellor -> Admin -> Wallet credit
 - Cancel class day (max 3, day extension)
-- Complaints system with role-based visibility
+- Complaints system
 - Notification system with bell icon
 - Stripe payment webhook handling
-- Renewal detection (80% threshold alerts)
-- Teacher feedback to students
+- Renewal detection (80% threshold)
 
 ## Key API Endpoints
 - Auth: /api/auth/register, login, session, me, logout
+- Admin: /api/admin/create-teacher, create-counsellor, create-student
+- Admin: /api/admin/block-user, delete-user, reset-password
+- Admin: /api/admin/counsellor-tracking, counsellor-daily-stats/{id}
+- Admin: /api/admin/all-users, user-detail/{id}
+- Admin: /api/admin/badge-template(s), assign-badge
 - Demo: /api/demo/request, live-sheet, accept, assign, feedback
-- Search: /api/search/teachers, /api/filter/classes, /api/filter/students
+- Search: /api/search/teachers, history/search, filter/classes, filter/students
 - Wallet: /api/wallet/summary
-- Proof Pipeline: teacher/submit-proof -> counsellor/verify-proof -> admin/approved-proofs -> admin/approve-proof
-- Badges: /api/admin/assign-badge, remove-badge, badge-template(s)
-- Credentials: /api/admin/reset-password, all-users, user-detail/{id}
-- Counsellor Tracking: /api/admin/counsellor-tracking
-- Learning Kit: /api/admin/learning-kit/upload, /api/learning-kit, /api/learning-kit/download/{id}
-- Calendar: /api/teacher/calendar (GET, POST, DELETE)
-- Grouped Classes: /api/teacher/grouped-classes
+- Proof Pipeline: teacher/submit-proof -> counsellor/verify-proof -> admin/approve-proof
+- Classes: /api/classes/create, /api/teacher/grouped-classes
+- Learning Kit: /api/admin/learning-kit/upload, /api/learning-kit
+- Calendar: /api/teacher/calendar
+- Notifications: /api/notifications/my, mark-all-read
 
 ## DB Collections
 users, user_sessions, class_sessions, student_teacher_assignments, transactions, payment_transactions,
@@ -115,6 +107,6 @@ learning_kits, teacher_calendar, badge_templates
 ## Remaining Backlog
 - P2: Jitsi screenshot fix (use captureLargeVideoScreenshot API)
 - P2: Verify Resend domain for production email delivery
-- P3: Complete migration of server.py into modular route files
+- P3: Modular refactor of server.py into route files
 - P3: Real-time notifications (WebSocket push)
 - P3: Student progress reports (PDF generation)
