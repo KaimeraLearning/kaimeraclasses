@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Label } from '../components/ui/label';
+import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Users, BookOpen } from 'lucide-react';
+import { GraduationCap, LogOut, Users, BookOpen, UserPlus } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -14,6 +17,10 @@ const CounsellorDashboard = () => {
   const [teachers, setTeachers] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showAssignDialog, setShowAssignDialog] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [selectedTeacher, setSelectedTeacher] = useState('');
+  const [customPrice, setCustomPrice] = useState('100');
 
   useEffect(() => {
     fetchDashboardData();
@@ -40,6 +47,39 @@ const CounsellorDashboard = () => {
       console.error(error);
       toast.error('Failed to load dashboard');
       setLoading(false);
+    }
+  };
+
+  const handleAssignStudent = async () => {
+    if (!selectedTeacher) {
+      toast.error('Please select a teacher');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API}/admin/assign-student`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          student_id: selectedStudent.user_id,
+          teacher_id: selectedTeacher,
+          credit_price: parseFloat(customPrice)
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail);
+      }
+
+      toast.success('Student assigned to teacher successfully!');
+      setShowAssignDialog(false);
+      setSelectedStudent(null);
+      setSelectedTeacher('');
+      fetchDashboardData();
+    } catch (error) {
+      toast.error(error.message);
     }
   };
 
@@ -127,51 +167,127 @@ const CounsellorDashboard = () => {
           </div>
         </div>
 
-        {/* Coming Soon Message */}
-        <div className="bg-white rounded-3xl p-12 border-2 border-slate-100 text-center">
-          <BookOpen className="w-16 h-16 text-sky-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-slate-900 mb-2">Phase 1: Foundation Complete</h2>
-          <p className="text-slate-600 mb-4">
-            Counsellor role has been created. Demo assignment features coming in Phase 2!
-          </p>
-          <div className="bg-slate-50 rounded-2xl p-6 mt-6 text-left max-w-2xl mx-auto">
-            <h3 className="font-bold text-slate-900 mb-3">✅ Phase 1 Complete:</h3>
-            <ul className="space-y-2 text-slate-700">
-              <li className="flex items-start gap-2">
-                <span className="text-emerald-500 font-bold">✓</span>
-                <span>Counsellor role added to system</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-emerald-500 font-bold">✓</span>
-                <span>Students can only self-register (0 credits)</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-emerald-500 font-bold">✓</span>
-                <span>Admin can create teacher & counsellor accounts</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-emerald-500 font-bold">✓</span>
-                <span>System pricing configuration ready</span>
-              </li>
-            </ul>
-            <h3 className="font-bold text-slate-900 mb-3 mt-6">🔄 Phase 2 Next:</h3>
-            <ul className="space-y-2 text-slate-700">
-              <li className="flex items-start gap-2">
-                <span className="text-sky-500 font-bold">→</span>
-                <span>Demo request system</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-sky-500 font-bold">→</span>
-                <span>Teacher availability management</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-sky-500 font-bold">→</span>
-                <span>Counsellor assignment workflow</span>
-              </li>
-            </ul>
-          </div>
+        {/* Students List */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-slate-900 mb-4">Students</h2>
+          {students.length === 0 ? (
+            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
+              <p className="text-slate-600">No students registered yet</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {students.map((student) => (
+                <div
+                  key={student.user_id}
+                  className="bg-white rounded-2xl border-2 border-slate-200 p-6"
+                  data-testid={`student-card-${student.user_id}`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h3 className="font-bold text-slate-900">{student.name}</h3>
+                      <p className="text-sm text-slate-600">{student.email}</p>
+                      <p className="text-sm text-slate-500 mt-2">Credits: {student.credits}</p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      setSelectedStudent(student);
+                      setShowAssignDialog(true);
+                    }}
+                    className="w-full mt-4 bg-sky-500 hover:bg-sky-600 text-white rounded-full"
+                    data-testid={`assign-student-button-${student.user_id}`}
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Assign to Teacher
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Teachers List */}
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 mb-4">Teachers</h2>
+          {teachers.length === 0 ? (
+            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
+              <p className="text-slate-600">No teachers available</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {teachers.map((teacher) => (
+                <div
+                  key={teacher.user_id}
+                  className="bg-white rounded-2xl border-2 border-slate-200 p-4"
+                  data-testid={`teacher-card-${teacher.user_id}`}
+                >
+                  <h3 className="font-bold text-slate-900">{teacher.name}</h3>
+                  <p className="text-sm text-slate-600">{teacher.email}</p>
+                  <p className="text-sm text-emerald-600 mt-2 font-semibold">Wallet: ₹{teacher.credits}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Assign Student Dialog */}
+      <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-slate-900">
+              Assign Student to Teacher
+            </DialogTitle>
+          </DialogHeader>
+          {selectedStudent && (
+            <div className="space-y-4 mt-4">
+              <div>
+                <Label>Student</Label>
+                <div className="bg-slate-50 p-3 rounded-xl">
+                  <p className="font-semibold text-slate-900">{selectedStudent.name}</p>
+                  <p className="text-sm text-slate-600">{selectedStudent.email}</p>
+                </div>
+              </div>
+
+              <div>
+                <Label>Select Teacher</Label>
+                <select
+                  value={selectedTeacher}
+                  onChange={(e) => setSelectedTeacher(e.target.value)}
+                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2"
+                  data-testid="teacher-select"
+                >
+                  <option value="">Choose a teacher...</option>
+                  {teachers.map((teacher) => (
+                    <option key={teacher.user_id} value={teacher.user_id}>
+                      {teacher.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <Label>Credits per Class (for this student)</Label>
+                <Input
+                  type="number"
+                  value={customPrice}
+                  onChange={(e) => setCustomPrice(e.target.value)}
+                  className="rounded-xl"
+                  data-testid="custom-price-input"
+                />
+              </div>
+
+              <Button
+                onClick={handleAssignStudent}
+                className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold"
+                data-testid="confirm-assign-button"
+              >
+                Assign Student
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -779,11 +779,31 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
         raise HTTPException(status_code=403, detail="Not your class")
     
     await db.class_sessions.update_one(
-        {"class_id": class_id},
+        {" class_id": class_id},
         {"$set": {"status": "in_progress"}}
     )
     
     return {"message": "Class started"}
+
+@api_router.delete("/classes/delete/{class_id}")
+async def delete_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher deletes a class"""
+    user = await get_current_user(request, authorization)
+    
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    
+    if cls['teacher_id'] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not your class")
+    
+    # Delete the class
+    await db.class_sessions.delete_one({"class_id": class_id})
+    
+    return {"message": "Class deleted successfully"}
 
 @api_router.post("/feedback/submit")
 async def submit_feedback(feedback_data: FeedbackCreate, request: Request, authorization: Optional[str] = Header(None)):

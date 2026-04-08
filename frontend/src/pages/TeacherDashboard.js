@@ -15,6 +15,8 @@ const TeacherDashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [classes, setClasses] = useState([]);
+  const [pendingAssignments, setPendingAssignments] = useState([]);
+  const [approvedStudents, setApprovedStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [formData, setFormData] = useState({
@@ -46,6 +48,8 @@ const TeacherDashboard = () => {
 
       setUser(userData);
       setClasses(dashboardData.classes);
+      setPendingAssignments(dashboardData.pending_assignments || []);
+      setApprovedStudents(dashboardData.approved_students || []);
       setLoading(false);
     } catch (error) {
       console.error(error);
@@ -103,6 +107,51 @@ const TeacherDashboard = () => {
     }
   };
 
+  const handleApproveAssignment = async (assignmentId, approved) => {
+    try {
+      const response = await fetch(`${API}/teacher/approve-assignment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          assignment_id: assignmentId,
+          approved
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail);
+      }
+
+      toast.success(approved ? 'Student approved!' : 'Student rejected');
+      fetchDashboardData();
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
+  const handleDeleteClass = async (classId) => {
+    if (!window.confirm('Are you sure you want to delete this class?')) return;
+
+    try {
+      const response = await fetch(`${API}/classes/delete/${classId}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail);
+      }
+
+      toast.success('Class deleted successfully');
+      fetchDashboardData();
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -155,6 +204,70 @@ const TeacherDashboard = () => {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Pending Student Assignments */}
+        {pendingAssignments.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">Pending Student Assignments</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {pendingAssignments.map((assignment) => (
+                <div
+                  key={assignment.assignment_id}
+                  className="bg-amber-50 rounded-2xl border-2 border-amber-200 p-6"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <h3 className="font-bold text-slate-900">{assignment.student_name}</h3>
+                      <p className="text-sm text-slate-600">{assignment.student_email}</p>
+                      <p className="text-sm text-slate-500 mt-2">
+                        Credits per class: ₹{assignment.credit_price}
+                      </p>
+                    </div>
+                    <span className="bg-amber-200 text-amber-900 px-3 py-1 rounded-full text-xs font-semibold">
+                      PENDING
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => handleApproveAssignment(assignment.assignment_id, true)}
+                      className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full"
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      onClick={() => handleApproveAssignment(assignment.assignment_id, false)}
+                      variant="outline"
+                      className="flex-1 rounded-full"
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Approved Students */}
+        {approvedStudents.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">My Students</h2>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {approvedStudents.map((assignment) => (
+                <div
+                  key={assignment.assignment_id}
+                  className="bg-emerald-50 rounded-2xl border-2 border-emerald-200 p-4"
+                >
+                  <h3 className="font-bold text-slate-900">{assignment.student_name}</h3>
+                  <p className="text-xs text-slate-600">{assignment.student_email}</p>
+                  <p className="text-sm text-emerald-600 mt-2 font-semibold">
+                    ₹{assignment.credit_price}/class
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="mb-8">
           <Button
             onClick={() => setShowCreateDialog(true)}
@@ -202,13 +315,23 @@ const TeacherDashboard = () => {
                 </div>
 
                 {cls.status === 'scheduled' && (
-                  <Button
-                    onClick={() => navigate(`/class/${cls.class_id}`)}
-                    className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold"
-                    data-testid={`start-class-button-${cls.class_id}`}
-                  >
-                    Start Class
-                  </Button>
+                  <div className="space-y-2">
+                    <Button
+                      onClick={() => navigate(`/class/${cls.class_id}`)}
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold"
+                      data-testid={`start-class-button-${cls.class_id}`}
+                    >
+                      Start Class
+                    </Button>
+                    <Button
+                      onClick={() => handleDeleteClass(cls.class_id)}
+                      variant="outline"
+                      className="w-full border-2 border-red-200 hover:bg-red-50 text-red-600 rounded-full font-bold"
+                      data-testid={`delete-class-button-${cls.class_id}`}
+                    >
+                      Delete Class
+                    </Button>
+                  </div>
                 )}
               </div>
             ))}
