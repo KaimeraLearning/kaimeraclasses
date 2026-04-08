@@ -26,8 +26,8 @@ const TeacherDashboard = () => {
     date: '',
     start_time: '',
     end_time: '',
-    credits_required: '',
-    max_students: ''
+    max_students: '',
+    assigned_student_id: ''
   });
 
   useEffect(() => {
@@ -67,8 +67,8 @@ const TeacherDashboard = () => {
         credentials: 'include',
         body: JSON.stringify({
           ...formData,
-          credits_required: parseFloat(formData.credits_required),
-          max_students: parseInt(formData.max_students)
+          max_students: parseInt(formData.max_students),
+          assigned_student_id: formData.assigned_student_id
         })
       });
 
@@ -86,8 +86,8 @@ const TeacherDashboard = () => {
         date: '',
         start_time: '',
         end_time: '',
-        credits_required: '',
-        max_students: ''
+        max_students: '',
+        assigned_student_id: ''
       });
       fetchDashboardData();
     } catch (error) {
@@ -412,16 +412,22 @@ const TeacherDashboard = () => {
                 />
               </div>
               <div>
-                <Label>Credits Required</Label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={formData.credits_required}
-                  onChange={(e) => setFormData({ ...formData, credits_required: e.target.value })}
-                  className="rounded-xl"
+                <Label>For Student</Label>
+                <select
+                  value={formData.assigned_student_id}
+                  onChange={(e) => setFormData({ ...formData, assigned_student_id: e.target.value })}
+                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2"
                   required
-                  data-testid="class-credits-input"
-                />
+                  data-testid="student-select"
+                >
+                  <option value="">Select student...</option>
+                  {approvedStudents.map((assignment) => (
+                    <option key={assignment.student_id} value={assignment.student_id}>
+                      {assignment.student_name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">Class will be created for this student only</p>
               </div>
               <div>
                 <Label>Max Students</Label>

@@ -13,9 +13,11 @@ const API = `${BACKEND_URL}/api`;
 const CounsellorDashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
-  const [students, setStudents] = useState([]);
+  const [unassignedStudents, setUnassignedStudents] = useState([]);
+  const [allStudents, setAllStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
-  const [assignments, setAssignments] = useState([]);
+  const [activeAssignments, setActiveAssignments] = useState([]);
+  const [rejectedAssignments, setRejectedAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -39,9 +41,11 @@ const CounsellorDashboard = () => {
       const dashboardData = await dashboardRes.json();
 
       setUser(userData);
-      setStudents(dashboardData.students || []);
+      setUnassignedStudents(dashboardData.unassigned_students || []);
+      setAllStudents(dashboardData.all_students || []);
       setTeachers(dashboardData.teachers || []);
-      setAssignments(dashboardData.assignments || []);
+      setActiveAssignments(dashboardData.active_assignments || []);
+      setRejectedAssignments(dashboardData.rejected_assignments || []);
       setLoading(false);
     } catch (error) {
       console.error(error);
@@ -135,12 +139,12 @@ const CounsellorDashboard = () => {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-gradient-to-br from-sky-500 to-sky-600 rounded-3xl p-6 text-white shadow-[4px_4px_0px_0px_rgba(14,165,233,0.3)]">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sky-100 text-sm font-medium mb-1">Total Students</p>
-                <p className="text-4xl font-bold">{students.length}</p>
+                <p className="text-sky-100 text-sm font-medium mb-1">Unassigned Students</p>
+                <p className="text-4xl font-bold">{unassignedStudents.length}</p>
               </div>
               <Users className="w-12 h-12 text-sky-200" />
             </div>
@@ -160,23 +164,60 @@ const CounsellorDashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-emerald-100 text-sm font-medium mb-1">Active Assignments</p>
-                <p className="text-4xl font-bold">{assignments.length}</p>
+                <p className="text-4xl font-bold">{activeAssignments.length}</p>
               </div>
               <BookOpen className="w-12 h-12 text-emerald-200" />
             </div>
           </div>
+
+          <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-3xl p-6 text-white shadow-[4px_4px_0px_0px_rgba(239,68,68,0.3)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-red-100 text-sm font-medium mb-1">Rejected</p>
+                <p className="text-4xl font-bold">{rejectedAssignments.length}</p>
+              </div>
+              <BookOpen className="w-12 h-12 text-red-200" />
+            </div>
+          </div>
         </div>
 
-        {/* Students List */}
+        {/* Rejected Assignments Panel */}
+        {rejectedAssignments.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold text-slate-900 mb-4">⚠️ Rejected Assignments</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {rejectedAssignments.map((assignment) => (
+                <div
+                  key={assignment.assignment_id}
+                  className="bg-red-50 rounded-2xl border-2 border-red-200 p-6"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h3 className="font-bold text-slate-900">{assignment.student_name}</h3>
+                      <p className="text-sm text-slate-600">→ {assignment.teacher_name}</p>
+                      <p className="text-sm text-slate-500 mt-2">Price: ₹{assignment.credit_price}</p>
+                    </div>
+                    <span className="bg-red-200 text-red-900 px-3 py-1 rounded-full text-xs font-semibold">
+                      REJECTED
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500">Teacher rejected this assignment</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Unassigned Students - Only show available students */}
         <div className="mb-8">
-          <h2 className="text-2xl font-bold text-slate-900 mb-4">Students</h2>
-          {students.length === 0 ? (
+          <h2 className="text-2xl font-bold text-slate-900 mb-4">Available Students (Unassigned)</h2>
+          {unassignedStudents.length === 0 ? (
             <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
-              <p className="text-slate-600">No students registered yet</p>
+              <p className="text-slate-600">All students are assigned! 🎉</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {students.map((student) => (
+              {unassignedStudents.map((student) => (
                 <div
                   key={student.user_id}
                   className="bg-white rounded-2xl border-2 border-slate-200 p-6"

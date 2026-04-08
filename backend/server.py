@@ -82,9 +82,8 @@ class ClassSessionCreate(BaseModel):
     date: str
     start_time: str
     end_time: str
-    credits_required: float
     max_students: int
-    assigned_student_id: Optional[str] = None  # For teacher to create class for specific student
+    assigned_student_id: str  # REQUIRED - Teacher must select which student
 
 class BookingRequest(BaseModel):
     class_id: str
@@ -429,32 +428,30 @@ async def logout(request: Request, response: Response):
 
 @api_router.get("/classes/browse")
 async def browse_classes(request: Request, authorization: Optional[str] = Header(None)):
-    """Browse available classes - students only see classes from their assigned teachers"""
+    """Browse available classes - students only see classes created specifically for them"""
     user = await get_current_user(request, authorization)
     
     if user.role == "student":
-        # Get approved teacher assignments for this student
-        approved_assignments = await db.student_teacher_assignments.find(
+        # Get approved teacher assignment for this student
+        approved_assignment = await db.student_teacher_assignments.find_one(
             {"student_id": user.user_id, "status": "approved"},
             {"_id": 0}
-        ).to_list(1000)
+        )
         
-        if not approved_assignments:
-            return []  # No assigned teachers yet
+        if not approved_assignment:
+            return []  # No approved teacher yet
         
-        # Get teacher IDs
-        teacher_ids = [assignment['teacher_id'] for assignment in approved_assignments]
-        
-        # Get classes only from assigned teachers
+        # Get classes created specifically for this student
         classes = await db.class_sessions.find(
             {
                 "status": "scheduled",
-                "teacher_id": {"$in": teacher_ids}
+                "teacher_id": approved_assignment['teacher_id'],
+                "assigned_student_id": user.user_id  # Only classes created for this student
             },
             {"_id": 0}
         ).to_list(1000)
     else:
-        # Admin/Teacher can see all classes
+        # Admin/Teacher/Counsellor can see all classes
         classes = await db.class_sessions.find(
             {"status": "scheduled"},
             {"_id": 0}
@@ -639,7 +636,7 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
 
 @api_router.post("/classes/create")
 async def create_class(class_data: ClassSessionCreate, request: Request, authorization: Optional[str] = Header(None)):
-    """Create a new class session"""
+    """Create a new class session - teacher must select student"""
     user = await get_current_user(request, authorization)
     
     if user.role != "teacher":
@@ -647,6 +644,24 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     
     if not user.is_approved:
         raise HTTPException(status_code=403, detail="Teacher account not approved yet")
+    
+    # Verify student is assigned to this teacher
+    assignment = await db.student_teacher_assignments.find_one({
+        "teacher_id": user.user_id,
+        "student_id": class_data.assigned_student_id,
+        "status": "approved"
+    }, {"_id": 0})
+    
+    if not assignment:
+        raise HTTPException(status_code=403, detail="Student not assigned to you or assignment not approved")
+    
+    # Get system pricing (admin-set, teacher doesn't decide)
+    pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+    if not pricing:
+        raise HTTPException(status_code=500, detail="System pricing not configured")
+    
+    # Use custom price for this student from assignment
+    credits_required = assignment['credit_price']
     
     class_id = f"class_{uuid.uuid4().hex[:12]}"
     
@@ -660,8 +675,9 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
         "date": class_data.date,
         "start_time": class_data.start_time,
         "end_time": class_data.end_time,
-        "credits_required": class_data.credits_required,
+        "credits_required": credits_required,  # From assignment, teacher doesn't see this
         "max_students": class_data.max_students,
+        "assigned_student_id": class_data.assigned_student_id,  # Class created for specific student
         "enrolled_students": [],
         "status": "scheduled",
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -671,10 +687,11 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     insert_doc = class_doc.copy()
     await db.class_sessions.insert_one(insert_doc)
     
-    # Convert datetime for response
-    class_doc['created_at'] = datetime.fromisoformat(class_doc['created_at'])
+    # Don't return credits_required to teacher
+    response_doc = {k: v for k, v in class_doc.items() if k != 'credits_required'}
+    response_doc['created_at'] = datetime.fromisoformat(class_doc['created_at'])
     
-    return {"message": "Class created successfully", "class": class_doc}
+    return {"message": "Class created successfully", "class": response_doc}
 
 @api_router.get("/teacher/dashboard")
 async def teacher_dashboard(request: Request, authorization: Optional[str] = Header(None)):
@@ -986,7 +1003,16 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
     if not student or not teacher:
         raise HTTPException(status_code=404, detail="Student or teacher not found")
     
-    # Check if assignment already exists
+    # CRITICAL: Check if student already has an active assignment (one student, one teacher only)
+    existing_active = await db.student_teacher_assignments.find_one({
+        "student_id": assignment.student_id,
+        "status": {"$in": ["pending", "approved"]}
+    }, {"_id": 0})
+    
+    if existing_active:
+        raise HTTPException(status_code=400, detail=f"Student already assigned to {existing_active['teacher_name']}. Only one teacher per student allowed.")
+    
+    # Check if assignment to this specific teacher already exists
     existing = await db.student_teacher_assignments.find_one({
         "student_id": assignment.student_id,
         "teacher_id": assignment.teacher_id,
@@ -1012,7 +1038,8 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         "credit_price": assignment.credit_price,
         "assigned_at": assigned_at.isoformat(),
         "approved_at": None,
-        "expires_at": expires_at.isoformat()
+        "expires_at": expires_at.isoformat(),
+        "assigned_by": user.user_id  # Track who assigned
     }
     
     await db.student_teacher_assignments.insert_one(assignment_doc)
@@ -1369,18 +1396,33 @@ async def counsellor_dashboard(request: Request, authorization: Optional[str] = 
         raise HTTPException(status_code=403, detail="Counsellor access only")
     
     # Get all students
-    students = await db.users.find({"role": "student"}, {"_id": 0, "password_hash": 0}).to_list(1000)
+    all_students = await db.users.find({"role": "student"}, {"_id": 0, "password_hash": 0}).to_list(1000)
+    
+    # Get all active assignments (pending or approved)
+    active_assignments = await db.student_teacher_assignments.find(
+        {"status": {"$in": ["pending", "approved"]}},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    # Get rejected assignments
+    rejected_assignments = await db.student_teacher_assignments.find(
+        {"status": "rejected"},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    # Filter out students who already have active assignments
+    assigned_student_ids = set([a['student_id'] for a in active_assignments])
+    unassigned_students = [s for s in all_students if s['user_id'] not in assigned_student_ids]
     
     # Get all teachers
     teachers = await db.users.find({"role": "teacher", "is_approved": True}, {"_id": 0, "password_hash": 0}).to_list(1000)
     
-    # Get all assignments
-    assignments = await db.student_teacher_assignments.find({}, {"_id": 0}).to_list(1000)
-    
     return {
-        "students": students,
+        "unassigned_students": unassigned_students,  # Only students without active assignments
+        "all_students": all_students,  # For separate page
         "teachers": teachers,
-        "assignments": assignments
+        "active_assignments": active_assignments,
+        "rejected_assignments": rejected_assignments
     }
 
 # Include the router in the main app
