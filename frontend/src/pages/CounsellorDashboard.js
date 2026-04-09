@@ -5,7 +5,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Users, BookOpen, UserPlus, ShieldCheck, MessageSquare, Clock, User, MapPin, Target, CalendarClock, Zap, FileText, CalendarDays, Repeat } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { GraduationCap, LogOut, Users, BookOpen, UserPlus, ShieldCheck, MessageSquare, Clock, User, MapPin, Target, CalendarClock, Zap, FileText, CalendarDays, Repeat, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -34,6 +35,12 @@ const CounsellorDashboard = () => {
   const [assignFrequency, setAssignFrequency] = useState('');
   const [assignDays, setAssignDays] = useState('');
   const [assignDemoNotes, setAssignDemoNotes] = useState('');
+  const [studentTab, setStudentTab] = useState('unassigned');
+  const [pageUnassigned, setPageUnassigned] = useState(1);
+  const [pageActive, setPageActive] = useState(1);
+  const [pageRejected, setPageRejected] = useState(1);
+  const [pageExpired, setPageExpired] = useState(1);
+  const PER_PAGE = 10;
 
   useEffect(() => { fetchDashboardData(); }, []);
 
@@ -176,6 +183,17 @@ const CounsellorDashboard = () => {
     </div>
   );
 
+  const paginate = (items, page) => items.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  const totalPages = (items) => Math.max(1, Math.ceil(items.length / PER_PAGE));
+
+  const Pagination = ({ page, setPage, total }) => total <= 1 ? null : (
+    <div className="flex items-center justify-center gap-2 mt-4">
+      <Button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} variant="outline" size="sm" className="rounded-full"><ChevronLeft className="w-4 h-4" /></Button>
+      <span className="text-sm text-slate-600 font-medium">Page {page} of {total}</span>
+      <Button onClick={() => setPage(Math.min(total, page + 1))} disabled={page === total} variant="outline" size="sm" className="rounded-full"><ChevronRight className="w-4 h-4" /></Button>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
@@ -246,175 +264,185 @@ const CounsellorDashboard = () => {
           </Button>
         </div>
 
-        {/* Expired Classes Needing Reassignment */}
-        {expiredClasses.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-4">Classes Ended - Reassignment Needed</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {expiredClasses.map(cls => (
-                <div key={cls.class_id} className={`rounded-2xl border-2 p-5 ${cls.can_rebook ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'}`}>
-                  <div className="flex justify-between mb-2">
-                    <h3 className="font-bold text-slate-900">{cls.title}</h3>
-                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${cls.can_rebook ? 'bg-amber-200 text-amber-900' : 'bg-red-200 text-red-900'}`}>
-                      {cls.can_rebook ? 'Can Rebook' : 'Release Required'}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-600 mb-1">Teacher: {cls.teacher_name}</p>
-                  <p className="text-xs text-slate-500 mb-3">Ended {cls.days_since_expiry} days ago</p>
-                  <div className="flex gap-2">
-                    {cls.can_rebook && (
-                      <Button onClick={() => handleReassign(cls.assigned_student_id, 'rebook')} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-full text-sm">
-                        Rebook with Teacher
-                      </Button>
-                    )}
-                    <Button onClick={() => handleReassign(cls.assigned_student_id, 'release')} variant="outline" className="flex-1 rounded-full text-sm">
-                      Release Student
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* ═══ TABBED STUDENT MANAGEMENT ═══ */}
+        <Tabs value={studentTab} onValueChange={setStudentTab} className="mb-8">
+          <TabsList className="mb-4 flex-wrap" data-testid="student-tabs">
+            <TabsTrigger value="unassigned" data-testid="tab-unassigned">Available ({unassignedStudents.length})</TabsTrigger>
+            <TabsTrigger value="active" data-testid="tab-active">Active ({activeAssignments.length})</TabsTrigger>
+            <TabsTrigger value="rejected" data-testid="tab-rejected">Rejected ({rejectedAssignments.length})</TabsTrigger>
+            <TabsTrigger value="expired" data-testid="tab-expired">Reassignment ({expiredClasses.length})</TabsTrigger>
+            {renewalClasses.length > 0 && <TabsTrigger value="renewals" data-testid="tab-renewals">Renewals ({renewalClasses.length})</TabsTrigger>}
+          </TabsList>
 
-        {/* Rejected Assignments */}
-        {rejectedAssignments.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-4">Rejected Assignments</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {rejectedAssignments.map(assignment => (
-                <div key={assignment.assignment_id} className="bg-red-50 rounded-2xl border-2 border-red-200 p-5">
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="font-bold text-slate-900">{assignment.student_name}</h3>
-                      <p className="text-sm text-slate-600">Rejected by: {assignment.teacher_name}</p>
-                    </div>
-                    <span className="bg-red-200 text-red-900 px-3 py-1 rounded-full text-xs font-semibold">REJECTED</span>
-                  </div>
-                  <Button
-                    onClick={() => {
-                      const student = allStudents.find(s => s.user_id === assignment.student_id);
-                      if (student) { setSelectedStudent(student); setShowAssignDialog(true); }
-                      else { setSelectedStudent({ user_id: assignment.student_id, name: assignment.student_name, email: assignment.student_email }); setShowAssignDialog(true); }
-                    }}
-                    className="w-full mt-2 bg-sky-500 hover:bg-sky-600 text-white rounded-full text-sm"
-                    data-testid={`reassign-rejected-${assignment.assignment_id}`}
-                  >
-                    <UserPlus className="w-4 h-4 mr-2" /> Reassign to Another Teacher
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Active Assignments */}
-        {activeAssignments.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-4">Active Assignments ({activeAssignments.length})</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {activeAssignments.map(a => (
-                <div key={a.assignment_id} className="bg-white rounded-2xl border-2 border-emerald-200 p-5" data-testid={`active-assignment-${a.assignment_id}`}>
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="font-bold text-slate-900">{a.student_name}</h3>
-                      <p className="text-sm text-slate-600">{a.student_email}</p>
-                    </div>
-                    <span className="bg-emerald-200 text-emerald-900 px-3 py-1 rounded-full text-xs font-semibold">{a.status?.toUpperCase()}</span>
-                  </div>
-                  <p className="text-sm text-slate-700 mb-1">Teacher: <strong>{a.teacher_name}</strong></p>
-                  <p className="text-xs text-slate-500">Price: {a.credit_price} credits/class</p>
-                  {a.class_frequency && (
-                    <div className="flex items-center gap-1.5 mt-2">
-                      <Repeat className="w-3 h-3 text-sky-500" />
-                      <span className="text-xs text-sky-700 font-medium bg-sky-50 px-2 py-0.5 rounded-full">{a.class_frequency.replace(/_/g, ' ')}</span>
-                    </div>
-                  )}
-                  {a.specific_days && (
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <CalendarDays className="w-3 h-3 text-amber-500" />
-                      <span className="text-xs text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded-full">{a.specific_days}</span>
-                    </div>
-                  )}
-                  {a.demo_performance_notes && (
-                    <div className="mt-2 bg-violet-50 rounded-lg p-2 border border-violet-100">
-                      <p className="text-[10px] font-semibold text-violet-600 mb-0.5">Demo Notes</p>
-                      <p className="text-xs text-violet-800">{a.demo_performance_notes}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Unassigned Students */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-slate-900">Available Students</h2>
-          </div>
-          {unassignedStudents.length === 0 ? (
-            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
-              <p className="text-slate-600">All students are assigned!</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {unassignedStudents.slice(0, 6).map(student => (
-                <div key={student.user_id} className="bg-white rounded-2xl border-2 border-slate-200 p-5" data-testid={`student-card-${student.user_id}`}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 cursor-pointer" onClick={() => handleViewStudent(student)} data-testid={`view-student-${student.user_id}`}>
-                      <h3 className="font-bold text-slate-900 hover:text-sky-600 transition-colors">{student.name}</h3>
-                      <p className="text-sm text-slate-600">{student.email}</p>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {student.grade && <span className="bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full text-xs font-medium">Class {student.grade}</span>}
-                        {student.institute && <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-xs"><MapPin className="w-3 h-3 inline mr-1" />{student.institute}</span>}
-                        {student.city && <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full text-xs">{student.city}{student.state ? `, ${student.state}` : ''}</span>}
-                        {student.goal && <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full text-xs"><Target className="w-3 h-3 inline mr-1" />{student.goal}</span>}
-                        {student.preferred_time_slot && <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full text-xs"><CalendarClock className="w-3 h-3 inline mr-1" />{student.preferred_time_slot}</span>}
+          {/* ── Unassigned / Available ── */}
+          <TabsContent value="unassigned">
+            {unassignedStudents.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-600">All students are assigned!</p></div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {paginate(unassignedStudents, pageUnassigned).map(student => (
+                    <div key={student.user_id} className="bg-white rounded-2xl border-2 border-slate-200 p-5" data-testid={`student-card-${student.user_id}`}>
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 cursor-pointer" onClick={() => handleViewStudent(student)} data-testid={`view-student-${student.user_id}`}>
+                          <h3 className="font-bold text-slate-900 hover:text-sky-600 transition-colors">{student.name}</h3>
+                          <p className="text-sm text-slate-600">{student.email}</p>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {student.grade && <span className="bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full text-xs font-medium">Class {student.grade}</span>}
+                            {student.institute && <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-xs"><MapPin className="w-3 h-3 inline mr-1" />{student.institute}</span>}
+                            {student.city && <span className="bg-sky-50 text-sky-700 px-2 py-0.5 rounded-full text-xs">{student.city}{student.state ? `, ${student.state}` : ''}</span>}
+                            {student.goal && <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full text-xs"><Target className="w-3 h-3 inline mr-1" />{student.goal}</span>}
+                            {student.preferred_time_slot && <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full text-xs"><CalendarClock className="w-3 h-3 inline mr-1" />{student.preferred_time_slot}</span>}
+                          </div>
+                          {student.demo_teacher_name && (
+                            <p className="text-xs text-violet-600 mt-1 font-semibold bg-violet-50 px-2 py-0.5 rounded-full inline-block">Demo by: {student.demo_teacher_name}</p>
+                          )}
+                          {student.demo_feedback_text && (
+                            <p className="text-xs text-slate-500 mt-1 italic">"{student.demo_feedback_text}"</p>
+                          )}
+                          <p className="text-sm text-slate-500 mt-2">Credits: {student.credits}</p>
+                        </div>
                       </div>
-                      <p className="text-sm text-slate-500 mt-2">Credits: {student.credits}</p>
+                      <Button onClick={() => { setSelectedStudent(student); setShowAssignDialog(true); }}
+                        className="w-full mt-3 bg-sky-500 hover:bg-sky-600 text-white rounded-full"
+                        data-testid={`assign-student-button-${student.user_id}`}>
+                        <UserPlus className="w-4 h-4 mr-2" /> Assign to Teacher
+                      </Button>
                     </div>
-                  </div>
-                  <Button
-                    onClick={() => { setSelectedStudent(student); setShowAssignDialog(true); }}
-                    className="w-full mt-3 bg-sky-500 hover:bg-sky-600 text-white rounded-full"
-                    data-testid={`assign-student-button-${student.user_id}`}
-                  >
-                    <UserPlus className="w-4 h-4 mr-2" /> Assign to Teacher
-                  </Button>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+                <Pagination page={pageUnassigned} setPage={setPageUnassigned} total={totalPages(unassignedStudents)} />
+              </>
+            )}
+          </TabsContent>
 
-        {/* Renewal Alerts */}
-        {renewalClasses.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-amber-500" /> Renewal Needed
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {renewalClasses.map(cls => (
-                <div key={cls.class_id} className="bg-amber-50 rounded-2xl border-2 border-amber-200 p-5">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <h3 className="font-bold text-slate-900">{cls.title}</h3>
-                      <p className="text-sm text-slate-600">Teacher: {cls.teacher_name}</p>
+          {/* ── Active Assignments ── */}
+          <TabsContent value="active">
+            {activeAssignments.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-600">No active assignments yet.</p></div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {paginate(activeAssignments, pageActive).map(a => (
+                    <div key={a.assignment_id} className="bg-white rounded-2xl border-2 border-emerald-200 p-5" data-testid={`active-assignment-${a.assignment_id}`}>
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <h3 className="font-bold text-slate-900">{a.student_name}</h3>
+                          <p className="text-sm text-slate-600">{a.student_email}</p>
+                        </div>
+                        <span className="bg-emerald-200 text-emerald-900 px-3 py-1 rounded-full text-xs font-semibold">{a.status?.toUpperCase()}</span>
+                      </div>
+                      <p className="text-sm text-slate-700 mb-1">Teacher: <strong>{a.teacher_name}</strong></p>
+                      <p className="text-xs text-slate-500">Price: {a.credit_price} credits/class</p>
+                      {a.class_frequency && (
+                        <div className="flex items-center gap-1.5 mt-2">
+                          <Repeat className="w-3 h-3 text-sky-500" />
+                          <span className="text-xs text-sky-700 font-medium bg-sky-50 px-2 py-0.5 rounded-full">{a.class_frequency.replace(/_/g, ' ')}</span>
+                        </div>
+                      )}
+                      {a.specific_days && (
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <CalendarDays className="w-3 h-3 text-amber-500" />
+                          <span className="text-xs text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded-full">{a.specific_days}</span>
+                        </div>
+                      )}
+                      {a.demo_performance_notes && (
+                        <div className="mt-2 bg-violet-50 rounded-lg p-2 border border-violet-100">
+                          <p className="text-[10px] font-semibold text-violet-600 mb-0.5">Demo Notes</p>
+                          <p className="text-xs text-violet-800">{a.demo_performance_notes}</p>
+                        </div>
+                      )}
                     </div>
-                    <span className="bg-amber-200 text-amber-900 px-3 py-1 rounded-full text-xs font-semibold">
-                      {cls.completion_pct}% Done
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mb-3">{cls.days_remaining} days remaining</p>
-                  <Button onClick={() => handleScheduleRenewal(cls.class_id)} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full text-sm">
-                    Schedule Renewal Meeting
-                  </Button>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+                <Pagination page={pageActive} setPage={setPageActive} total={totalPages(activeAssignments)} />
+              </>
+            )}
+          </TabsContent>
+
+          {/* ── Rejected ── */}
+          <TabsContent value="rejected">
+            {rejectedAssignments.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-600">No rejected assignments.</p></div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {paginate(rejectedAssignments, pageRejected).map(assignment => (
+                    <div key={assignment.assignment_id} className="bg-red-50 rounded-2xl border-2 border-red-200 p-5">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <h3 className="font-bold text-slate-900">{assignment.student_name}</h3>
+                          <p className="text-sm text-slate-600">Rejected by: {assignment.teacher_name}</p>
+                        </div>
+                        <span className="bg-red-200 text-red-900 px-3 py-1 rounded-full text-xs font-semibold">REJECTED</span>
+                      </div>
+                      <Button onClick={() => {
+                        const student = allStudents.find(s => s.user_id === assignment.student_id);
+                        if (student) { setSelectedStudent(student); setShowAssignDialog(true); }
+                        else { setSelectedStudent({ user_id: assignment.student_id, name: assignment.student_name, email: assignment.student_email }); setShowAssignDialog(true); }
+                      }} className="w-full mt-2 bg-sky-500 hover:bg-sky-600 text-white rounded-full text-sm" data-testid={`reassign-rejected-${assignment.assignment_id}`}>
+                        <UserPlus className="w-4 h-4 mr-2" /> Reassign to Another Teacher
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                <Pagination page={pageRejected} setPage={setPageRejected} total={totalPages(rejectedAssignments)} />
+              </>
+            )}
+          </TabsContent>
+
+          {/* ── Expired / Reassignment ── */}
+          <TabsContent value="expired">
+            {expiredClasses.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-600">No reassignment needed.</p></div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {paginate(expiredClasses, pageExpired).map(cls => (
+                    <div key={cls.class_id} className={`rounded-2xl border-2 p-5 ${cls.can_rebook ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'}`}>
+                      <div className="flex justify-between mb-2">
+                        <h3 className="font-bold text-slate-900">{cls.title}</h3>
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${cls.can_rebook ? 'bg-amber-200 text-amber-900' : 'bg-red-200 text-red-900'}`}>
+                          {cls.can_rebook ? 'Can Rebook' : 'Release Required'}
+                        </span>
+                      </div>
+                      <p className="text-sm text-slate-600 mb-1">Teacher: {cls.teacher_name}</p>
+                      <p className="text-xs text-slate-500 mb-3">Ended {cls.days_since_expiry} days ago</p>
+                      <div className="flex gap-2">
+                        {cls.can_rebook && (
+                          <Button onClick={() => handleReassign(cls.assigned_student_id, 'rebook')} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-full text-sm">Rebook with Teacher</Button>
+                        )}
+                        <Button onClick={() => handleReassign(cls.assigned_student_id, 'release')} variant="outline" className="flex-1 rounded-full text-sm">Release Student</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <Pagination page={pageExpired} setPage={setPageExpired} total={totalPages(expiredClasses)} />
+              </>
+            )}
+          </TabsContent>
+
+          {/* ── Renewals ── */}
+          {renewalClasses.length > 0 && (
+            <TabsContent value="renewals">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {renewalClasses.map(cls => (
+                  <div key={cls.class_id} className="bg-amber-50 rounded-2xl border-2 border-amber-200 p-5">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h3 className="font-bold text-slate-900">{cls.title}</h3>
+                        <p className="text-sm text-slate-600">Teacher: {cls.teacher_name}</p>
+                      </div>
+                      <span className="bg-amber-200 text-amber-900 px-3 py-1 rounded-full text-xs font-semibold">{cls.completion_pct}% Done</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-3">{cls.days_remaining} days remaining</p>
+                    <Button onClick={() => handleScheduleRenewal(cls.class_id)} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full text-sm">Schedule Renewal Meeting</Button>
+                  </div>
+                ))}
+              </div>
+            </TabsContent>
+          )}
+        </Tabs>
 
         {/* Teachers Search */}
         <div>

@@ -284,24 +284,33 @@ const StudentDashboard = () => {
               <Label className="text-xs text-slate-500">Email</Label>
               <p className="text-sm text-slate-900">{user?.email}</p>
             </div>
+            {/* Read-only academic fields (only Admin can edit) */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-50 rounded-xl p-3">
+                <Label className="text-xs text-slate-500">Grade/Class</Label>
+                <p className="text-sm font-semibold text-slate-900">{user?.grade ? `Class ${user.grade}` : 'Not set'}</p>
+              </div>
+              <div className="bg-slate-50 rounded-xl p-3">
+                <Label className="text-xs text-slate-500">Institute</Label>
+                <p className="text-sm font-semibold text-slate-900">{user?.institute || 'Not set'}</p>
+              </div>
+              <div className="bg-slate-50 rounded-xl p-3 col-span-2">
+                <Label className="text-xs text-slate-500">Goal</Label>
+                <p className="text-sm font-semibold text-slate-900">{user?.goal || 'Not set'}</p>
+              </div>
+            </div>
+            <p className="text-[10px] text-amber-600 bg-amber-50 rounded-lg p-2 font-medium">Academic details (Grade, Institute, Goal) can only be changed by Admin. Contact support if you need changes.</p>
+            {/* Editable contact fields */}
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Phone</Label><Input value={profileForm.phone} onChange={e => setProfileForm({...profileForm, phone: e.target.value})} className="rounded-xl" data-testid="profile-phone" /></div>
-              <div><Label>Grade</Label>
-                <select value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 bg-white h-10 text-sm" data-testid="profile-grade">
-                  <option value="">Select...</option>
-                  {['1','2','3','4','5','6','7','8','9','10','11','12','UG','PG','Other'].map(g => <option key={g} value={g}>{g === 'UG' || g === 'PG' || g === 'Other' ? g : `Class ${g}`}</option>)}
-                </select>
+              <div><Label>Preferred Time</Label>
+                <Input type="datetime-local" value={profileForm.preferred_time_slot?.split(' to ')[0] || ''} onChange={e => setProfileForm({...profileForm, preferred_time_slot: e.target.value})} className="rounded-xl" data-testid="profile-time" />
               </div>
               <div><Label>State</Label><Input value={profileForm.state} onChange={e => setProfileForm({...profileForm, state: e.target.value})} className="rounded-xl" data-testid="profile-state" /></div>
               <div><Label>City</Label><Input value={profileForm.city} onChange={e => setProfileForm({...profileForm, city: e.target.value})} className="rounded-xl" data-testid="profile-city" /></div>
-              <div><Label>Country</Label><Input value={profileForm.country} onChange={e => setProfileForm({...profileForm, country: e.target.value})} className="rounded-xl" data-testid="profile-country" /></div>
-              <div><Label>Institute</Label><Input value={profileForm.institute} onChange={e => setProfileForm({...profileForm, institute: e.target.value})} className="rounded-xl" data-testid="profile-institute" /></div>
+              <div className="col-span-2"><Label>Country</Label><Input value={profileForm.country} onChange={e => setProfileForm({...profileForm, country: e.target.value})} className="rounded-xl" data-testid="profile-country" /></div>
             </div>
-            <div><Label>Goal</Label><Input value={profileForm.goal} onChange={e => setProfileForm({...profileForm, goal: e.target.value})} className="rounded-xl" data-testid="profile-goal" /></div>
-            <div><Label>Preferred Time</Label>
-              <Input type="datetime-local" value={profileForm.preferred_time_slot?.split(' to ')[0] || ''} onChange={e => setProfileForm({...profileForm, preferred_time_slot: e.target.value})} className="rounded-xl" data-testid="profile-time" />
-            </div>
-            <Button onClick={handleUpdateProfile} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="save-profile-button">Save Profile</Button>
+            <Button onClick={handleUpdateProfile} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="save-profile-button">Save Contact Info</Button>
           </div>
         </DialogContent>
       </Dialog>

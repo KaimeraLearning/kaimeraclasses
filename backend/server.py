@@ -278,6 +278,13 @@ class TeacherFeedbackToStudent(BaseModel):
     feedback_text: str
     performance_rating: str  # excellent, good, average, needs_improvement
 
+class TeacherDemoFeedback(BaseModel):
+    demo_id: str
+    student_id: str
+    feedback_text: str
+    performance_rating: str  # excellent, good, average, needs_improvement
+    recommended_frequency: Optional[str] = None
+
 class BadgeAssign(BaseModel):
     user_id: str
     badge_name: str
@@ -1953,6 +1960,17 @@ async def counsellor_dashboard(request: Request, authorization: Optional[str] = 
     assigned_student_ids = set([a['student_id'] for a in active_assignments])
     unassigned_students = [s for s in all_students if s['user_id'] not in assigned_student_ids]
     
+    # Enrich unassigned students with demo teacher name + demo feedback
+    for student in unassigned_students:
+        demo = await db.demo_requests.find_one(
+            {"student_id": student["user_id"], "status": {"$in": ["accepted", "completed", "feedback_submitted"]}},
+            {"_id": 0, "accepted_by_teacher_name": 1, "teacher_feedback_text": 1, "teacher_feedback_rating": 1}
+        )
+        if demo:
+            student["demo_teacher_name"] = demo.get("accepted_by_teacher_name")
+            student["demo_feedback_text"] = demo.get("teacher_feedback_text")
+            student["demo_feedback_rating"] = demo.get("teacher_feedback_rating")
+    
     # Get all teachers
     teachers = await db.users.find({"role": "teacher", "is_approved": True}, {"_id": 0, "password_hash": 0}).to_list(1000)
     
@@ -1968,18 +1986,14 @@ async def counsellor_dashboard(request: Request, authorization: Optional[str] = 
 
 @api_router.post("/student/update-profile")
 async def update_student_profile(profile: StudentProfileUpdate, request: Request, authorization: Optional[str] = Header(None)):
-    """Student updates their profile details"""
+    """Student updates limited profile details (contact info only, no class/course changes)"""
     user = await get_current_user(request, authorization)
     if user.role != "student":
         raise HTTPException(status_code=403, detail="Student access only")
     
+    # Students can only update contact info, NOT academic fields (grade, institute, goal)
+    # Academic fields are locked — only Admin can change via /admin/edit-student
     update_fields = {}
-    if profile.institute is not None:
-        update_fields['institute'] = profile.institute
-    if profile.goal is not None:
-        update_fields['goal'] = profile.goal
-    if profile.preferred_time_slot is not None:
-        update_fields['preferred_time_slot'] = profile.preferred_time_slot
     if profile.phone is not None:
         update_fields['phone'] = profile.phone
     if profile.state is not None:
@@ -1988,8 +2002,8 @@ async def update_student_profile(profile: StudentProfileUpdate, request: Request
         update_fields['city'] = profile.city
     if profile.country is not None:
         update_fields['country'] = profile.country
-    if profile.grade is not None:
-        update_fields['grade'] = profile.grade
+    if profile.preferred_time_slot is not None:
+        update_fields['preferred_time_slot'] = profile.preferred_time_slot
     
     if update_fields:
         await db.users.update_one({"user_id": user.user_id}, {"$set": update_fields})
@@ -3609,6 +3623,89 @@ async def teacher_feedback_to_student(data: TeacherFeedbackToStudent, request: R
     return {"message": "Feedback sent to student"}
 
 
+@api_router.post("/teacher/submit-demo-feedback")
+async def teacher_submit_demo_feedback(data: TeacherDemoFeedback, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher submits mandatory demo feedback - auto-notifies counsellor"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    # Check demo exists
+    demo = await db.demo_requests.find_one({"demo_id": data.demo_id}, {"_id": 0})
+    if not demo:
+        raise HTTPException(status_code=404, detail="Demo not found")
+
+    # Check if already submitted
+    existing = await db.teacher_student_feedback.find_one(
+        {"teacher_id": user.user_id, "demo_id": data.demo_id, "type": "demo_feedback"}, {"_id": 0}
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Demo feedback already submitted")
+
+    feedback_id = f"tdf_{uuid.uuid4().hex[:12]}"
+    feedback_doc = {
+        "feedback_id": feedback_id,
+        "type": "demo_feedback",
+        "demo_id": data.demo_id,
+        "teacher_id": user.user_id,
+        "teacher_name": user.name,
+        "teacher_code": getattr(user, 'teacher_code', ''),
+        "student_id": data.student_id,
+        "feedback_text": data.feedback_text,
+        "performance_rating": data.performance_rating,
+        "recommended_frequency": data.recommended_frequency,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    insert_doc = feedback_doc.copy()
+    await db.teacher_student_feedback.insert_one(insert_doc)
+
+    # Update demo request with feedback
+    await db.demo_requests.update_one(
+        {"demo_id": data.demo_id},
+        {"$set": {
+            "teacher_feedback_submitted": True,
+            "teacher_feedback_id": feedback_id,
+            "teacher_feedback_rating": data.performance_rating,
+            "teacher_feedback_text": data.feedback_text
+        }}
+    )
+
+    # Notify ALL counsellors immediately
+    counsellors = await db.users.find({"role": "counsellor"}, {"_id": 0}).to_list(100)
+    student = await db.users.find_one({"user_id": data.student_id}, {"_id": 0, "name": 1, "email": 1})
+    student_name = student.get("name", "Student") if student else "Student"
+    for c in counsellors:
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": c["user_id"],
+            "type": "teacher_demo_feedback",
+            "title": "Teacher Demo Feedback Submitted",
+            "message": f"Teacher {user.name} rated {student_name}'s demo as '{data.performance_rating}': {data.feedback_text[:100]}",
+            "read": False,
+            "related_id": data.demo_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    return {"message": "Demo feedback submitted and counsellors notified"}
+
+
+@api_router.get("/teacher/pending-demo-feedback")
+async def teacher_pending_demo_feedback(request: Request, authorization: Optional[str] = Header(None)):
+    """Get demos awaiting teacher feedback"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    # Find demos accepted by this teacher that don't have teacher feedback yet
+    demos = await db.demo_requests.find(
+        {"accepted_by_teacher_id": user.user_id, "status": {"$in": ["accepted", "completed", "feedback_submitted"]},
+         "$or": [{"teacher_feedback_submitted": {"$exists": False}}, {"teacher_feedback_submitted": False}]},
+        {"_id": 0}
+    ).to_list(50)
+
+    return demos
+
+
 # ==================== BADGE SYSTEM ====================
 
 @api_router.post("/admin/assign-badge")
@@ -4415,6 +4512,33 @@ async def admin_delete_user(request: Request, authorization: Optional[str] = Hea
     return {"message": f"User {target['name']} ({target['email']}) deleted permanently"}
 
 
+@api_router.post("/admin/purge-system")
+async def admin_purge_system(request: Request, authorization: Optional[str] = Header(None)):
+    """Admin purges ALL non-admin data for a clean system reset"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    collections_to_clear = [
+        "class_sessions", "student_teacher_assignments", "transactions",
+        "payment_transactions", "complaints", "class_proofs", "feedback",
+        "notifications", "demo_requests", "demo_extras", "demo_feedback",
+        "history_logs", "teacher_student_feedback", "renewal_meetings",
+        "learning_kits", "teacher_calendar", "badge_templates", "system_pricing"
+    ]
+    for coll_name in collections_to_clear:
+        await db[coll_name].delete_many({})
+
+    # Delete all non-admin users
+    await db.users.delete_many({"role": {"$ne": "admin"}})
+    await db.user_sessions.delete_many({"user_id": {"$nin": [u["user_id"] async for u in db.users.find({"role": "admin"}, {"_id": 0, "user_id": 1})]}}),
+
+    # Reset counters to 0
+    await db.counters.delete_many({})
+
+    return {"message": "System purged. Only admin accounts remain. All counters reset to zero."}
+
+
 # ==================== COUNSELLOR DAILY STATS (for admin bar chart) ====================
 
 @api_router.get("/admin/counsellor-daily-stats/{counsellor_id}")
@@ -4506,11 +4630,11 @@ async def startup_event():
 
 
 async def background_cleanup_task():
-    """Check every hour: Students with no enrollment/demo for 5 days get notified then deleted"""
+    """Check every hour: Students with no enrollment/demo for 24h get warned, then deleted after another 24h"""
     while True:
         try:
             await asyncio.sleep(3600)  # Check every hour
-            five_days_ago = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+            one_day_ago = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
             
             students = await db.users.find(
                 {"role": "student"}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "created_at": 1}
@@ -4539,34 +4663,34 @@ async def background_cleanup_task():
                 if has_demo:
                     continue
                 
-                # Check if created > 5 days ago
+                # Check if created > 24 hours ago
                 created = s.get("created_at", "")
-                if created and created < five_days_ago:
+                if created and created < one_day_ago:
                     # Check if already warned
                     warned = await db.notifications.find_one(
                         {"user_id": sid, "type": "inactivity_warning"}, {"_id": 0}
                     )
                     if not warned:
-                        # Send warning notification
+                        # Send 24-hour warning notification
                         await db.notifications.insert_one({
                             "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
                             "user_id": sid,
                             "type": "inactivity_warning",
                             "title": "Account Inactivity Warning",
-                            "message": "Your account has been inactive for 5 days with no enrollment or demo. Please book a demo or enroll to keep your account active.",
+                            "message": "Your account has been inactive for 24 hours with no demo or class assigned. Please book a demo to keep your account active. Your account will be deleted in 24 hours if no action is taken.",
                             "read": False,
                             "created_at": datetime.now(timezone.utc).isoformat()
                         })
-                        await send_email(s.get("email", ""), "Kaimera Learning - Account Inactivity",
-                            f"<p>Hi {s.get('name', '')}, your Kaimera Learning account has been inactive for 5 days. Please book a demo or enroll to keep your account active.</p>")
-                        logger.info(f"Sent inactivity warning to {s.get('name', '')} ({s.get('email', '')})")
+                        await send_email(s.get("email", ""), "Kaimera Learning - Account Inactivity Warning",
+                            f"<p>Hi {s.get('name', '')}, your Kaimera Learning account has been inactive for 24 hours with no demo or class assigned. Please book a demo to keep your account active. <b>Your account will be permanently deleted in 24 hours if no action is taken.</b></p>")
+                        logger.info(f"Sent 24h inactivity warning to {s.get('name', '')} ({s.get('email', '')})")
                     else:
-                        # Already warned, check if 7+ days (2 more days grace after warning)
+                        # Already warned — delete if 24+ hours since warning
                         warn_date = warned.get("created_at", "")
-                        if warn_date and warn_date < (datetime.now(timezone.utc) - timedelta(days=2)).isoformat():
+                        if warn_date and warn_date < (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat():
                             await db.users.delete_one({"user_id": sid})
                             await db.user_sessions.delete_many({"user_id": sid})
-                            logger.info(f"Auto-deleted inactive student: {s.get('name', '')} ({s.get('email', '')})")
+                            logger.info(f"Auto-deleted inactive student (48h total): {s.get('name', '')} ({s.get('email', '')})")
         except Exception as e:
             logger.error(f"Background cleanup error: {e}")
 

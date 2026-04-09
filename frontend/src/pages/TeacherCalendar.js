@@ -1,209 +1,194 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
-import { ArrowLeft, Plus, Trash2, CalendarDays, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, Users, AlertCircle } from 'lucide-react';
+import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-const COLORS = ['#0ea5e9', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444', '#ec4899', '#06b6d4'];
-
 const TeacherCalendar = () => {
   const navigate = useNavigate();
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [entries, setEntries] = useState([]);
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [selectedDate, setSelectedDate] = useState('');
-  const [form, setForm] = useState({ title: '', description: '', subject: '', color: '#0ea5e9' });
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [dayClasses, setDayClasses] = useState([]);
 
-  const yearMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+  useEffect(() => { fetchSchedule(); }, []);
 
-  const fetchEntries = useCallback(async () => {
+  const fetchSchedule = async () => {
     try {
-      const res = await fetch(`${API}/teacher/calendar?month=${yearMonth}`, { credentials: 'include' });
-      if (!res.ok && res.status === 401) { navigate('/login'); return; }
-      if (res.ok) setEntries(await res.json());
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
-  }, [navigate, yearMonth]);
-
-  useEffect(() => { fetchEntries(); }, [fetchEntries]);
-
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    if (!selectedDate || !form.title) { toast.error('Date and title required'); return; }
-    try {
-      const res = await fetch(`${API}/teacher/calendar`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: selectedDate, ...form })
-      });
-      if (!res.ok) throw new Error((await res.json()).detail);
-      toast.success('Entry added');
-      setShowAddForm(false);
-      setForm({ title: '', description: '', subject: '', color: '#0ea5e9' });
-      fetchEntries();
+      const res = await fetch(`${API}/teacher/schedule`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch schedule');
+      setClasses(await res.json());
     } catch (err) { toast.error(err.message); }
+    setLoading(false);
   };
 
-  const handleDelete = async (entryId) => {
-    try {
-      const res = await fetch(`${API}/teacher/calendar/${entryId}`, { method: 'DELETE', credentials: 'include' });
-      if (!res.ok) throw new Error((await res.json()).detail);
-      toast.success('Entry removed');
-      fetchEntries();
-    } catch (err) { toast.error(err.message); }
+  const getClassesForDate = (date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    return classes.filter(cls => {
+      const startDate = cls.date;
+      const endDate = cls.end_date || cls.date;
+      return dateStr >= startDate && dateStr <= endDate;
+    });
   };
 
-  const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
-  const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
-
-  // Calendar rendering
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const monthName = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-
-  const calendarDays = [];
-  for (let i = 0; i < firstDay; i++) calendarDays.push(null);
-  for (let d = 1; d <= daysInMonth; d++) calendarDays.push(d);
-
-  const getEntriesForDay = (day) => {
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return entries.filter(e => e.date === dateStr);
+  const handleDayClick = (date) => {
+    const dc = getClassesForDate(date);
+    setSelectedDay(format(date, 'yyyy-MM-dd'));
+    setDayClasses(dc);
   };
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const renderCalendar = () => {
+    const monthStart = startOfMonth(currentMonth);
+    const monthEnd = endOfMonth(currentMonth);
+    const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
+    const firstDayOfWeek = monthStart.getDay();
+    const leadingEmptyCells = Array(firstDayOfWeek).fill(null);
+    const today = format(new Date(), 'yyyy-MM-dd');
+
+    return (
+      <div className="grid grid-cols-7 gap-1.5">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+          <div key={day} className="text-center font-semibold text-slate-600 py-2 text-xs">{day}</div>
+        ))}
+        {leadingEmptyCells.map((_, idx) => <div key={`e-${idx}`} className="aspect-square" />)}
+        {daysInMonth.map(date => {
+          const dateStr = format(date, 'yyyy-MM-dd');
+          const dc = getClassesForDate(date);
+          const hasClasses = dc.length > 0;
+          const isToday = dateStr === today;
+          const isSelected = dateStr === selectedDay;
+          const hasLive = dc.some(c => c.status === 'in_progress');
+          const hasCancelled = dc.some(c => c.cancelled_today);
+
+          let bgClass = 'bg-white border-slate-200 hover:border-sky-300';
+          if (isSelected) bgClass = 'bg-sky-100 border-sky-500 ring-2 ring-sky-200';
+          else if (hasLive) bgClass = 'bg-emerald-100 border-emerald-400';
+          else if (hasCancelled) bgClass = 'bg-red-50 border-red-300';
+          else if (hasClasses) bgClass = 'bg-sky-50 border-sky-300';
+
+          return (
+            <div key={dateStr} onClick={() => handleDayClick(date)}
+              className={`aspect-square rounded-xl border-2 p-1 cursor-pointer transition-all ${bgClass}`}>
+              <div className={`text-xs font-bold ${isToday ? 'text-sky-600' : 'text-slate-700'}`}>
+                {format(date, 'd')}
+                {isToday && <span className="ml-0.5 text-[8px] text-sky-500">TODAY</span>}
+              </div>
+              {hasClasses && (
+                <div className="mt-0.5 space-y-0.5">
+                  {dc.slice(0, 2).map(cls => (
+                    <div key={cls.class_id} className={`text-[9px] font-bold px-0.5 py-0 rounded truncate ${
+                      cls.status === 'in_progress' ? 'bg-emerald-200 text-emerald-800' :
+                      cls.cancelled_today ? 'bg-red-200 text-red-700' :
+                      'bg-sky-200 text-sky-800'
+                    }`}>
+                      {cls.start_time}
+                    </div>
+                  ))}
+                  {dc.length > 2 && <div className="text-[8px] text-slate-500 font-medium">+{dc.length - 2} more</div>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   if (loading) return (
-    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-white to-amber-50 flex items-center justify-center">
-      <Loader2 className="w-10 h-10 animate-spin text-sky-500" />
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="w-16 h-16 border-4 border-sky-500 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-white to-amber-50">
-      <div className="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" onClick={() => navigate('/teacher-dashboard')} className="rounded-full" data-testid="back-btn">
-              <ArrowLeft className="w-4 h-4" />
+    <div className="min-h-screen bg-slate-50">
+      <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center gap-4">
+            <Button onClick={() => navigate('/teacher-dashboard')} variant="outline" className="rounded-full" data-testid="back-btn">
+              <ArrowLeft className="w-4 h-4 mr-2" /> Back
             </Button>
             <div>
-              <h1 className="text-xl font-bold text-slate-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>
-                <CalendarDays className="w-5 h-5 inline mr-2 text-sky-500" />Content Planner
-              </h1>
-              <p className="text-xs text-slate-500">Plan your teaching content ahead</p>
+              <h1 className="text-2xl font-bold text-slate-900">My Schedule Planner</h1>
+              <p className="text-sm text-slate-600">{classes.length} scheduled classes</p>
             </div>
           </div>
-          <Button onClick={() => { setShowAddForm(true); setSelectedDate(todayStr); }}
-            className="bg-sky-500 hover:bg-sky-600 text-white rounded-full" data-testid="add-entry-btn">
-            <Plus className="w-4 h-4 mr-1" /> Add Plan
-          </Button>
         </div>
-      </div>
+      </header>
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Month navigation */}
-        <div className="flex items-center justify-between mb-6">
-          <Button variant="ghost" onClick={prevMonth} className="rounded-full" data-testid="prev-month">
-            <ChevronLeft className="w-5 h-5" />
-          </Button>
-          <h2 className="text-2xl font-bold text-slate-900" style={{ fontFamily: 'Fredoka, sans-serif' }}>{monthName}</h2>
-          <Button variant="ghost" onClick={nextMonth} className="rounded-full" data-testid="next-month">
-            <ChevronRight className="w-5 h-5" />
-          </Button>
-        </div>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Calendar */}
+          <div className="lg:col-span-2 bg-white rounded-3xl border-2 border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <Button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} variant="outline" className="rounded-full" data-testid="prev-month"><ChevronLeft className="w-5 h-5" /></Button>
+              <div className="flex items-center gap-3">
+                <CalendarIcon className="w-6 h-6 text-sky-500" />
+                <h2 className="text-xl font-bold text-slate-900" data-testid="current-month">{format(currentMonth, 'MMMM yyyy')}</h2>
+              </div>
+              <Button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} variant="outline" className="rounded-full" data-testid="next-month"><ChevronRight className="w-5 h-5" /></Button>
+            </div>
+            {renderCalendar()}
 
-        {/* Calendar grid */}
-        <div className="bg-white rounded-3xl border-2 border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
-          {/* Day headers */}
-          <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-200">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-              <div key={d} className="py-3 text-center text-xs font-semibold text-slate-500">{d}</div>
-            ))}
+            <div className="mt-6 flex flex-wrap items-center gap-3 text-xs">
+              <div className="flex items-center gap-1.5"><div className="w-4 h-3 bg-sky-200 rounded" /><span className="text-slate-600">Scheduled</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-4 h-3 bg-emerald-200 rounded" /><span className="text-slate-600">Live</span></div>
+              <div className="flex items-center gap-1.5"><div className="w-4 h-3 bg-red-200 rounded" /><span className="text-slate-600">Cancelled</span></div>
+            </div>
           </div>
-          {/* Days */}
-          <div className="grid grid-cols-7">
-            {calendarDays.map((day, i) => {
-              if (!day) return <div key={`empty-${i}`} className="min-h-[100px] border-b border-r border-slate-100 bg-slate-50/50" />;
-              const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const dayEntries = getEntriesForDay(day);
-              const isToday = dateStr === todayStr;
-              return (
-                <div key={day} className={`min-h-[100px] border-b border-r border-slate-100 p-1.5 cursor-pointer hover:bg-sky-50/50 transition-colors ${isToday ? 'bg-sky-50' : ''}`}
-                  onClick={() => { setSelectedDate(dateStr); setShowAddForm(true); }}
-                  data-testid={`day-${dateStr}`}>
-                  <span className={`inline-flex items-center justify-center w-7 h-7 text-sm font-medium rounded-full mb-1 ${isToday ? 'bg-sky-500 text-white' : 'text-slate-700'}`}>
-                    {day}
-                  </span>
-                  <div className="space-y-1">
-                    {dayEntries.map(entry => (
-                      <div key={entry.entry_id} className="group flex items-center justify-between rounded-lg px-2 py-1 text-xs text-white"
-                        style={{ backgroundColor: entry.color || '#0ea5e9' }}>
-                        <span className="truncate font-medium">{entry.title}</span>
-                        <button onClick={e => { e.stopPropagation(); handleDelete(entry.entry_id); }}
-                          className="opacity-0 group-hover:opacity-100 ml-1 flex-shrink-0" data-testid={`del-${entry.entry_id}`}>
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+
+          {/* Day Detail Panel */}
+          <div className="bg-white rounded-3xl border-2 border-slate-200 p-6">
+            <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-sky-500" />
+              {selectedDay ? format(new Date(selectedDay + 'T00:00'), 'EEEE, MMM d') : 'Select a day'}
+            </h3>
+            {!selectedDay ? (
+              <p className="text-sm text-slate-400 text-center py-8">Click on a date to see class details</p>
+            ) : dayClasses.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-8">No classes on this day</p>
+            ) : (
+              <div className="space-y-3">
+                {dayClasses.map(cls => (
+                  <div key={cls.class_id} className={`rounded-2xl border-2 p-4 ${
+                    cls.status === 'in_progress' ? 'border-emerald-300 bg-emerald-50' :
+                    cls.cancelled_today ? 'border-red-200 bg-red-50' :
+                    'border-slate-200 bg-slate-50'
+                  }`} data-testid={`day-class-${cls.class_id}`}>
+                    <div className="flex items-start justify-between mb-1">
+                      <h4 className="font-bold text-slate-900 text-sm">{cls.title}</h4>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        cls.status === 'in_progress' ? 'bg-emerald-200 text-emerald-800' :
+                        cls.cancelled_today ? 'bg-red-200 text-red-800' :
+                        'bg-sky-200 text-sky-800'
+                      }`}>
+                        {cls.status === 'in_progress' ? 'LIVE' : cls.cancelled_today ? 'CANCELLED' : 'SCHEDULED'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 flex items-center gap-1"><Clock className="w-3 h-3" /> {cls.start_time} - {cls.end_time}</p>
+                    <p className="text-xs text-slate-600 flex items-center gap-1 mt-0.5"><Users className="w-3 h-3" /> {cls.enrolled_students?.length || 0} student(s)</p>
+                    {cls.is_demo && <span className="inline-block mt-1 bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-[10px] font-semibold">DEMO</span>}
+                    {cls.cancelled_today && (
+                      <div className="mt-2 bg-red-100 rounded-lg p-2 flex items-center gap-1.5 text-xs text-red-700 font-medium">
+                        <AlertCircle className="w-3 h-3" /> Student cancelled this session
                       </div>
-                    ))}
+                    )}
+                    {cls.rescheduled && (
+                      <div className="mt-2 bg-sky-100 rounded-lg p-2 text-xs text-sky-700 font-medium">
+                        Rescheduled to {cls.rescheduled_date} {cls.rescheduled_start_time}-{cls.rescheduled_end_time}
+                      </div>
+                    )}
                   </div>
-                </div>
-              );
-            })}
+                ))}
+              </div>
+            )}
           </div>
         </div>
-
-        {/* Add form dialog */}
-        {showAddForm && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowAddForm(false)}>
-            <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()} data-testid="add-form">
-              <h3 className="text-lg font-bold text-slate-900 mb-4">Plan Content for {selectedDate}</h3>
-              <form onSubmit={handleAdd} className="space-y-4">
-                <div>
-                  <Label>Title *</Label>
-                  <Input value={form.title} onChange={e => setForm({...form, title: e.target.value})}
-                    className="rounded-xl" placeholder="e.g., Algebra Chapter 3" required data-testid="entry-title" />
-                </div>
-                <div>
-                  <Label>Subject</Label>
-                  <Input value={form.subject} onChange={e => setForm({...form, subject: e.target.value})}
-                    className="rounded-xl" placeholder="e.g., Mathematics" data-testid="entry-subject" />
-                </div>
-                <div>
-                  <Label>Description</Label>
-                  <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})}
-                    className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl px-4 py-3 text-sm resize-none h-20 focus:outline-none focus:ring-4 focus:ring-sky-500/20 focus:border-sky-500"
-                    placeholder="Notes about the content..." data-testid="entry-desc" />
-                </div>
-                <div>
-                  <Label>Color</Label>
-                  <div className="flex gap-2 mt-1">
-                    {COLORS.map(c => (
-                      <button key={c} type="button" onClick={() => setForm({...form, color: c})}
-                        className={`w-8 h-8 rounded-full border-2 transition-all ${form.color === c ? 'border-slate-900 scale-110' : 'border-transparent'}`}
-                        style={{ backgroundColor: c }} />
-                    ))}
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <Button type="submit" className="flex-1 bg-sky-500 hover:bg-sky-600 text-white rounded-full" data-testid="save-entry">
-                    Save
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => setShowAddForm(false)} className="rounded-full">
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

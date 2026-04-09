@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star } from 'lucide-react';
+import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -33,6 +33,10 @@ const TeacherDashboard = () => {
   const [showRescheduleDialog, setShowRescheduleDialog] = useState(false);
   const [rescheduleTarget, setRescheduleTarget] = useState(null);
   const [rescheduleForm, setRescheduleForm] = useState({ new_date: '', new_start_time: '', new_end_time: '' });
+  const [pendingDemoFeedback, setPendingDemoFeedback] = useState([]);
+  const [showDemoFeedbackDialog, setShowDemoFeedbackDialog] = useState(false);
+  const [demoFeedbackTarget, setDemoFeedbackTarget] = useState(null);
+  const [demoFeedbackForm, setDemoFeedbackForm] = useState({ feedback_text: '', performance_rating: 'good', recommended_frequency: '' });
   const [formData, setFormData] = useState({
     title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '',
     max_students: '1', assigned_student_id: '', duration_days: '1', is_demo: false
@@ -62,6 +66,11 @@ const TeacherDashboard = () => {
       if (notifRes.ok) setNotifications(await notifRes.json());
       if (complaintsRes.ok) setStudentComplaints(await complaintsRes.json());
       if (groupedRes.ok) setGroupedData(await groupedRes.json());
+      // Fetch pending demo feedback
+      try {
+        const demoFbRes = await fetch(`${API}/teacher/pending-demo-feedback`, { credentials: 'include' });
+        if (demoFbRes.ok) setPendingDemoFeedback(await demoFbRes.json());
+      } catch {}
       setLoading(false);
     } catch (error) {
       toast.error('Failed to load dashboard');
@@ -172,6 +181,26 @@ const TeacherDashboard = () => {
     } catch (error) { toast.error(error.message); }
   };
 
+  const handleSubmitDemoFeedback = async () => {
+    if (!demoFeedbackForm.feedback_text) { toast.error('Please enter demo feedback'); return; }
+    try {
+      const res = await fetch(`${API}/teacher/submit-demo-feedback`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({
+          demo_id: demoFeedbackTarget.demo_id,
+          student_id: demoFeedbackTarget.student_id || demoFeedbackTarget.student_user_id,
+          ...demoFeedbackForm
+        })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success('Demo feedback submitted! Counsellors notified.');
+      setShowDemoFeedbackDialog(false);
+      setDemoFeedbackTarget(null);
+      setDemoFeedbackForm({ feedback_text: '', performance_rating: 'good', recommended_frequency: '' });
+      fetchDashboardData();
+    } catch (error) { toast.error(error.message); }
+  };
+
   const handleLogout = async () => {
     try { await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' }); navigate('/login'); } catch {}
   };
@@ -216,7 +245,12 @@ const TeacherDashboard = () => {
         )}
         {proof && <div className={`rounded-lg p-1.5 mb-2 text-center text-xs font-semibold ${proof.status === 'pending' ? 'bg-amber-50 text-amber-800' : proof.status === 'verified' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}><ShieldCheck className="w-3 h-3 inline mr-1" /> Proof: {proof.status}</div>}
         <div className="space-y-1.5">
-          {cls.status === 'scheduled' && (
+          {cls.cancelled_today && (
+            <div className="bg-red-50 rounded-lg p-2 text-center text-xs text-red-700 font-semibold border border-red-200">
+              <AlertCircle className="w-3 h-3 inline mr-1" /> Session cancelled by student
+            </div>
+          )}
+          {cls.status === 'scheduled' && !cls.cancelled_today && (
             <>
               <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8" data-testid={`start-class-${cls.class_id}`}>
                 <Play className="w-3 h-3 mr-1" /> Start Class
@@ -224,7 +258,7 @@ const TeacherDashboard = () => {
               <Button onClick={() => handleDeleteClass(cls.class_id)} variant="outline" className="w-full border border-red-200 hover:bg-red-50 text-red-600 rounded-full text-xs h-7" data-testid={`delete-class-${cls.class_id}`}>Delete</Button>
             </>
           )}
-          {isLive && (
+          {isLive && !cls.cancelled_today && (
             <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8 animate-pulse" data-testid={`rejoin-class-${cls.class_id}`}>
               <Play className="w-3 h-3 mr-1" /> Rejoin Live
             </Button>
@@ -287,6 +321,30 @@ const TeacherDashboard = () => {
                   </div>
                   <p className="text-sm text-slate-600 mb-1">{c.description}</p>
                   <p className="text-xs text-slate-500">From: {c.raised_by_name}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Pending Demo Feedback (Mandatory) */}
+        {pendingDemoFeedback.length > 0 && (
+          <div className="mb-8 bg-violet-50 rounded-3xl border-2 border-violet-300 p-6" data-testid="pending-demo-feedback-alert">
+            <h2 className="text-lg font-bold text-violet-800 mb-2 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-violet-600" /> Demo Feedback Required ({pendingDemoFeedback.length})
+            </h2>
+            <p className="text-sm text-violet-600 mb-4">You must submit feedback for completed demos. This is mandatory and will be shared with the counsellor.</p>
+            <div className="space-y-2">
+              {pendingDemoFeedback.map(demo => (
+                <div key={demo.demo_id} className="bg-white rounded-xl p-3 border border-violet-200 flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900 text-sm">{demo.student_name || demo.name || 'Student'}</p>
+                    <p className="text-xs text-slate-500">{demo.subject || 'Demo'} - {demo.preferred_date}</p>
+                  </div>
+                  <Button onClick={() => { setDemoFeedbackTarget(demo); setShowDemoFeedbackDialog(true); }}
+                    className="bg-violet-500 hover:bg-violet-600 text-white rounded-full text-xs px-4" data-testid={`submit-demo-fb-${demo.demo_id}`}>
+                    Submit Feedback
+                  </Button>
                 </div>
               ))}
             </div>
@@ -546,6 +604,52 @@ const TeacherDashboard = () => {
               </div>
               <Button onClick={handleReschedule} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full py-6 font-bold" data-testid="confirm-reschedule-btn">
                 <CalendarDays className="w-5 h-5 mr-2" /> Confirm Reschedule
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Demo Feedback Dialog (Mandatory) */}
+      <Dialog open={showDemoFeedbackDialog} onOpenChange={setShowDemoFeedbackDialog}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Demo Feedback (Required)</DialogTitle></DialogHeader>
+          {demoFeedbackTarget && (
+            <div className="space-y-4 mt-4">
+              <div className="bg-violet-50 rounded-xl p-3 border border-violet-200">
+                <p className="font-semibold text-slate-900">{demoFeedbackTarget.student_name || demoFeedbackTarget.name || 'Student'}</p>
+                <p className="text-sm text-violet-700">{demoFeedbackTarget.subject || 'Demo'} - {demoFeedbackTarget.preferred_date}</p>
+              </div>
+              <div>
+                <Label>Performance Rating</Label>
+                <select value={demoFeedbackForm.performance_rating} onChange={e => setDemoFeedbackForm({...demoFeedbackForm, performance_rating: e.target.value})}
+                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="demo-fb-rating">
+                  <option value="excellent">Excellent</option>
+                  <option value="good">Good</option>
+                  <option value="average">Average</option>
+                  <option value="needs_improvement">Needs Improvement</option>
+                </select>
+              </div>
+              <div>
+                <Label>Recommended Frequency</Label>
+                <select value={demoFeedbackForm.recommended_frequency} onChange={e => setDemoFeedbackForm({...demoFeedbackForm, recommended_frequency: e.target.value})}
+                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="demo-fb-frequency">
+                  <option value="">Select...</option>
+                  <option value="daily">Daily</option>
+                  <option value="alternate_days">Alternate Days</option>
+                  <option value="3_per_week">3 Per Week</option>
+                  <option value="2_per_week">2 Per Week</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+              </div>
+              <div>
+                <Label>Feedback Notes (Required)</Label>
+                <textarea value={demoFeedbackForm.feedback_text} onChange={e => setDemoFeedbackForm({...demoFeedbackForm, feedback_text: e.target.value})}
+                  placeholder="Your assessment of the student's demo performance, readiness, areas to focus on..."
+                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={4} data-testid="demo-fb-text" />
+              </div>
+              <Button onClick={handleSubmitDemoFeedback} className="w-full bg-violet-500 hover:bg-violet-600 text-white rounded-full py-6 font-bold" data-testid="submit-demo-fb-btn">
+                Submit Demo Feedback
               </Button>
             </div>
           )}

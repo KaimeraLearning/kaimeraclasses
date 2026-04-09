@@ -376,6 +376,17 @@ const AdminDashboard = () => {
     } catch (err) { toast.error(err.message); }
   };
 
+  const handlePurgeSystem = async () => {
+    if (!window.confirm('WARNING: This will delete ALL students, teachers, counsellors, classes, demos, assignments, and pricing. Only the Admin account will remain. This action is IRREVERSIBLE. Are you sure?')) return;
+    if (!window.confirm('FINAL CONFIRMATION: Type "yes" to proceed. Everything will be deleted.')) return;
+    try {
+      const res = await fetch(`${API}/admin/purge-system`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success('System purged! Fresh install state.');
+      fetchAll();
+    } catch (err) { toast.error(err.message); }
+  };
+
   // ─── Computed ───
 
   const staff = useMemo(() => allUsers.filter(u =>
@@ -820,6 +831,14 @@ const AdminDashboard = () => {
                     </div>
                     <Button onClick={handleSavePricing} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="save-pricing-btn">
                       <Save className="w-5 h-5 mr-2" /> Save System Pricing
+                    </Button>
+                  </div>
+                  {/* System Reset */}
+                  <div className="mt-8 bg-red-50 rounded-2xl p-5 border border-red-200">
+                    <h4 className="text-sm font-bold text-red-800 mb-2">Danger Zone</h4>
+                    <p className="text-xs text-red-600 mb-3">Purge all system data (students, teachers, counsellors, classes, demos, pricing). Only Admin account will remain. This is irreversible.</p>
+                    <Button onClick={handlePurgeSystem} variant="outline" className="border-red-300 text-red-600 hover:bg-red-100 rounded-full" data-testid="purge-system-btn">
+                      <Trash2 className="w-4 h-4 mr-2" /> Purge System (Fresh Install)
                     </Button>
                   </div>
                 </div>
