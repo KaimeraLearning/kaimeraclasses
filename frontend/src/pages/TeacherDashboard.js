@@ -278,9 +278,11 @@ const TeacherDashboard = () => {
               <Play className="w-3 h-3 mr-1" /> Rejoin Live
             </Button>
           )}
+          {section === 'conducted' && (
+            <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="w-full rounded-full text-xs h-7"><Upload className="w-3 h-3 mr-1" /> Submit Proof</Button>
+          )}
           {section !== 'conducted' && cls.status !== 'completed' && (
             <div className="flex gap-1.5">
-              <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="flex-1 rounded-full text-xs h-7"><Upload className="w-3 h-3 mr-1" /> Proof</Button>
               <Button onClick={() => handleTeacherCancelClass(cls.class_id)} variant="outline" className="flex-1 rounded-full text-xs h-7 border-red-200 text-red-600 hover:bg-red-50" data-testid={`teacher-cancel-${cls.class_id}`}><XCircle className="w-3 h-3 mr-1" /> Cancel</Button>
             </div>
           )}
@@ -301,7 +303,7 @@ const TeacherDashboard = () => {
               <GraduationCap className="w-8 h-8 text-sky-500" />
               <div>
                 <h1 className="text-xl font-bold text-slate-900">{user?.name}</h1>
-                <p className="text-xs text-slate-500 font-mono">{user?.teacher_code}</p>
+                <p className="text-xs text-slate-500 font-mono" data-testid="teacher-id-display">ID: {user?.teacher_code || user?.user_id}</p>
               </div>
               {/* Star Rating Badge */}
               <button onClick={() => { fetchRating(); setShowRatingDialog(true); }} className="flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-full px-3 py-1 hover:bg-amber-100 transition-colors" data-testid="rating-badge">
@@ -325,6 +327,7 @@ const TeacherDashboard = () => {
         {/* Quick Actions */}
         <div className="flex flex-wrap gap-3 mb-8">
           <Button onClick={() => setShowCreateClass(true)} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full" data-testid="create-class-button"><Plus className="w-4 h-4 mr-2" /> Create Class</Button>
+          <Button onClick={() => navigate('/demo-live-sheet')} variant="outline" className="rounded-full bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100" data-testid="demo-live-sheet-button"><Play className="w-4 h-4 mr-2" /> Demo Live Sheet</Button>
           <Button onClick={() => navigate('/teacher-calendar')} variant="outline" className="rounded-full" data-testid="calendar-button"><Calendar className="w-4 h-4 mr-2" /> Schedule Planner</Button>
           <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full"><CreditCard className="w-4 h-4 mr-2" /> Wallet</Button>
           <Button onClick={() => navigate('/learning-kits')} variant="outline" className="rounded-full"><BookOpen className="w-4 h-4 mr-2" /> Learning Kit</Button>
@@ -447,10 +450,15 @@ const TeacherDashboard = () => {
               </div>
             </div>
             <div><Label>Student</Label>
-              <select value={classForm.assigned_student_id} onChange={e => setClassForm({...classForm, assigned_student_id: e.target.value})}
+              <select value={classForm.assigned_student_id} onChange={e => {
+                const sid = e.target.value;
+                const student = (dashboardData?.approved_students || []).find(s => s.student_id === sid);
+                const days = student?.assigned_days || classForm.duration_days;
+                setClassForm({...classForm, assigned_student_id: sid, duration_days: days});
+              }}
                 className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="class-student-select">
                 <option value="">Select student...</option>
-                {(dashboardData?.approved_students || []).map(s => <option key={s.student_id} value={s.student_id}>{s.student_name}</option>)}
+                {(dashboardData?.approved_students || []).map(s => <option key={s.student_id} value={s.student_id}>{s.student_name} {s.assigned_days ? `(${s.assigned_days} days assigned)` : ''}</option>)}
               </select>
             </div>
             <div className="grid grid-cols-3 gap-3">
@@ -459,7 +467,21 @@ const TeacherDashboard = () => {
               <div><Label>End</Label><Input type="time" value={classForm.end_time} onChange={e => setClassForm({...classForm, end_time: e.target.value})} className="rounded-xl" /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>Duration (Days)</Label><Input type="number" min="1" value={classForm.duration_days} onChange={e => setClassForm({...classForm, duration_days: parseInt(e.target.value) || 1})} className="rounded-xl" data-testid="class-days-input" /></div>
+              <div>
+                <Label>Duration (Days)</Label>
+                {(() => {
+                  const student = (dashboardData?.approved_students || []).find(s => s.student_id === classForm.assigned_student_id);
+                  const locked = student?.assigned_days > 0;
+                  return (
+                    <>
+                      <Input type="number" min="1" value={classForm.duration_days}
+                        onChange={e => { if (!locked) setClassForm({...classForm, duration_days: parseInt(e.target.value) || 1}); }}
+                        readOnly={locked} className={`rounded-xl ${locked ? 'bg-slate-100 cursor-not-allowed' : ''}`} data-testid="class-days-input" />
+                      {locked && <p className="text-[10px] text-amber-600 mt-0.5">Set by counsellor</p>}
+                    </>
+                  );
+                })()}
+              </div>
               <div className="flex items-end">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={classForm.is_demo} onChange={e => setClassForm({...classForm, is_demo: e.target.checked})} className="rounded" />

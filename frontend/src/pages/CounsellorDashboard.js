@@ -35,6 +35,7 @@ const CounsellorDashboard = () => {
   const [assignFrequency, setAssignFrequency] = useState('');
   const [assignDays, setAssignDays] = useState('');
   const [assignDemoNotes, setAssignDemoNotes] = useState('');
+  const [assignedDays, setAssignedDays] = useState('');
   const [studentTab, setStudentTab] = useState('unassigned');
   const [pageUnassigned, setPageUnassigned] = useState(1);
   const [pageActive, setPageActive] = useState(1);
@@ -99,7 +100,8 @@ const CounsellorDashboard = () => {
           teacher_id: selectedTeacherForAssign,
           class_frequency: assignFrequency || null,
           specific_days: assignDays || null,
-          demo_performance_notes: assignDemoNotes || null
+          demo_performance_notes: assignDemoNotes || null,
+          assigned_days: assignedDays ? parseInt(assignedDays) : null
         })
       });
       if (!response.ok) throw new Error((await response.json()).detail);
@@ -110,6 +112,7 @@ const CounsellorDashboard = () => {
       setAssignFrequency('');
       setAssignDays('');
       setAssignDemoNotes('');
+      setAssignedDays('');
       fetchDashboardData();
     } catch (error) {
       toast.error(error.message);
@@ -495,7 +498,7 @@ const CounsellorDashboard = () => {
       </div>
 
       {/* Assign Student Dialog */}
-      <Dialog open={showAssignDialog} onOpenChange={(open) => { setShowAssignDialog(open); if (!open) { setAssignFrequency(''); setAssignDays(''); setAssignDemoNotes(''); setMinRatingFilter(0); } }}>
+      <Dialog open={showAssignDialog} onOpenChange={(open) => { setShowAssignDialog(open); if (!open) { setAssignFrequency(''); setAssignDays(''); setAssignDemoNotes(''); setMinRatingFilter(0); setAssignedDays(''); } }}>
         <DialogContent className="sm:max-w-lg rounded-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold text-slate-900">Assign Student to Teacher</DialogTitle>
@@ -525,9 +528,12 @@ const CounsellorDashboard = () => {
                 <select value={selectedTeacherForAssign} onChange={e => setSelectedTeacherForAssign(e.target.value)}
                   className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="teacher-select">
                   <option value="">Choose a teacher...</option>
-                  {teachers.filter(t => (t.star_rating || 5) >= minRatingFilter).map(t => (
+                  {teachers.filter(t => {
+                    const rating = t.star_rating ?? 5;
+                    return rating >= minRatingFilter;
+                  }).map(t => (
                     <option key={t.user_id} value={t.user_id}>
-                      {t.name} ({t.teacher_code || t.email}) - {(t.star_rating || 5).toFixed(1)} stars
+                      {t.name} ({t.teacher_code || t.email}) - {(t.star_rating ?? 5).toFixed(1)} stars {t.is_suspended ? '(SUSPENDED)' : ''}
                     </option>
                   ))}
                 </select>
@@ -555,6 +561,12 @@ const CounsellorDashboard = () => {
                 <textarea value={assignDemoNotes} onChange={e => setAssignDemoNotes(e.target.value)}
                   placeholder="Notes from the demo session for the teacher..."
                   className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={3} data-testid="assign-demo-notes" />
+              </div>
+              <div>
+                <Label className="flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5 text-sky-600" /> Number of Class Days (Required)</Label>
+                <Input type="number" min="1" value={assignedDays} onChange={e => setAssignedDays(e.target.value)}
+                  placeholder="e.g. 10, 20, 30" className="rounded-xl" data-testid="assign-days-count" />
+                <p className="text-[10px] text-slate-500 mt-0.5">Teacher will only be able to create this many days of classes</p>
               </div>
               <p className="text-xs text-slate-500 bg-slate-50 rounded-lg p-2">Price per class is set globally by Admin. System pricing will apply.</p>
               <Button onClick={handleAssignStudent} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="confirm-assign-button">
@@ -594,6 +606,21 @@ const CounsellorDashboard = () => {
                   <p className="text-sm text-slate-600 mb-1">Status</p>
                   <p className="text-2xl font-bold text-slate-900">{selectedTeacher.is_approved ? 'Approved' : 'Pending'}</p>
                 </div>
+              </div>
+              {/* Teacher Rating Card */}
+              <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-bold text-amber-800">Star Rating</p>
+                  <span className="text-2xl font-black text-amber-600">{(selectedTeacher.star_rating ?? 5).toFixed(1)}<span className="text-sm">/5</span></span>
+                </div>
+                {selectedTeacher.rating_details && (
+                  <div className="grid grid-cols-3 gap-2 text-center mt-2">
+                    <div className="bg-white rounded-lg p-1.5"><p className="text-[10px] text-slate-500">Avg Feedback</p><p className="text-xs font-bold">{selectedTeacher.rating_details.avg_feedback?.toFixed(1) || '-'}</p></div>
+                    <div className="bg-white rounded-lg p-1.5"><p className="text-[10px] text-slate-500">Cancellations</p><p className="text-xs font-bold text-red-600">{selectedTeacher.rating_details.monthly_cancellations || 0}</p></div>
+                    <div className="bg-white rounded-lg p-1.5"><p className="text-[10px] text-slate-500">Penalty</p><p className="text-xs font-bold text-red-600">-{selectedTeacher.rating_details.penalty?.toFixed(1) || 0}</p></div>
+                  </div>
+                )}
+                {selectedTeacher.is_suspended && <p className="text-xs text-red-600 font-bold mt-2 bg-red-100 rounded-lg p-1.5 text-center">SUSPENDED until {new Date(selectedTeacher.suspended_until).toLocaleDateString()}</p>}
               </div>
               {selectedTeacher.badges?.length > 0 && (
                 <div className="flex flex-wrap gap-2">

@@ -162,6 +162,7 @@ class AssignStudentToTeacher(BaseModel):
     class_frequency: Optional[str] = None
     specific_days: Optional[str] = None
     demo_performance_notes: Optional[str] = None
+    assigned_days: Optional[int] = None  # Number of class days counsellor sets
 
 class TeacherApprovalRequest(BaseModel):
     assignment_id: str
@@ -1068,6 +1069,12 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     if not assignment:
         raise HTTPException(status_code=403, detail="Student not assigned to you or assignment not approved")
     
+    # Auto-enforce assigned_days from counsellor's assignment
+    enforced_days = assignment.get("assigned_days")
+    if enforced_days and enforced_days > 0:
+        if class_data.duration_days != enforced_days:
+            class_data.duration_days = enforced_days  # Force counsellor's value
+    
     # DUPLICATE PREVENTION: Only 1 active class per student-teacher pair
     existing_active = await db.class_sessions.find_one({
         "teacher_id": user.user_id,
@@ -1915,7 +1922,8 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         "assigned_by": user.user_id,
         "class_frequency": assignment.class_frequency if hasattr(assignment, 'class_frequency') else None,
         "specific_days": assignment.specific_days if hasattr(assignment, 'specific_days') else None,
-        "demo_performance_notes": assignment.demo_performance_notes if hasattr(assignment, 'demo_performance_notes') else None
+        "demo_performance_notes": assignment.demo_performance_notes if hasattr(assignment, 'demo_performance_notes') else None,
+        "assigned_days": assignment.assigned_days if hasattr(assignment, 'assigned_days') else None
     }
     
     await db.student_teacher_assignments.insert_one(assignment_doc)
@@ -4134,9 +4142,10 @@ async def teacher_pending_demo_feedback(request: Request, authorization: Optiona
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
 
-    # Find demos accepted by this teacher that don't have teacher feedback yet
+    # Find demos COMPLETED by this teacher that don't have teacher feedback yet
+    # Only "completed" or "feedback_submitted" status - NOT "accepted" (demo not yet conducted)
     demos = await db.demo_requests.find(
-        {"accepted_by_teacher_id": user.user_id, "status": {"$in": ["accepted", "completed", "feedback_submitted"]},
+        {"accepted_by_teacher_id": user.user_id, "status": {"$in": ["completed", "feedback_submitted"]},
          "$or": [{"teacher_feedback_submitted": {"$exists": False}}, {"teacher_feedback_submitted": False}]},
         {"_id": 0}
     ).to_list(50)
@@ -4503,25 +4512,52 @@ async def student_nag_check(request: Request, authorization: Optional[str] = Hea
 
 @api_router.post("/admin/reset-password")
 async def admin_reset_password(request: Request, authorization: Optional[str] = Header(None)):
-    """Admin resets password for any user"""
+    """Admin resets password for any user - accepts email or user_id"""
     user = await get_current_user(request, authorization)
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access only")
 
     body = await request.json()
     target_email = body.get("email")
+    target_user_id = body.get("user_id")
     new_password = body.get("new_password")
-    if not target_email or not new_password:
-        raise HTTPException(status_code=400, detail="Email and new_password required")
+    if not new_password:
+        raise HTTPException(status_code=400, detail="new_password required")
+    if not target_email and not target_user_id:
+        raise HTTPException(status_code=400, detail="email or user_id required")
 
-    target = await db.users.find_one({"email": target_email}, {"_id": 0})
+    query = {"email": target_email} if target_email else {"user_id": target_user_id}
+    target = await db.users.find_one(query, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
     password_hash = hash_password(new_password)
-    await db.users.update_one({"email": target_email}, {"$set": {"password_hash": password_hash}})
+    await db.users.update_one({"user_id": target["user_id"]}, {"$set": {"password_hash": password_hash}})
 
-    return {"message": f"Password reset for {target['name']} ({target_email})", "role": target["role"]}
+    return {"message": f"Password reset for {target['name']} ({target['email']})", "role": target["role"], "email": target["email"], "user_id": target["user_id"]}
+
+
+@api_router.get("/admin/search-users-for-reset")
+async def admin_search_users_for_reset(q: str = "", role: str = "", request: Request = None, authorization: Optional[str] = Header(None)):
+    """Admin searches users by name/email/user_id for password reset"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    query = {}
+    if role and role != "all":
+        query["role"] = role
+    if q:
+        query["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"email": {"$regex": q, "$options": "i"}},
+            {"user_id": {"$regex": q, "$options": "i"}},
+            {"teacher_code": {"$regex": q, "$options": "i"}},
+            {"student_code": {"$regex": q, "$options": "i"}}
+        ]
+
+    users = await db.users.find(query, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "role": 1, "teacher_code": 1, "student_code": 1}).to_list(50)
+    return users
 
 
 @api_router.get("/admin/all-users")

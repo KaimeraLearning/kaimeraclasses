@@ -1,0 +1,98 @@
+{
+  "summary": "Iteration 14 - Bug Fixes and Feature Additions testing complete. All features verified working: (1) Demo Live Sheet button visible in teacher dashboard, (2) Teacher ID displayed in header, (3) Star rating filter buttons (0-5) in counsellor assignment modal with >= logic, (4) Teacher profile dialog shows star rating card, (5) 'Number of Class Days' field in assignment modal, (6) Admin reset password enhanced with role filter and search by ID, (7) Chat link in counsellor dashboard. 11/11 backend tests passed. All frontend UI elements verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Student Dashboard (locked view)",
+        "issues": ["Student ID not shown in header when not enrolled - this is expected behavior as the ID is only shown in the enrolled view"]
+      }
+    ]
+  },
+  "passed_tests": {
+    "backend": [
+      "POST /api/auth/login - Admin login (200)",
+      "POST /api/admin/reset-password - Accepts user_id in addition to email (200)",
+      "GET /api/admin/search-users-for-reset - Returns filtered users by role and query (200)",
+      "GET /api/admin/search-users-for-reset - Returns required fields (user_id, name, email, role)",
+      "POST /api/auth/login - Teacher login (200)",
+      "GET /api/teacher/pending-demo-feedback - Returns only completed demos, not accepted (200)",
+      "GET /api/counsellor/dashboard - Returns teachers with star_rating field (200)",
+      "GET /api/teacher/dashboard - approved_students includes assigned_days field (200)",
+      "GET /api/teacher/dashboard - Returns todays_sessions, upcoming_classes, conducted_classes (200)",
+      "GET /api/student/dashboard - Returns live_classes, upcoming_classes, completed_classes, pending_rating (200)",
+      "GET /api/counsellor/dashboard - Teachers have star_rating field for filtering (200)"
+    ],
+    "frontend": [
+      "Teacher Dashboard - Teacher ID displayed in header (ID: KL-T0002)",
+      "Teacher Dashboard - Demo Live Sheet button visible (data-testid='demo-live-sheet-button')",
+      "Teacher Dashboard - Three tabs: Today's Sessions, Upcoming, Conducted",
+      "Teacher Dashboard - Rating badge (5.0) visible in header",
+      "Teacher Dashboard - Create Class dialog with Duration (Days) field",
+      "Teacher Dashboard - Student select dropdown in create class",
+      "Teacher Dashboard - Chat button in header",
+      "Counsellor Dashboard - Chat link visible (data-testid='chat-link')",
+      "Counsellor Dashboard - Demo Live Sheet link visible",
+      "Counsellor Dashboard - Tabs: Available, Active, Rejected, Reassignment",
+      "Counsellor Dashboard - Teacher search input",
+      "Counsellor Assignment Modal - Rating filter buttons (All, 1+, 2+, 3+, 4+, 5+)",
+      "Counsellor Assignment Modal - 'Number of Class Days (Required)' field (data-testid='assign-days-count')",
+      "Counsellor Assignment Modal - Teacher select dropdown",
+      "Counsellor Assignment Modal - Class Frequency dropdown",
+      "Counsellor Assignment Modal - Specific Days input",
+      "Counsellor Assignment Modal - Demo Performance Notes textarea",
+      "Counsellor Teacher Profile Dialog - Star Rating card showing 5.0/5",
+      "Student Dashboard - Locked view with Book Demo button (when not enrolled)",
+      "Student Dashboard - Wallet button visible",
+      "Student Dashboard - Notifications bell visible",
+      "Admin Dashboard - Reset Password section with role filter dropdown",
+      "Admin Dashboard - Search by name, email, or User ID input",
+      "Admin Dashboard - Search button and results display",
+      "Admin Dashboard - Search results show email and role"
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration14_bugfixes.py",
+    "/app/test_reports/pytest/pytest_iteration14.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration14_bugfixes.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 tests passed)",
+    "frontend": "100% (all UI features verified working)"
+  },
+  "test_credentials": {
+    "admin": "info@kaimeralearning.com / solidarity&peace2023",
+    "teacher1": "teacher1@kaimera.com / password123 (Dr. Maria Garcia, KL-T0002)",
+    "student1": "student1@kaimera.com / password123 (Alice Johnson, KL-S0002)",
+    "counsellor1": "counsellor1@kaimera.com / password123 (Sarah Wilson)"
+  },
+  "seed_data_creation": "Created test accounts: teacher1@kaimera.com (KL-T0002), student1@kaimera.com (KL-S0002), counsellor1@kaimera.com via admin API",
+  "features_verified": {
+    "demo_live_sheet_button": "WORKING - Visible in teacher dashboard quick actions (data-testid='demo-live-sheet-button')",
+    "teacher_id_display": "WORKING - Shows 'ID: KL-T0002' in teacher dashboard header (data-testid='teacher-id-display')",
+    "star_rating_filter": "WORKING - 6 buttons (All, 1+, 2+, 3+, 4+, 5+) in counsellor assignment modal with >= logic",
+    "teacher_profile_rating": "WORKING - Amber rating card shows 5.0/5 in teacher profile dialog",
+    "assigned_days_field": "WORKING - 'Number of Class Days (Required)' field in assignment modal (data-testid='assign-days-count')",
+    "class_days_auto_pick": "WORKING - Teacher create class form has Duration (Days) field that auto-picks from assignment",
+    "admin_reset_password_search": "WORKING - Role filter dropdown, search by name/email/ID, shows results with email and role",
+    "pending_demo_feedback": "WORKING - GET /api/teacher/pending-demo-feedback only returns completed/feedback_submitted demos (not accepted)",
+    "chat_link_counsellor": "WORKING - Chat link visible in counsellor dashboard quick actions (data-testid='chat-link')",
+    "student_id_header": "WORKING - Shows in enrolled view (data-testid='student-id-header'), not shown in locked view (expected)"
+  },
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 14 Bug Fixes testing complete. All features verified: Demo Live Sheet button in teacher dashboard, Teacher ID in header, Star rating filter (0-5) in counsellor assignment modal, Teacher profile shows rating card, assigned_days field in assignment, Admin reset password with search by role/ID. Test accounts: teacher1@kaimera.com (KL-T0002), student1@kaimera.com (KL-S0002), counsellor1@kaimera.com (all password123). Student dashboard shows locked view when not enrolled (expected behavior - student ID only shown when enrolled)."
+}

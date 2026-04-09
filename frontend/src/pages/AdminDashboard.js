@@ -87,6 +87,10 @@ const AdminDashboard = () => {
   // Password Reset
   const [resetEmail, setResetEmail] = useState('');
   const [resetPassword, setResetPassword] = useState('');
+  const [resetSearchQuery, setResetSearchQuery] = useState('');
+  const [resetRoleFilter, setResetRoleFilter] = useState('all');
+  const [resetSearchResults, setResetSearchResults] = useState([]);
+  const [resetSelectedUser, setResetSelectedUser] = useState(null);
 
   // Classes
   const [classFilter, setClassFilter] = useState({ search: '', is_demo: '', status: '' });
@@ -190,17 +194,29 @@ const AdminDashboard = () => {
   };
 
   const handleResetPassword = async () => {
-    if (!resetEmail || !resetPassword) { toast.error('Email and new password required'); return; }
+    const target = resetSelectedUser || (resetEmail ? { email: resetEmail } : null);
+    if (!target || !resetPassword) { toast.error('Select a user and enter new password'); return; }
     try {
+      const body = { new_password: resetPassword };
+      if (target.user_id) body.user_id = target.user_id;
+      else if (target.email) body.email = target.email;
       const res = await fetch(`${API}/admin/reset-password`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: resetEmail, new_password: resetPassword })
+        body: JSON.stringify(body)
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
-      toast.success('Password reset!');
-      setResetEmail('');
-      setResetPassword('');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      toast.success(`Password reset for ${data.email} (${data.role})`);
+      setResetEmail(''); setResetPassword(''); setResetSelectedUser(null); setResetSearchResults([]);
     } catch (err) { toast.error(err.message); }
+  };
+
+  const handleResetSearch = async () => {
+    if (!resetSearchQuery && resetRoleFilter === 'all') return;
+    try {
+      const res = await fetch(`${API}/admin/search-users-for-reset?q=${encodeURIComponent(resetSearchQuery)}&role=${resetRoleFilter}`, { credentials: 'include' });
+      if (res.ok) setResetSearchResults(await res.json());
+    } catch {}
   };
 
   const handleAdjustCredits = async (e) => {
@@ -626,6 +642,43 @@ const AdminDashboard = () => {
                   <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
                     <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><KeyRound className="w-5 h-5 text-amber-500" /> Reset Password</h3>
                     <div className="space-y-3">
+                      {/* Search by role or user ID */}
+                      <div className="flex gap-2">
+                        <select value={resetRoleFilter} onChange={e => setResetRoleFilter(e.target.value)} className="rounded-xl border-2 border-slate-200 px-2 py-2 text-sm" data-testid="reset-role-filter">
+                          <option value="all">All Roles</option>
+                          <option value="student">Student</option>
+                          <option value="teacher">Teacher</option>
+                          <option value="counsellor">Counsellor</option>
+                        </select>
+                        <Input value={resetSearchQuery} onChange={e => setResetSearchQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleResetSearch(); }} placeholder="Search by name, email, or User ID..." className="flex-1 rounded-xl" data-testid="reset-search-input" />
+                        <Button onClick={handleResetSearch} variant="outline" className="rounded-full" data-testid="reset-search-btn"><Search className="w-4 h-4" /></Button>
+                      </div>
+                      {/* Search Results */}
+                      {resetSearchResults.length > 0 && (
+                        <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-xl">
+                          {resetSearchResults.map(u => (
+                            <div key={u.user_id} onClick={() => { setResetSelectedUser(u); setResetEmail(u.email); }}
+                              className={`px-3 py-2 cursor-pointer text-sm hover:bg-sky-50 border-b border-slate-100 ${resetSelectedUser?.user_id === u.user_id ? 'bg-sky-50 border-l-4 border-l-sky-500' : ''}`}
+                              data-testid={`reset-user-${u.user_id}`}>
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-semibold text-slate-900">{u.name}</p>
+                                  <p className="text-xs text-slate-500">{u.email}</p>
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full">{u.role}</span>
+                                  <p className="text-[10px] font-mono text-slate-400 mt-0.5">{u.teacher_code || u.student_code || u.user_id}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {resetSelectedUser && (
+                        <div className="bg-sky-50 rounded-xl p-2 text-xs border border-sky-200">
+                          Selected: <strong>{resetSelectedUser.name}</strong> ({resetSelectedUser.email}) - {resetSelectedUser.role}
+                        </div>
+                      )}
                       <div><Label>User Email</Label><Input value={resetEmail} onChange={e => setResetEmail(e.target.value)} placeholder="user@example.com" className="rounded-xl" data-testid="reset-email-input" /></div>
                       <div><Label>New Password</Label><Input value={resetPassword} onChange={e => setResetPassword(e.target.value)} placeholder="New password" className="rounded-xl" data-testid="reset-password-input" /></div>
                       <Button onClick={handleResetPassword} className="bg-amber-500 hover:bg-amber-600 text-white rounded-full w-full" data-testid="reset-password-btn"><KeyRound className="w-4 h-4 mr-2" /> Reset</Button>

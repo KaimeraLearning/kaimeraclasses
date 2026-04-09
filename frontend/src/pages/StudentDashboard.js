@@ -207,6 +207,7 @@ const StudentDashboard = () => {
               {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{unreadCount}</span>}
             </button>
             <span className="text-sm font-medium text-slate-700">{user?.name}</span>
+            <span className="text-[10px] font-mono text-slate-400" data-testid="student-id-header">{user?.student_code}</span>
             <Button onClick={handleLogout} variant="outline" size="sm" className="rounded-full" data-testid="logout-button"><LogOut className="w-3 h-3" /></Button>
           </div>
         </div>
