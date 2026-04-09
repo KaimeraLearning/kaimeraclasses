@@ -2019,10 +2019,27 @@ async def get_student_profile(student_id: str, request: Request, authorization: 
         {"_id": 0}
     ).to_list(100)
     
+    # Get demo history with teacher info
+    demos = await db.demo_requests.find(
+        {"student_id": student_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(20)
+    demo_history = []
+    for d in demos:
+        demo_history.append({
+            "demo_id": d.get("demo_id"),
+            "title": d.get("subject", "Demo Session"),
+            "date": d.get("preferred_date"),
+            "status": d.get("status"),
+            "teacher_name": d.get("accepted_by_teacher_name"),
+            "teacher_id": d.get("accepted_by_teacher_id")
+        })
+    
     return {
         "student": student,
         "current_assignment": assignment,
-        "class_history": classes
+        "class_history": classes,
+        "demo_history": demo_history
     }
 
 # ==================== CLASS PROOF/VERIFICATION ENDPOINTS ====================

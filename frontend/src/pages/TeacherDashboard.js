@@ -30,6 +30,9 @@ const TeacherDashboard = () => {
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [feedbackTarget, setFeedbackTarget] = useState(null);
   const [feedbackForm, setFeedbackForm] = useState({ feedback_text: '', performance_rating: 'good' });
+  const [showRescheduleDialog, setShowRescheduleDialog] = useState(false);
+  const [rescheduleTarget, setRescheduleTarget] = useState(null);
+  const [rescheduleForm, setRescheduleForm] = useState({ new_date: '', new_start_time: '', new_end_time: '' });
   const [formData, setFormData] = useState({
     title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '',
     max_students: '1', assigned_student_id: '', duration_days: '1', is_demo: false
@@ -151,6 +154,24 @@ const TeacherDashboard = () => {
     } catch (error) { toast.error(error.message); }
   };
 
+  const handleReschedule = async () => {
+    if (!rescheduleForm.new_date || !rescheduleForm.new_start_time || !rescheduleForm.new_end_time) {
+      toast.error('All reschedule fields required'); return;
+    }
+    try {
+      const response = await fetch(`${API}/teacher/reschedule-class/${rescheduleTarget.class_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify(rescheduleForm)
+      });
+      if (!response.ok) throw new Error((await response.json()).detail);
+      toast.success('Session rescheduled!');
+      setShowRescheduleDialog(false);
+      setRescheduleTarget(null);
+      setRescheduleForm({ new_date: '', new_start_time: '', new_end_time: '' });
+      fetchDashboardData();
+    } catch (error) { toast.error(error.message); }
+  };
+
   const handleLogout = async () => {
     try { await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' }); navigate('/login'); } catch {}
   };
@@ -183,6 +204,16 @@ const TeacherDashboard = () => {
           <div className="flex items-center gap-1.5"><Users className="w-3 h-3" /><span>{cls.duration_days}d | {cls.start_time}-{cls.end_time}</span></div>
         </div>
         {cancellations > 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-1.5 mb-2 text-xs text-amber-800 font-semibold">Cancelled {cancellations}/{cls.max_cancellations || 3} sessions</div>}
+        {cls.cancelled_today && (
+          <Button onClick={() => { setRescheduleTarget(cls); setShowRescheduleDialog(true); }} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full text-xs h-7 mb-2" data-testid={`reschedule-${cls.class_id}`}>
+            <CalendarDays className="w-3 h-3 mr-1" /> Reschedule Session
+          </Button>
+        )}
+        {cls.rescheduled && (
+          <div className="bg-sky-50 border border-sky-200 rounded-lg p-1.5 mb-2 text-xs text-sky-800 font-medium">
+            Rescheduled to {cls.rescheduled_date} {cls.rescheduled_start_time}-{cls.rescheduled_end_time}
+          </div>
+        )}
         {proof && <div className={`rounded-lg p-1.5 mb-2 text-center text-xs font-semibold ${proof.status === 'pending' ? 'bg-amber-50 text-amber-800' : proof.status === 'verified' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}><ShieldCheck className="w-3 h-3 inline mr-1" /> Proof: {proof.status}</div>}
         <div className="space-y-1.5">
           {cls.status === 'scheduled' && (
@@ -486,6 +517,38 @@ const TeacherDashboard = () => {
               </div>
             ))}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reschedule Dialog */}
+      <Dialog open={showRescheduleDialog} onOpenChange={setShowRescheduleDialog}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Reschedule Session</DialogTitle></DialogHeader>
+          {rescheduleTarget && (
+            <div className="space-y-4 mt-4">
+              <div className="bg-amber-50 rounded-xl p-3 border border-amber-200">
+                <p className="font-semibold text-slate-900">{rescheduleTarget.title}</p>
+                <p className="text-sm text-amber-700">Student cancelled today's session</p>
+              </div>
+              <div>
+                <Label>New Date</Label>
+                <Input type="date" value={rescheduleForm.new_date} onChange={e => setRescheduleForm({...rescheduleForm, new_date: e.target.value})} className="rounded-xl" data-testid="reschedule-date" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Start Time</Label>
+                  <Input type="time" value={rescheduleForm.new_start_time} onChange={e => setRescheduleForm({...rescheduleForm, new_start_time: e.target.value})} className="rounded-xl" data-testid="reschedule-start" />
+                </div>
+                <div>
+                  <Label>End Time</Label>
+                  <Input type="time" value={rescheduleForm.new_end_time} onChange={e => setRescheduleForm({...rescheduleForm, new_end_time: e.target.value})} className="rounded-xl" data-testid="reschedule-end" />
+                </div>
+              </div>
+              <Button onClick={handleReschedule} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full py-6 font-bold" data-testid="confirm-reschedule-btn">
+                <CalendarDays className="w-5 h-5 mr-2" /> Confirm Reschedule
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

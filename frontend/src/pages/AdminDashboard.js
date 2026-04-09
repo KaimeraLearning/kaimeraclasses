@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import {
   GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap,
   History, Search, Shield, Award, Filter, BookOpen, KeyRound, Users, Trash2, Plus,
-  Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play
+  Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
@@ -93,6 +93,14 @@ const AdminDashboard = () => {
 
   // Counsellor chart
   const [expandedCounsellor, setExpandedCounsellor] = useState(null);
+
+  // System Pricing
+  const [pricingForm, setPricingForm] = useState({ demo_price_student: '', class_price_student: '', demo_earning_teacher: '', class_earning_teacher: '' });
+  const [pricingLoaded, setPricingLoaded] = useState(false);
+
+  // Student Edit
+  const [editingStudent, setEditingStudent] = useState(false);
+  const [editForm, setEditForm] = useState({});
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -301,6 +309,71 @@ const AdminDashboard = () => {
   const handleLogout = async () => {
     await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
     navigate('/login');
+  };
+
+  const fetchPricing = async () => {
+    try {
+      const res = await fetch(`${API}/admin/get-pricing`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setPricingForm({
+          demo_price_student: data.demo_price_student ?? '',
+          class_price_student: data.class_price_student ?? '',
+          demo_earning_teacher: data.demo_earning_teacher ?? '',
+          class_earning_teacher: data.class_earning_teacher ?? ''
+        });
+        setPricingLoaded(true);
+      }
+    } catch {}
+  };
+
+  const handleSavePricing = async () => {
+    try {
+      const res = await fetch(`${API}/admin/set-pricing`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          demo_price_student: parseFloat(pricingForm.demo_price_student) || 0,
+          class_price_student: parseFloat(pricingForm.class_price_student) || 0,
+          demo_earning_teacher: parseFloat(pricingForm.demo_earning_teacher) || 0,
+          class_earning_teacher: parseFloat(pricingForm.class_earning_teacher) || 0
+        })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success('System pricing updated!');
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleStartEditStudent = () => {
+    if (!drawerUser || drawerUser.role !== 'student') return;
+    setEditForm({
+      name: drawerUser.name || '',
+      email: drawerUser.email || '',
+      phone: drawerUser.phone || '',
+      institute: drawerUser.institute || '',
+      goal: drawerUser.goal || '',
+      preferred_time_slot: drawerUser.preferred_time_slot || '',
+      state: drawerUser.state || '',
+      city: drawerUser.city || '',
+      country: drawerUser.country || '',
+      grade: drawerUser.grade || '',
+      credits: drawerUser.credits || 0,
+      bio: drawerUser.bio || ''
+    });
+    setEditingStudent(true);
+  };
+
+  const handleSaveStudentEdit = async () => {
+    try {
+      const res = await fetch(`${API}/admin/edit-student/${drawerUser.user_id}`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm)
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success('Student profile updated!');
+      setEditingStudent(false);
+      setDrawerUser(null);
+      fetchAll();
+    } catch (err) { toast.error(err.message); }
   };
 
   // ─── Computed ───
@@ -581,6 +654,7 @@ const AdminDashboard = () => {
               <TabsList className="mb-4">
                 <TabsTrigger value="ledger" data-testid="ledger-tab">Transaction Ledger</TabsTrigger>
                 <TabsTrigger value="proofs" data-testid="proofs-tab">Proofs & Approvals ({pendingProofs.length})</TabsTrigger>
+                <TabsTrigger value="pricing" data-testid="pricing-tab" onClick={() => { if (!pricingLoaded) fetchPricing(); }}><Settings className="w-3.5 h-3.5 mr-1.5" /> System Pricing</TabsTrigger>
               </TabsList>
 
               {/* ── Transaction Ledger ── */}
@@ -709,6 +783,45 @@ const AdminDashboard = () => {
                       ))}
                     </div>
                   )}
+                </div>
+              </TabsContent>
+
+              {/* ── System Pricing ── */}
+              <TabsContent value="pricing">
+                <div className="bg-white rounded-3xl border-2 border-slate-100 p-6 max-w-2xl">
+                  <h3 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2"><Settings className="w-5 h-5 text-sky-500" /> Unified Rates Dashboard</h3>
+                  <p className="text-sm text-slate-500 mb-6">Set global pricing for all student-teacher transactions. These rates apply to all new assignments.</p>
+                  <div className="space-y-6">
+                    <div className="bg-sky-50 rounded-2xl p-5 border border-sky-200">
+                      <h4 className="text-sm font-bold text-sky-800 mb-3">Student Rates (Deducted from wallet)</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-xs text-sky-700">Demo Class Rate (credits)</Label>
+                          <Input type="number" step="0.1" min="0" value={pricingForm.demo_price_student} onChange={e => setPricingForm({...pricingForm, demo_price_student: e.target.value})} className="rounded-xl bg-white" data-testid="pricing-demo-student" />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-sky-700">Regular Class Fee (credits)</Label>
+                          <Input type="number" step="0.1" min="0" value={pricingForm.class_price_student} onChange={e => setPricingForm({...pricingForm, class_price_student: e.target.value})} className="rounded-xl bg-white" data-testid="pricing-class-student" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-amber-50 rounded-2xl p-5 border border-amber-200">
+                      <h4 className="text-sm font-bold text-amber-800 mb-3">Teacher Rates (Credited to wallet)</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-xs text-amber-700">Demo Session Credit (credits)</Label>
+                          <Input type="number" step="0.1" min="0" value={pricingForm.demo_earning_teacher} onChange={e => setPricingForm({...pricingForm, demo_earning_teacher: e.target.value})} className="rounded-xl bg-white" data-testid="pricing-demo-teacher" />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-amber-700">Regular Class Pay (credits)</Label>
+                          <Input type="number" step="0.1" min="0" value={pricingForm.class_earning_teacher} onChange={e => setPricingForm({...pricingForm, class_earning_teacher: e.target.value})} className="rounded-xl bg-white" data-testid="pricing-class-teacher" />
+                        </div>
+                      </div>
+                    </div>
+                    <Button onClick={handleSavePricing} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="save-pricing-btn">
+                      <Save className="w-5 h-5 mr-2" /> Save System Pricing
+                    </Button>
+                  </div>
                 </div>
               </TabsContent>
             </Tabs>
@@ -842,7 +955,7 @@ const AdminDashboard = () => {
       </div>
 
       {/* ═══════ DRAWER: User Drill-Down ═══════ */}
-      <Dialog open={!!drawerUser} onOpenChange={() => setDrawerUser(null)}>
+      <Dialog open={!!drawerUser} onOpenChange={(open) => { if (!open) { setDrawerUser(null); setEditingStudent(false); } }}>
         <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="text-xl font-bold text-slate-900">User Profile</DialogTitle></DialogHeader>
           {drawerUser && (
@@ -857,18 +970,54 @@ const AdminDashboard = () => {
                   {drawerUser.is_blocked && <span className="bg-red-500/80 px-2 py-1 rounded-full font-bold">BLOCKED</span>}
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">Credits</p><p className="text-lg font-bold">{drawerUser.credits || 0}</p></div>
-                <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">Phone</p><p className="text-xs font-medium">{drawerUser.phone || 'N/A'}</p></div>
-                <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">Grade</p><p className="text-xs font-medium">{drawerUser.grade ? `Class ${drawerUser.grade}` : 'N/A'}</p></div>
-              </div>
-              {/* Admin Actions */}
-              {drawerUser.role !== 'admin' && (
-                <div className="flex gap-2">
-                  <Button onClick={() => { setCreditUser(drawerUser.user_id); setCreditsDialog(true); }} variant="outline" className="flex-1 rounded-full text-xs"><DollarSign className="w-3 h-3 mr-1" /> Credits</Button>
-                  <Button onClick={() => handleBlock(drawerUser.user_id, !drawerUser.is_blocked)} variant="outline" className={`flex-1 rounded-full text-xs ${drawerUser.is_blocked ? 'border-emerald-200 text-emerald-600' : 'border-amber-200 text-amber-600'}`} data-testid="drawer-block-btn"><Ban className="w-3 h-3 mr-1" /> {drawerUser.is_blocked ? 'Unblock' : 'Block'}</Button>
-                  <Button onClick={() => handleDelete(drawerUser.user_id)} variant="outline" className="flex-1 rounded-full text-xs border-red-200 text-red-600" data-testid="drawer-delete-btn"><Trash2 className="w-3 h-3 mr-1" /> Delete</Button>
+
+              {/* Student Edit Mode */}
+              {editingStudent && drawerUser.role === 'student' ? (
+                <div className="space-y-3 bg-sky-50 rounded-2xl p-4 border border-sky-200">
+                  <h4 className="text-sm font-bold text-sky-800 flex items-center gap-1.5"><Pencil className="w-3.5 h-3.5" /> Edit Student Profile</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><Label className="text-xs">Name</Label><Input value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-name" /></div>
+                    <div><Label className="text-xs">Email</Label><Input value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-email" /></div>
+                    <div><Label className="text-xs">Phone</Label><Input value={editForm.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-phone" /></div>
+                    <div><Label className="text-xs">Credits</Label><Input type="number" step="0.1" value={editForm.credits} onChange={e => setEditForm({...editForm, credits: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-credits" /></div>
+                    <div><Label className="text-xs">Grade</Label>
+                      <select value={editForm.grade} onChange={e => setEditForm({...editForm, grade: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 bg-white text-sm h-10" data-testid="edit-student-grade">
+                        <option value="">Select...</option>
+                        {['1','2','3','4','5','6','7','8','9','10','11','12','UG','PG','Other'].map(g => <option key={g} value={g}>{g === 'UG' || g === 'PG' || g === 'Other' ? g : `Class ${g}`}</option>)}
+                      </select>
+                    </div>
+                    <div><Label className="text-xs">Institute</Label><Input value={editForm.institute} onChange={e => setEditForm({...editForm, institute: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-institute" /></div>
+                    <div><Label className="text-xs">Goal</Label><Input value={editForm.goal} onChange={e => setEditForm({...editForm, goal: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-goal" /></div>
+                    <div><Label className="text-xs">Preferred Time</Label><Input value={editForm.preferred_time_slot} onChange={e => setEditForm({...editForm, preferred_time_slot: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-time" /></div>
+                    <div><Label className="text-xs">State</Label><Input value={editForm.state} onChange={e => setEditForm({...editForm, state: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-state" /></div>
+                    <div><Label className="text-xs">City</Label><Input value={editForm.city} onChange={e => setEditForm({...editForm, city: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-city" /></div>
+                    <div><Label className="text-xs">Country</Label><Input value={editForm.country} onChange={e => setEditForm({...editForm, country: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-country" /></div>
+                    <div><Label className="text-xs">Bio</Label><Input value={editForm.bio} onChange={e => setEditForm({...editForm, bio: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-bio" /></div>
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    <Button onClick={handleSaveStudentEdit} className="flex-1 bg-sky-500 hover:bg-sky-600 text-white rounded-full font-bold" data-testid="save-student-edit-btn"><Save className="w-4 h-4 mr-1" /> Save Changes</Button>
+                    <Button onClick={() => setEditingStudent(false)} variant="outline" className="rounded-full">Cancel</Button>
+                  </div>
                 </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">Credits</p><p className="text-lg font-bold">{drawerUser.credits || 0}</p></div>
+                    <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">Phone</p><p className="text-xs font-medium">{drawerUser.phone || 'N/A'}</p></div>
+                    <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">Grade</p><p className="text-xs font-medium">{drawerUser.grade ? `Class ${drawerUser.grade}` : 'N/A'}</p></div>
+                  </div>
+                  {/* Admin Actions */}
+                  {drawerUser.role !== 'admin' && (
+                    <div className="flex gap-2 flex-wrap">
+                      {drawerUser.role === 'student' && (
+                        <Button onClick={handleStartEditStudent} variant="outline" className="flex-1 rounded-full text-xs border-sky-200 text-sky-600" data-testid="drawer-edit-student-btn"><Pencil className="w-3 h-3 mr-1" /> Edit Profile</Button>
+                      )}
+                      <Button onClick={() => { setCreditUser(drawerUser.user_id); setCreditsDialog(true); }} variant="outline" className="flex-1 rounded-full text-xs"><DollarSign className="w-3 h-3 mr-1" /> Credits</Button>
+                      <Button onClick={() => handleBlock(drawerUser.user_id, !drawerUser.is_blocked)} variant="outline" className={`flex-1 rounded-full text-xs ${drawerUser.is_blocked ? 'border-emerald-200 text-emerald-600' : 'border-amber-200 text-amber-600'}`} data-testid="drawer-block-btn"><Ban className="w-3 h-3 mr-1" /> {drawerUser.is_blocked ? 'Unblock' : 'Block'}</Button>
+                      <Button onClick={() => handleDelete(drawerUser.user_id)} variant="outline" className="flex-1 rounded-full text-xs border-red-200 text-red-600" data-testid="drawer-delete-btn"><Trash2 className="w-3 h-3 mr-1" /> Delete</Button>
+                    </div>
+                  )}
+                </>
               )}
               {/* Drill-down data */}
               {drawerData && (
