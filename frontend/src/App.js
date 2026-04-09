@@ -20,6 +20,7 @@ import HistoryPage from './pages/HistoryPage';
 import WalletPage from './pages/WalletPage';
 import LearningKit from './pages/LearningKit';
 import TeacherCalendar from './pages/TeacherCalendar';
+import ChatPage from './pages/ChatPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from './components/ui/sonner';
 import './App.css';
@@ -121,6 +122,11 @@ function AppRouter() {
         <Route path="/teacher-calendar" element={
           <ProtectedRoute requiredRole="teacher">
             <TeacherCalendar />
+          </ProtectedRoute>
+        } />
+        <Route path="/chat" element={
+          <ProtectedRoute>
+            <ChatPage />
           </ProtectedRoute>
         } />
         <Route path="/class/:classId" element={

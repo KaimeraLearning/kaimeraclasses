@@ -294,6 +294,15 @@ class AdminProofApproval(BaseModel):
     approved: bool
     admin_notes: Optional[str] = None
 
+class ChatMessage(BaseModel):
+    recipient_id: str
+    message: str
+
+class StudentFeedbackRating(BaseModel):
+    class_id: str
+    rating: int  # 1-5
+    comments: str
+
 # ==================== HELPER FUNCTIONS ====================
 
 async def generate_teacher_code():
@@ -434,6 +443,82 @@ async def seed_admin():
         })
         
         logging.info(f"Admin account seeded: {admin_email}")
+
+
+async def recalc_teacher_rating(teacher_id: str):
+    """Recalculate a teacher's star rating based on student feedback and cancellations"""
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    # Get all student feedback ratings for this teacher
+    feedbacks = await db.feedback.find(
+        {"teacher_id": teacher_id, "rating": {"$exists": True}},
+        {"_id": 0, "rating": 1}
+    ).to_list(5000)
+    avg_feedback = sum(f["rating"] for f in feedbacks) / len(feedbacks) if feedbacks else 5.0
+
+    # Count monthly cancellations by teacher
+    monthly_cancellations = await db.teacher_rating_events.count_documents({
+        "teacher_id": teacher_id, "event": "cancellation",
+        "created_at": {"$gte": month_start}
+    })
+
+    # Count bad feedbacks (rating <= 2)
+    bad_feedbacks = sum(1 for f in feedbacks if f["rating"] <= 2)
+
+    # Rating: start at avg_feedback, subtract 0.2 per cancellation, 0.3 per bad feedback
+    penalty = (monthly_cancellations * 0.2) + (bad_feedbacks * 0.3)
+    star_rating = round(max(0, min(5, avg_feedback - penalty)), 1)
+
+    # Auto-suspension: 5+ cancellations this month
+    is_suspended = False
+    suspension_until = None
+    if monthly_cancellations >= 5:
+        existing_suspension = await db.users.find_one(
+            {"user_id": teacher_id, "suspended_until": {"$exists": True}}, {"_id": 0, "suspended_until": 1}
+        )
+        if existing_suspension and existing_suspension.get("suspended_until"):
+            susp_until = existing_suspension["suspended_until"]
+            if isinstance(susp_until, str):
+                susp_until = datetime.fromisoformat(susp_until)
+            if susp_until.tzinfo is None:
+                susp_until = susp_until.replace(tzinfo=timezone.utc)
+            if now < susp_until:
+                is_suspended = True
+                suspension_until = susp_until.isoformat()
+        else:
+            # New suspension: 3 days
+            suspension_until = (now + timedelta(days=3)).isoformat()
+            is_suspended = True
+
+    update = {
+        "star_rating": star_rating,
+        "monthly_cancellations": monthly_cancellations,
+        "is_suspended": is_suspended,
+        "rating_details": {
+            "avg_feedback": round(avg_feedback, 2),
+            "total_feedbacks": len(feedbacks),
+            "bad_feedbacks": bad_feedbacks,
+            "monthly_cancellations": monthly_cancellations,
+            "penalty": round(penalty, 2)
+        }
+    }
+    if suspension_until:
+        update["suspended_until"] = suspension_until
+    await db.users.update_one({"user_id": teacher_id}, {"$set": update})
+    return star_rating, is_suspended
+
+
+async def record_rating_event(teacher_id: str, event: str, details: str = ""):
+    """Record a rating event (cancellation, bad_feedback) and recalculate"""
+    await db.teacher_rating_events.insert_one({
+        "event_id": f"rev_{uuid.uuid4().hex[:12]}",
+        "teacher_id": teacher_id,
+        "event": event,
+        "details": details,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    return await recalc_teacher_rating(teacher_id)
 
 # ==================== AUTH ENDPOINTS ====================
 
@@ -897,7 +982,7 @@ async def cancel_todays_session(class_id: str, request: Request, authorization: 
 
 @api_router.get("/student/dashboard")
 async def student_dashboard(request: Request, authorization: Optional[str] = Header(None)):
-    """Get student dashboard data"""
+    """Get student dashboard data with live/upcoming/completed sections"""
     user = await get_current_user(request, authorization)
     
     if user.role != "student":
@@ -910,26 +995,49 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
     ).to_list(1000)
     
     now = datetime.now(timezone.utc)
+    today_str = now.strftime('%Y-%m-%d')
+    
+    live_classes = []
     upcoming = []
-    past = []
+    completed = []
+    pending_rating = []
     
     for cls in all_classes:
-        class_datetime = datetime.fromisoformat(f"{cls['date']}T{cls['start_time']}:00")
-        if class_datetime.tzinfo is None:
-            class_datetime = class_datetime.replace(tzinfo=timezone.utc)
+        status = cls.get('status', 'scheduled')
+        cls_date = cls.get('date', '')
+        cls_end_date = cls.get('end_date', cls_date)
         
-        if isinstance(cls['created_at'], str):
-            cls['created_at'] = datetime.fromisoformat(cls['created_at'])
-        
-        if class_datetime > now:
+        if status == 'in_progress' or (status == 'scheduled' and cls_date == today_str):
+            live_classes.append(cls)
+        elif status == 'completed':
+            # Check if student has rated it
+            rated = await db.feedback.find_one(
+                {"class_id": cls["class_id"], "student_id": user.user_id, "type": "student_rating"},
+                {"_id": 0}
+            )
+            if rated:
+                completed.append(cls)
+            else:
+                pending_rating.append(cls)
+        elif cls_date > today_str and status in ('scheduled',):
             upcoming.append(cls)
+        elif cls_end_date < today_str and status not in ('completed', 'cancelled'):
+            # Auto-complete
+            await db.class_sessions.update_one(
+                {"class_id": cls["class_id"]}, {"$set": {"status": "completed"}}
+            )
+            cls["status"] = "completed"
+            pending_rating.append(cls)
         else:
-            past.append(cls)
+            completed.append(cls)
     
     return {
         "credits": user.credits,
+        "live_classes": live_classes,
         "upcoming_classes": upcoming,
-        "past_classes": past
+        "completed_classes": completed,
+        "pending_rating": pending_rating,
+        "past_classes": completed + pending_rating  # backward compat
     }
 
 # ==================== TEACHER ENDPOINTS ====================
@@ -945,6 +1053,11 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     if not user.is_approved:
         raise HTTPException(status_code=403, detail="Teacher account not approved yet")
     
+    # Check suspension
+    if getattr(user, 'is_suspended', False):
+        susp_until = getattr(user, 'suspended_until', None)
+        raise HTTPException(status_code=403, detail=f"Account suspended until {susp_until}. Cannot create classes.")
+    
     # Verify student is assigned to this teacher
     assignment = await db.student_teacher_assignments.find_one({
         "teacher_id": user.user_id,
@@ -955,20 +1068,42 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     if not assignment:
         raise HTTPException(status_code=403, detail="Student not assigned to you or assignment not approved")
     
-    # Get system pricing (admin-set, teacher doesn't decide)
+    # DUPLICATE PREVENTION: Only 1 active class per student-teacher pair
+    existing_active = await db.class_sessions.find_one({
+        "teacher_id": user.user_id,
+        "assigned_student_id": class_data.assigned_student_id,
+        "status": {"$in": ["scheduled", "in_progress"]}
+    }, {"_id": 0})
+    if existing_active:
+        raise HTTPException(status_code=400, detail="You already have an active class with this student. Complete or cancel it first.")
+    
+    # Get system pricing
     pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
     if not pricing:
         raise HTTPException(status_code=500, detail="System pricing not configured")
     
-    # Use demo price or custom assignment price
+    # Calculate total cost = price per class × number of days
     if class_data.is_demo:
-        credits_required = pricing.get('demo_price_student', 0)
+        price_per_day = pricing.get('demo_price_student', 0)
     else:
-        credits_required = assignment['credit_price']
+        price_per_day = pricing.get('class_price_student', 0)
+    
+    total_cost = price_per_day * class_data.duration_days
+    
+    # INSUFFICIENT FUNDS CHECK
+    student = await db.users.find_one({"user_id": class_data.assigned_student_id}, {"_id": 0})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    
+    if student.get("credits", 0) < total_cost and total_cost > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Action Failed: Insufficient funds in student account. Required: {total_cost} credits, Available: {student.get('credits', 0)} credits."
+        )
     
     # Calculate end date based on duration
     start_date = datetime.fromisoformat(class_data.date)
-    end_date = start_date + timedelta(days=class_data.duration_days - 1)  # -1 because start date counts as day 1
+    end_date = start_date + timedelta(days=class_data.duration_days - 1)
     
     class_id = f"class_{uuid.uuid4().hex[:12]}"
     
@@ -981,64 +1116,90 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
         "class_type": class_data.class_type,
         "is_demo": class_data.is_demo,
         "date": class_data.date,
-        "end_date": end_date.isoformat().split('T')[0],  # End date
+        "end_date": end_date.isoformat().split('T')[0],
         "duration_days": class_data.duration_days,
+        "current_day": 1,
         "start_time": class_data.start_time,
         "end_time": class_data.end_time,
-        "credits_required": credits_required,  # From assignment, teacher doesn't see this
+        "credits_required": total_cost,
+        "price_per_day": price_per_day,
         "max_students": class_data.max_students,
-        "assigned_student_id": class_data.assigned_student_id,  # Class created for specific student
-        "enrolled_students": [],  # Will auto-enroll student after creation
+        "assigned_student_id": class_data.assigned_student_id,
+        "enrolled_students": [],
         "status": "scheduled",
-        "verification_status": "pending",  # pending, submitted, verified, rejected
-        "cancellations": [],  # Tracks per-day cancellations by student
+        "verification_status": "pending",
+        "cancellations": [],
         "cancellation_count": 0,
         "max_cancellations": 3,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
-    # Create a copy for insertion to avoid ObjectId in response
     insert_doc = class_doc.copy()
     await db.class_sessions.insert_one(insert_doc)
     
-    # Auto-enroll the student (no booking needed for teacher-created classes)
-    student = await db.users.find_one({"user_id": class_data.assigned_student_id}, {"_id": 0})
+    # Auto-enroll the student
     await db.class_sessions.update_one(
         {"class_id": class_id},
         {"$push": {"enrolled_students": {"user_id": student['user_id'], "name": student['name']}}}
     )
     
-    # Deduct credits from student (auto-deduct for teacher-created classes)
-    await db.users.update_one(
-        {"user_id": student['user_id']},
-        {"$inc": {"credits": -credits_required}}
-    )
+    # Deduct total credits from student
+    if total_cost > 0:
+        await db.users.update_one(
+            {"user_id": student['user_id']},
+            {"$inc": {"credits": -total_cost}}
+        )
+        
+        transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+        await db.transactions.insert_one({
+            "transaction_id": transaction_id,
+            "user_id": student['user_id'],
+            "type": "class_booking",
+            "amount": -total_cost,
+            "description": f"Class: {class_data.title} ({class_data.duration_days} days x {price_per_day} credits/day)",
+            "status": "completed",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
     
-    # Create transaction
-    transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
-    await db.transactions.insert_one({
-        "transaction_id": transaction_id,
-        "user_id": student['user_id'],
-        "type": "auto_booking",
-        "amount": -credits_required,
-        "description": f"Auto-enrolled in class: {class_data.title}",
-        "status": "completed",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
+    # Update matured_lead status if this is first regular class with demo teacher
+    if not class_data.is_demo:
+        demo = await db.demo_requests.find_one({
+            "student_id": class_data.assigned_student_id,
+            "accepted_by_teacher_id": user.user_id,
+            "status": {"$in": ["completed", "feedback_submitted"]}
+        }, {"_id": 0})
+        if demo:
+            await db.users.update_one(
+                {"user_id": class_data.assigned_student_id},
+                {"$set": {"matured_lead": True, "matured_at": datetime.now(timezone.utc).isoformat()}}
+            )
     
-    # Don't return credits_required to teacher
     response_doc = {k: v for k, v in class_doc.items() if k != 'credits_required'}
-    response_doc['created_at'] = datetime.fromisoformat(class_doc['created_at'])
     
     return {"message": "Class created successfully", "class": response_doc}
 
 @api_router.get("/teacher/dashboard")
 async def teacher_dashboard(request: Request, authorization: Optional[str] = Header(None)):
-    """Get teacher dashboard data with week view"""
+    """Get teacher dashboard data with session state management"""
     user = await get_current_user(request, authorization)
     
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
+    
+    # Check suspension
+    teacher_doc = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+    if teacher_doc.get("is_suspended"):
+        susp_until = teacher_doc.get("suspended_until", "")
+        return {
+            "is_suspended": True,
+            "suspended_until": susp_until,
+            "star_rating": teacher_doc.get("star_rating", 5.0),
+            "rating_details": teacher_doc.get("rating_details", {}),
+            "is_approved": user.is_approved,
+            "classes": [], "other_classes": [], "todays_sessions": [],
+            "upcoming_classes": [], "conducted_classes": [],
+            "pending_assignments": [], "approved_students": []
+        }
     
     # Get all classes by this teacher
     all_classes = await db.class_sessions.find(
@@ -1046,41 +1207,39 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         {"_id": 0}
     ).to_list(1000)
     
-    for cls in all_classes:
-        if isinstance(cls['created_at'], str):
-            cls['created_at'] = datetime.fromisoformat(cls['created_at'])
-    
-    # Separate into this week's classes and others
     now = datetime.now(timezone.utc)
-    today = now.date()
-    # Start of week (Monday)
-    week_start = today - timedelta(days=today.weekday())
-    week_end = week_start + timedelta(days=6)
+    today_str = now.strftime('%Y-%m-%d')
     
-    this_week_classes = []
-    other_classes = []
+    todays_sessions = []
+    upcoming_classes = []
+    conducted_classes = []
     
     for cls in all_classes:
-        cls_date = datetime.fromisoformat(cls['date']).date() if isinstance(cls['date'], str) else cls['date']
-        cls_end = datetime.fromisoformat(cls.get('end_date', cls['date'])).date() if isinstance(cls.get('end_date', cls['date']), str) else cls.get('end_date', cls_date)
+        cls_date = cls.get('date', '')
+        cls_end_date = cls.get('end_date', cls_date)
+        status = cls.get('status', 'scheduled')
         
-        # Class overlaps with this week if its range intersects [week_start, week_end]
-        if cls_date <= week_end and cls_end >= week_start and cls.get('status') != 'completed':
-            this_week_classes.append(cls)
+        if status == 'completed':
+            conducted_classes.append(cls)
+        elif cls_date == today_str or (cls_date <= today_str and cls_end_date >= today_str):
+            todays_sessions.append(cls)
+        elif cls_date > today_str and status in ('scheduled', 'in_progress'):
+            upcoming_classes.append(cls)
+        elif cls_end_date < today_str and status != 'completed':
+            # Auto-mark as completed if past end date
+            await db.class_sessions.update_one(
+                {"class_id": cls['class_id']}, {"$set": {"status": "completed"}}
+            )
+            cls['status'] = 'completed'
+            conducted_classes.append(cls)
         else:
-            other_classes.append(cls)
+            conducted_classes.append(cls)
     
     # Get pending student assignments
     pending_assignments = await db.student_teacher_assignments.find(
         {"teacher_id": user.user_id, "status": "pending"},
         {"_id": 0}
     ).to_list(1000)
-    
-    for assignment in pending_assignments:
-        if isinstance(assignment.get('assigned_at'), str):
-            assignment['assigned_at'] = datetime.fromisoformat(assignment['assigned_at'])
-        if isinstance(assignment.get('expires_at'), str):
-            assignment['expires_at'] = datetime.fromisoformat(assignment['expires_at'])
     
     # Get approved students
     approved_students = await db.student_teacher_assignments.find(
@@ -1090,8 +1249,14 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
     
     return {
         "is_approved": user.is_approved,
-        "classes": this_week_classes,
-        "other_classes": other_classes,
+        "is_suspended": False,
+        "star_rating": teacher_doc.get("star_rating", 5.0),
+        "rating_details": teacher_doc.get("rating_details", {}),
+        "classes": todays_sessions,  # backward compat
+        "other_classes": upcoming_classes + conducted_classes,
+        "todays_sessions": todays_sessions,
+        "upcoming_classes": upcoming_classes,
+        "conducted_classes": conducted_classes,
         "pending_assignments": pending_assignments,
         "approved_students": approved_students
     }
@@ -1140,36 +1305,15 @@ async def approve_student_assignment(approval: TeacherApprovalRequest, request: 
         }}
     )
     
-    # If approved, deduct credits from student wallet based on admin-set rates
+    # NO credit deduction on approval — charge happens at class creation only
     if approval.approved:
-        pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
-        class_fee = pricing.get("class_price_student", 0) if pricing else 0
-        credit_price = assignment.get("credit_price", class_fee)
-        
-        student = await db.users.find_one({"user_id": assignment["student_id"]}, {"_id": 0})
-        if student and credit_price > 0:
-            await db.users.update_one(
-                {"user_id": assignment["student_id"]},
-                {"$inc": {"credits": -credit_price}}
-            )
-            txn_id = f"txn_{uuid.uuid4().hex[:12]}"
-            await db.transactions.insert_one({
-                "transaction_id": txn_id,
-                "user_id": assignment["student_id"],
-                "type": "enrollment_deduction",
-                "amount": -credit_price,
-                "description": f"Enrollment fee: assigned to teacher {user.name}",
-                "status": "completed",
-                "created_at": datetime.now(timezone.utc).isoformat()
-            })
-        
         # Notify student
         await db.notifications.insert_one({
             "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
             "user_id": assignment["student_id"],
             "type": "assignment_approved",
             "title": "Teacher Accepted!",
-            "message": f"Teacher {user.name} has accepted your enrollment. {credit_price} credits deducted.",
+            "message": f"Teacher {user.name} has accepted your enrollment. Classes will be charged when scheduled.",
             "read": False,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
@@ -1196,6 +1340,288 @@ async def delete_class(class_id: str, request: Request, authorization: Optional[
     await db.class_sessions.delete_one({"class_id": class_id})
     
     return {"message": "Class deleted successfully"}
+
+
+@api_router.post("/teacher/cancel-class/{class_id}")
+async def teacher_cancel_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher cancels a class - impacts their rating"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if cls['teacher_id'] != user.user_id:
+        raise HTTPException(status_code=403, detail="Not your class")
+    if cls.get('status') == 'completed':
+        raise HTTPException(status_code=400, detail="Cannot cancel completed class")
+
+    # Mark class as cancelled
+    await db.class_sessions.update_one(
+        {"class_id": class_id},
+        {"$set": {"status": "cancelled", "cancelled_by": "teacher", "cancelled_at": datetime.now(timezone.utc).isoformat()}}
+    )
+
+    # Refund student
+    student_id = cls.get("assigned_student_id")
+    refund = cls.get("credits_required", 0)
+    if student_id and refund > 0:
+        await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": refund}})
+        await db.transactions.insert_one({
+            "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+            "user_id": student_id, "type": "teacher_cancel_refund", "amount": refund,
+            "description": f"Refund: Teacher cancelled '{cls['title']}'",
+            "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    # RATING IMPACT: Record cancellation event
+    rating, suspended = await record_rating_event(user.user_id, "cancellation", f"Cancelled class {cls['title']}")
+
+    # Notify student
+    if student_id:
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": student_id, "type": "teacher_cancelled",
+            "title": "Class Cancelled by Teacher",
+            "message": f"Teacher {user.name} cancelled '{cls['title']}'. Credits refunded.",
+            "read": False, "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    msg = f"Class cancelled. Your rating is now {rating}."
+    if suspended:
+        msg += " WARNING: Your account has been suspended for 3 days due to excessive cancellations."
+    return {"message": msg, "star_rating": rating, "is_suspended": suspended}
+
+
+@api_router.post("/student/rate-class")
+async def student_rate_class(data: StudentFeedbackRating, request: Request, authorization: Optional[str] = Header(None)):
+    """Student rates a completed class — impacts teacher rating"""
+    user = await get_current_user(request, authorization)
+    if user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only")
+
+    cls = await db.class_sessions.find_one({"class_id": data.class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if cls.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="Can only rate completed classes")
+
+    # Check if already rated
+    existing = await db.feedback.find_one(
+        {"class_id": data.class_id, "student_id": user.user_id, "type": "student_rating"}, {"_id": 0}
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Already rated this class")
+
+    feedback_doc = {
+        "feedback_id": f"fb_{uuid.uuid4().hex[:12]}",
+        "class_id": data.class_id,
+        "student_id": user.user_id,
+        "student_name": user.name,
+        "teacher_id": cls["teacher_id"],
+        "type": "student_rating",
+        "rating": data.rating,
+        "comments": data.comments,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.feedback.insert_one(feedback_doc)
+
+    # If bad rating (<=2), record as bad_feedback event
+    if data.rating <= 2:
+        await record_rating_event(cls["teacher_id"], "bad_feedback", f"Rating {data.rating}/5 from {user.name}: {data.comments[:100]}")
+    else:
+        await recalc_teacher_rating(cls["teacher_id"])
+
+    return {"message": "Rating submitted. Thank you!"}
+
+
+@api_router.get("/teacher/my-rating")
+async def teacher_my_rating(request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher views their own rating and negative markings"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    teacher_doc = await db.users.find_one({"user_id": user.user_id}, {"_id": 0, "star_rating": 1, "rating_details": 1, "is_suspended": 1, "suspended_until": 1, "monthly_cancellations": 1})
+    events = await db.teacher_rating_events.find(
+        {"teacher_id": user.user_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+
+    return {
+        "star_rating": teacher_doc.get("star_rating", 5.0),
+        "is_suspended": teacher_doc.get("is_suspended", False),
+        "suspended_until": teacher_doc.get("suspended_until"),
+        "rating_details": teacher_doc.get("rating_details", {}),
+        "recent_events": events
+    }
+
+
+@api_router.get("/admin/teacher-ratings")
+async def admin_teacher_ratings(request: Request, authorization: Optional[str] = Header(None)):
+    """Admin/Counsellor views all teacher ratings"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counsellor access only")
+
+    teachers = await db.users.find(
+        {"role": "teacher"},
+        {"_id": 0, "user_id": 1, "name": 1, "email": 1, "teacher_code": 1, "star_rating": 1, "rating_details": 1, "is_suspended": 1, "suspended_until": 1, "monthly_cancellations": 1}
+    ).to_list(500)
+
+    return teachers
+
+
+# ==================== CHAT SYSTEM ====================
+
+@api_router.post("/chat/send")
+async def send_chat_message(data: ChatMessage, request: Request, authorization: Optional[str] = Header(None)):
+    """Send a scoped chat message"""
+    user = await get_current_user(request, authorization)
+
+    recipient = await db.users.find_one({"user_id": data.recipient_id}, {"_id": 0})
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+
+    # PERMISSION CHECK
+    if user.role == "teacher":
+        # Teachers can only message assigned students
+        assigned = await db.student_teacher_assignments.find_one(
+            {"teacher_id": user.user_id, "student_id": data.recipient_id, "status": {"$in": ["pending", "approved"]}},
+            {"_id": 0}
+        )
+        if not assigned and recipient.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="You can only message your assigned students")
+    elif user.role == "student":
+        # Students can only message assigned teacher or their counsellor
+        assigned_teacher = await db.student_teacher_assignments.find_one(
+            {"student_id": user.user_id, "teacher_id": data.recipient_id, "status": {"$in": ["pending", "approved"]}},
+            {"_id": 0}
+        )
+        is_counsellor = recipient.get("role") == "counsellor"
+        if not assigned_teacher and not is_counsellor:
+            raise HTTPException(status_code=403, detail="You can only message your assigned teacher or a counsellor")
+    # Admin and Counsellor: global access - no restriction
+
+    msg_id = f"msg_{uuid.uuid4().hex[:12]}"
+    msg_doc = {
+        "message_id": msg_id,
+        "sender_id": user.user_id,
+        "sender_name": user.name,
+        "sender_role": user.role,
+        "sender_code": getattr(user, 'teacher_code', None) or getattr(user, 'student_code', None) or user.user_id,
+        "recipient_id": data.recipient_id,
+        "recipient_name": recipient.get("name"),
+        "recipient_role": recipient.get("role"),
+        "recipient_code": recipient.get("teacher_code") or recipient.get("student_code") or data.recipient_id,
+        "message": data.message,
+        "read": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.chat_messages.insert_one(msg_doc)
+
+    return {"message": "Message sent", "message_id": msg_id}
+
+
+@api_router.get("/chat/conversations")
+async def get_conversations(request: Request, authorization: Optional[str] = Header(None)):
+    """Get all conversations for the current user"""
+    user = await get_current_user(request, authorization)
+
+    # Get all messages where user is sender or recipient
+    messages = await db.chat_messages.find(
+        {"$or": [{"sender_id": user.user_id}, {"recipient_id": user.user_id}]},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(5000)
+
+    # Group by conversation partner
+    convos = {}
+    for msg in messages:
+        partner_id = msg["recipient_id"] if msg["sender_id"] == user.user_id else msg["sender_id"]
+        if partner_id not in convos:
+            convos[partner_id] = {
+                "partner_id": partner_id,
+                "partner_name": msg["recipient_name"] if msg["sender_id"] == user.user_id else msg["sender_name"],
+                "partner_role": msg["recipient_role"] if msg["sender_id"] == user.user_id else msg["sender_role"],
+                "partner_code": msg.get("recipient_code") if msg["sender_id"] == user.user_id else msg.get("sender_code"),
+                "last_message": msg["message"],
+                "last_message_at": msg["created_at"],
+                "unread_count": 0
+            }
+        if msg["recipient_id"] == user.user_id and not msg.get("read"):
+            convos[partner_id]["unread_count"] += 1
+
+    return list(convos.values())
+
+
+@api_router.get("/chat/messages/{partner_id}")
+async def get_chat_messages(partner_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Get messages between current user and partner"""
+    user = await get_current_user(request, authorization)
+
+    messages = await db.chat_messages.find(
+        {"$or": [
+            {"sender_id": user.user_id, "recipient_id": partner_id},
+            {"sender_id": partner_id, "recipient_id": user.user_id}
+        ]},
+        {"_id": 0}
+    ).sort("created_at", 1).to_list(500)
+
+    # Mark as read
+    await db.chat_messages.update_many(
+        {"sender_id": partner_id, "recipient_id": user.user_id, "read": False},
+        {"$set": {"read": True}}
+    )
+
+    return messages
+
+
+@api_router.get("/chat/contacts")
+async def get_chat_contacts(request: Request, authorization: Optional[str] = Header(None)):
+    """Get contacts the user is allowed to message"""
+    user = await get_current_user(request, authorization)
+    contacts = []
+
+    if user.role == "admin" or user.role == "counsellor":
+        # Global access
+        users = await db.users.find(
+            {"user_id": {"$ne": user.user_id}},
+            {"_id": 0, "user_id": 1, "name": 1, "email": 1, "role": 1, "teacher_code": 1, "student_code": 1}
+        ).to_list(5000)
+        contacts = users
+    elif user.role == "teacher":
+        # Only assigned students
+        assignments = await db.student_teacher_assignments.find(
+            {"teacher_id": user.user_id, "status": {"$in": ["pending", "approved"]}},
+            {"_id": 0, "student_id": 1}
+        ).to_list(100)
+        student_ids = [a["student_id"] for a in assignments]
+        if student_ids:
+            contacts = await db.users.find(
+                {"user_id": {"$in": student_ids}},
+                {"_id": 0, "user_id": 1, "name": 1, "email": 1, "role": 1, "student_code": 1}
+            ).to_list(100)
+    elif user.role == "student":
+        # Assigned teacher + counsellors
+        assignments = await db.student_teacher_assignments.find(
+            {"student_id": user.user_id, "status": {"$in": ["pending", "approved"]}},
+            {"_id": 0, "teacher_id": 1}
+        ).to_list(10)
+        teacher_ids = [a["teacher_id"] for a in assignments]
+        if teacher_ids:
+            teachers = await db.users.find(
+                {"user_id": {"$in": teacher_ids}},
+                {"_id": 0, "user_id": 1, "name": 1, "email": 1, "role": 1, "teacher_code": 1}
+            ).to_list(10)
+            contacts.extend(teachers)
+        # All counsellors
+        counsellors = await db.users.find(
+            {"role": "counsellor"},
+            {"_id": 0, "user_id": 1, "name": 1, "email": 1, "role": 1}
+        ).to_list(100)
+        contacts.extend(counsellors)
+
+    return contacts
 
 @api_router.post("/feedback/submit")
 async def submit_feedback(feedback_data: FeedbackCreate, request: Request, authorization: Optional[str] = Header(None)):
@@ -1441,6 +1867,18 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
     
     if not student or not teacher:
         raise HTTPException(status_code=404, detail="Student or teacher not found")
+    
+    # DEMO-FIRST CONSTRAINT: Student must have a completed/successful demo before assignment
+    demo = await db.demo_requests.find_one({
+        "student_id": assignment.student_id,
+        "status": {"$in": ["completed", "feedback_submitted"]}
+    }, {"_id": 0})
+    if not demo:
+        raise HTTPException(status_code=400, detail="Cannot assign: Student has not completed a demo class yet. A successful demo is required before assignment.")
+    
+    # Check teacher suspension
+    if teacher.get("is_suspended"):
+        raise HTTPException(status_code=400, detail=f"Teacher {teacher['name']} is currently suspended and cannot accept new students.")
     
     # CRITICAL: Check if student already has an active assignment (one student, one teacher only)
     existing_active = await db.student_teacher_assignments.find_one({

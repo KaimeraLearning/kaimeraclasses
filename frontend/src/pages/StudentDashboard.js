@@ -15,12 +15,19 @@ const StudentDashboard = () => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [classes, setClasses] = useState([]);
+  const [liveClasses, setLiveClasses] = useState([]);
+  const [upcomingClasses, setUpcomingClasses] = useState([]);
+  const [completedClasses, setCompletedClasses] = useState([]);
+  const [pendingRating, setPendingRating] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [enrollment, setEnrollment] = useState(null);
   const [demoFeedbacks, setDemoFeedbacks] = useState([]);
   const [showNotifDialog, setShowNotifDialog] = useState(false);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
+  const [showRatingDialog, setShowRatingDialog] = useState(false);
+  const [ratingTarget, setRatingTarget] = useState(null);
+  const [ratingForm, setRatingForm] = useState({ rating: 5, comments: '' });
   const [profileForm, setProfileForm] = useState({});
 
   useEffect(() => { fetchData(); }, []);
@@ -38,7 +45,14 @@ const StudentDashboard = () => {
       const userData = await userRes.json();
       setUser(userData);
       setProfileForm({ state: userData.state || '', city: userData.city || '', country: userData.country || '', grade: userData.grade || '', phone: userData.phone || '', institute: userData.institute || '', goal: userData.goal || '', preferred_time_slot: userData.preferred_time_slot || '' });
-      if (dashRes.ok) { const d = await dashRes.json(); setClasses(d.my_classes || []); }
+      if (dashRes.ok) {
+        const d = await dashRes.json();
+        setClasses(d.live_classes || []);
+        setLiveClasses(d.live_classes || []);
+        setUpcomingClasses(d.upcoming_classes || []);
+        setCompletedClasses(d.completed_classes || []);
+        setPendingRating(d.pending_rating || []);
+      }
       if (notifRes.ok) setNotifications(await notifRes.json());
       if (enrollRes.ok) setEnrollment(await enrollRes.json());
       if (feedbackRes.ok) setDemoFeedbacks(await feedbackRes.json());
@@ -72,6 +86,22 @@ const StudentDashboard = () => {
       });
       if (!res.ok) throw new Error((await res.json()).detail);
       toast.success("Session cancelled. Teacher will reschedule.");
+      fetchData();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleSubmitRating = async () => {
+    if (!ratingForm.comments) { toast.error('Please enter comments'); return; }
+    try {
+      const res = await fetch(`${API}/student/rate-class`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ class_id: ratingTarget.class_id, rating: ratingForm.rating, comments: ratingForm.comments })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      toast.success('Rating submitted!');
+      setShowRatingDialog(false); setRatingTarget(null);
+      setRatingForm({ rating: 5, comments: '' });
       fetchData();
     } catch (err) { toast.error(err.message); }
   };
@@ -189,64 +219,132 @@ const StudentDashboard = () => {
           <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full" data-testid="wallet-button"><CreditCard className="w-4 h-4 mr-2" /> Wallet</Button>
           <Button onClick={() => navigate('/learning-kit')} variant="outline" className="rounded-full" data-testid="learning-kit-button"><BookOpen className="w-4 h-4 mr-2" /> Learning Kit</Button>
           <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full" data-testid="complaints-button"><MessageSquare className="w-4 h-4 mr-2" /> Complaints</Button>
+          <Button onClick={() => navigate('/chat')} variant="outline" className="rounded-full" data-testid="chat-button"><MessageSquare className="w-4 h-4 mr-2" /> Chat</Button>
           <Button onClick={() => setShowFeedbackDialog(true)} variant="outline" className="rounded-full" data-testid="feedback-button"><Star className="w-4 h-4 mr-2" /> Demo Feedback</Button>
         </div>
 
-        {/* Active Classes */}
-        <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2"><Calendar className="w-5 h-5 text-sky-500" /> My Classes ({classes.length})</h2>
-        {classes.length === 0 ? (
-          <div className="bg-white rounded-3xl p-12 border-2 border-slate-100 text-center">
-            <p className="text-slate-500">No active classes. Your teacher will create classes for you.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {classes.map(cls => {
-              const isLive = cls.status === 'in_progress';
-              const isCancelledToday = cls.cancelled_today;
-              const isRescheduled = cls.rescheduled;
-              return (
-                <div key={cls.class_id} className={`bg-white rounded-2xl border-2 p-5 ${isLive ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-slate-200'}`} data-testid={`class-card-${cls.class_id}`}>
-                  <div className="flex gap-2 flex-wrap mb-2">
-                    <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-xs font-semibold">{cls.subject}</span>
-                    {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full text-xs font-semibold">DEMO</span>}
-                    {isLive && <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-xs font-semibold animate-pulse">LIVE</span>}
-                    {isCancelledToday && <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded-full text-xs font-semibold">Session Cancelled</span>}
-                    {isRescheduled && <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full text-xs font-semibold">Rescheduled</span>}
+        {/* ═══ LIVE CLASSES ═══ */}
+        {liveClasses.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-bold text-emerald-700 mb-4 flex items-center gap-2"><Play className="w-5 h-5 text-emerald-500" /> Live Now ({liveClasses.length})</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {liveClasses.map(cls => (
+                <div key={cls.class_id} className="bg-white rounded-2xl border-2 border-emerald-400 p-5 ring-2 ring-emerald-200" data-testid={`live-class-${cls.class_id}`}>
+                  <div className="flex gap-2 mb-2">
+                    <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-xs font-semibold animate-pulse">LIVE</span>
+                    <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-xs">{cls.subject}</span>
                   </div>
-                  <h3 className="text-base font-bold text-slate-900 mb-1">{cls.title}</h3>
-                  <div className="text-xs text-slate-600 space-y-0.5 mb-3">
-                    <p className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {cls.date} - {cls.end_date || cls.date}</p>
-                    <p className="flex items-center gap-1"><Clock className="w-3 h-3" /> {cls.start_time} - {cls.end_time}</p>
-                    {cls.rescheduled_date && <p className="text-sky-600 font-semibold">Rescheduled: {cls.rescheduled_date} {cls.rescheduled_start_time}-{cls.rescheduled_end_time}</p>}
-                  </div>
-                  {cls.cancellation_count > 0 && (
-                    <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-1.5 mb-2">Cancelled {cls.cancellation_count}/{cls.max_cancellations || 3} sessions</p>
+                  <h3 className="font-bold text-slate-900 mb-1">{cls.title}</h3>
+                  <p className="text-xs text-slate-600 mb-3">{cls.start_time} - {cls.end_time} | Teacher: {cls.teacher_name}</p>
+                  {!cls.cancelled_today ? (
+                    <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold animate-pulse" data-testid={`join-live-${cls.class_id}`}>
+                      <Play className="w-4 h-4 mr-2" /> Join Live Class
+                    </Button>
+                  ) : (
+                    <div className="bg-red-50 rounded-xl p-3 text-center text-sm text-red-700 font-medium">
+                      <AlertCircle className="w-4 h-4 inline mr-1" /> Waiting for teacher to reschedule
+                    </div>
                   )}
-                  <div className="space-y-1.5">
-                    {isLive && !isCancelledToday && (
-                      <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold animate-pulse" data-testid={`join-live-${cls.class_id}`}>
-                        <Play className="w-4 h-4 mr-2" /> Join Live Class
-                      </Button>
-                    )}
-                    {isCancelledToday && (
-                      <div className="bg-red-50 rounded-xl p-3 text-center text-sm text-red-700 font-medium">
-                        <AlertCircle className="w-4 h-4 inline mr-1" /> Waiting for teacher to reschedule
-                      </div>
-                    )}
-                    {!isLive && !isCancelledToday && cls.status === 'scheduled' && (
-                      <Button onClick={() => handleCancelSession(cls.class_id)} variant="outline" className="w-full rounded-full border-red-200 text-red-600 text-xs" data-testid={`cancel-session-${cls.class_id}`}>
-                        <XCircle className="w-3 h-3 mr-1" /> Cancel Today's Session
-                      </Button>
-                    )}
-                  </div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ═══ PENDING RATING (Completed but unrated) ═══ */}
+        {pendingRating.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-bold text-amber-700 mb-4 flex items-center gap-2"><Star className="w-5 h-5 text-amber-500" /> Rate Your Classes ({pendingRating.length})</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {pendingRating.map(cls => (
+                <div key={cls.class_id} className="bg-amber-50 rounded-2xl border-2 border-amber-200 p-5" data-testid={`pending-rating-${cls.class_id}`}>
+                  <h3 className="font-bold text-slate-900 mb-1">{cls.title}</h3>
+                  <p className="text-xs text-slate-600 mb-3">{cls.subject} | Teacher: {cls.teacher_name} | {cls.date}</p>
+                  <Button onClick={() => { setRatingTarget(cls); setShowRatingDialog(true); }}
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full font-bold" data-testid={`rate-class-${cls.class_id}`}>
+                    <Star className="w-4 h-4 mr-2" /> Rate & Review
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ═══ UPCOMING CLASSES ═══ */}
+        <div className="mb-8">
+          <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2"><Calendar className="w-5 h-5 text-sky-500" /> Upcoming Classes ({upcomingClasses.length})</h2>
+          {upcomingClasses.length === 0 ? (
+            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-500">No upcoming classes</p></div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {upcomingClasses.map(cls => (
+                <div key={cls.class_id} className="bg-white rounded-2xl border-2 border-slate-200 p-5" data-testid={`upcoming-class-${cls.class_id}`}>
+                  <div className="flex gap-2 flex-wrap mb-2">
+                    <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-xs">{cls.subject}</span>
+                    {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full text-xs">DEMO</span>}
+                  </div>
+                  <h3 className="font-bold text-slate-900 mb-1">{cls.title}</h3>
+                  <p className="text-xs text-slate-600 mb-1">{cls.date} | {cls.start_time} - {cls.end_time}</p>
+                  <p className="text-xs text-slate-500">Teacher: {cls.teacher_name} | {cls.duration_days}d</p>
+                  {cls.status === 'scheduled' && !cls.cancelled_today && (
+                    <Button onClick={() => handleCancelSession(cls.class_id)} variant="outline" className="w-full mt-3 rounded-full border-red-200 text-red-600 text-xs" data-testid={`cancel-session-${cls.class_id}`}>
+                      <XCircle className="w-3 h-3 mr-1" /> Cancel Today's Session
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ═══ COMPLETED CLASSES ═══ */}
+        {completedClasses.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-bold text-slate-700 mb-4 flex items-center gap-2"><Clock className="w-5 h-5 text-slate-400" /> Completed Classes ({completedClasses.length})</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {completedClasses.map(cls => (
+                <div key={cls.class_id} className="bg-slate-50 rounded-2xl border border-slate-200 p-4" data-testid={`completed-class-${cls.class_id}`}>
+                  <h3 className="font-semibold text-slate-700 text-sm">{cls.title}</h3>
+                  <p className="text-xs text-slate-500">{cls.subject} | {cls.date} | Teacher: {cls.teacher_name}</p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Demo Feedback Dialog */}
+      {/* Rating Dialog */}
+      <Dialog open={showRatingDialog} onOpenChange={setShowRatingDialog}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader><DialogTitle className="text-xl font-bold flex items-center gap-2"><Star className="w-5 h-5 text-amber-500" /> Rate This Class</DialogTitle></DialogHeader>
+          {ratingTarget && (
+            <div className="space-y-4 mt-4">
+              <div className="bg-sky-50 rounded-xl p-3 border border-sky-200">
+                <p className="font-semibold text-slate-900">{ratingTarget.title}</p>
+                <p className="text-sm text-slate-600">Teacher: {ratingTarget.teacher_name}</p>
+              </div>
+              <div>
+                <Label>Rating</Label>
+                <div className="flex gap-2 mt-1">
+                  {[1,2,3,4,5].map(s => (
+                    <button key={s} onClick={() => setRatingForm({...ratingForm, rating: s})}
+                      className={`w-10 h-10 rounded-full text-lg font-bold transition-all ${ratingForm.rating >= s ? 'bg-amber-400 text-white scale-110' : 'bg-slate-100 text-slate-400'}`}
+                      data-testid={`star-${s}`}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label>Comments (Required)</Label>
+                <textarea value={ratingForm.comments} onChange={e => setRatingForm({...ratingForm, comments: e.target.value})}
+                  placeholder="Share your experience..." className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={3} data-testid="rating-comments" />
+              </div>
+              <Button onClick={handleSubmitRating} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full py-6 font-bold" data-testid="submit-rating-btn">Submit Rating</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
       <Dialog open={showFeedbackDialog} onOpenChange={setShowFeedbackDialog}>
         <DialogContent className="sm:max-w-lg rounded-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="text-xl font-bold">Demo Feedback from Teachers</DialogTitle></DialogHeader>

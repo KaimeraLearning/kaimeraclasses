@@ -41,6 +41,7 @@ const CounsellorDashboard = () => {
   const [pageRejected, setPageRejected] = useState(1);
   const [pageExpired, setPageExpired] = useState(1);
   const PER_PAGE = 10;
+  const [minRatingFilter, setMinRatingFilter] = useState(0);
 
   useEffect(() => { fetchDashboardData(); }, []);
 
@@ -261,6 +262,9 @@ const CounsellorDashboard = () => {
           </Button>
           <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full" data-testid="complaints-link">
             <MessageSquare className="w-4 h-4 mr-2" /> Complaints
+          </Button>
+          <Button onClick={() => navigate('/chat')} variant="outline" className="rounded-full" data-testid="chat-link">
+            <MessageSquare className="w-4 h-4 mr-2" /> Chat
           </Button>
         </div>
 
@@ -491,7 +495,7 @@ const CounsellorDashboard = () => {
       </div>
 
       {/* Assign Student Dialog */}
-      <Dialog open={showAssignDialog} onOpenChange={(open) => { setShowAssignDialog(open); if (!open) { setAssignFrequency(''); setAssignDays(''); setAssignDemoNotes(''); } }}>
+      <Dialog open={showAssignDialog} onOpenChange={(open) => { setShowAssignDialog(open); if (!open) { setAssignFrequency(''); setAssignDays(''); setAssignDemoNotes(''); setMinRatingFilter(0); } }}>
         <DialogContent className="sm:max-w-lg rounded-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold text-slate-900">Assign Student to Teacher</DialogTitle>
@@ -502,13 +506,30 @@ const CounsellorDashboard = () => {
                 <p className="font-semibold text-slate-900">{selectedStudent.name}</p>
                 <p className="text-sm text-slate-600">{selectedStudent.email}</p>
                 {selectedStudent.grade && <p className="text-xs text-slate-500 mt-1">Class {selectedStudent.grade}</p>}
+                {selectedStudent.demo_teacher_name && <p className="text-xs text-violet-600 font-semibold mt-1">Demo Teacher: {selectedStudent.demo_teacher_name}</p>}
+              </div>
+              <div>
+                <Label className="flex items-center gap-1.5 mb-1">Filter by Star Rating</Label>
+                <div className="flex gap-1.5 mb-2">
+                  {[0,1,2,3,4,5].map(r => (
+                    <button key={r} onClick={() => setMinRatingFilter(r)}
+                      className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${minRatingFilter === r ? 'bg-amber-400 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      data-testid={`rating-filter-${r}`}>
+                      {r === 0 ? 'All' : `${r}+`}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div>
                 <Label>Select Teacher</Label>
                 <select value={selectedTeacherForAssign} onChange={e => setSelectedTeacherForAssign(e.target.value)}
                   className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="teacher-select">
                   <option value="">Choose a teacher...</option>
-                  {teachers.map(t => <option key={t.user_id} value={t.user_id}>{t.name} ({t.teacher_code || t.email})</option>)}
+                  {teachers.filter(t => (t.star_rating || 5) >= minRatingFilter).map(t => (
+                    <option key={t.user_id} value={t.user_id}>
+                      {t.name} ({t.teacher_code || t.email}) - {(t.star_rating || 5).toFixed(1)} stars
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>

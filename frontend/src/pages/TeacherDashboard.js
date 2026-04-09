@@ -1,32 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle, XCircle, CheckCircle, Clock } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const TeacherDashboard = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
-  const [groupedData, setGroupedData] = useState({ today: [], by_student: [], ended_count: 0 });
-  const [pendingAssignments, setPendingAssignments] = useState([]);
-  const [approvedStudents, setApprovedStudents] = useState([]);
-  const [proofs, setProofs] = useState([]);
-  const [notifications, setNotifications] = useState([]);
-  const [studentComplaints, setStudentComplaints] = useState([]);
+  const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [user, setUser] = useState(null);
+  const [groupedData, setGroupedData] = useState({ today: [], grouped_by_student: {} });
+  const [showCreateClass, setShowCreateClass] = useState(false);
   const [showProofDialog, setShowProofDialog] = useState(false);
-  const [showNotifDialog, setShowNotifDialog] = useState(false);
-  const [selectedClassForProof, setSelectedClassForProof] = useState(null);
-  const [expandedStudent, setExpandedStudent] = useState(null);
-  const [studentSearch, setStudentSearch] = useState('');
+  const [proofClass, setProofClass] = useState(null);
+  const [proofForm, setProofForm] = useState({ feedback_text: '', student_performance: 'good', topics_covered: '' });
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [feedbackTarget, setFeedbackTarget] = useState(null);
   const [feedbackForm, setFeedbackForm] = useState({ feedback_text: '', performance_rating: 'good' });
@@ -37,130 +31,136 @@ const TeacherDashboard = () => {
   const [showDemoFeedbackDialog, setShowDemoFeedbackDialog] = useState(false);
   const [demoFeedbackTarget, setDemoFeedbackTarget] = useState(null);
   const [demoFeedbackForm, setDemoFeedbackForm] = useState({ feedback_text: '', performance_rating: 'good', recommended_frequency: '' });
-  const [formData, setFormData] = useState({
-    title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '',
-    max_students: '1', assigned_student_id: '', duration_days: '1', is_demo: false
-  });
-  const [proofData, setProofData] = useState({
-    feedback_text: '', student_performance: 'good', topics_covered: '', screenshot_base64: null
+  const [classTab, setClassTab] = useState('today');
+  const [showNotifDialog, setShowNotifDialog] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showRatingDialog, setShowRatingDialog] = useState(false);
+  const [ratingData, setRatingData] = useState(null);
+
+  // Create class form
+  const [classForm, setClassForm] = useState({
+    title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '', max_students: 1, assigned_student_id: '', duration_days: 1, is_demo: false
   });
 
-  useEffect(() => { fetchDashboardData(); }, []);
+  useEffect(() => { fetchUser(); fetchDashboardData(); fetchNotifications(); }, []);
+
+  const fetchUser = async () => {
+    try {
+      const res = await fetch(`${API}/auth/me`, { credentials: 'include' });
+      if (!res.ok) { navigate('/login'); return; }
+      setUser(await res.json());
+    } catch { navigate('/login'); }
+  };
 
   const fetchDashboardData = async () => {
     try {
-      const [userRes, dashboardRes, proofsRes, notifRes, complaintsRes, groupedRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
+      const [dashRes, groupedRes] = await Promise.all([
         fetch(`${API}/teacher/dashboard`, { credentials: 'include' }),
-        fetch(`${API}/teacher/my-proofs`, { credentials: 'include' }),
-        fetch(`${API}/notifications/my`, { credentials: 'include' }),
-        fetch(`${API}/teacher/student-complaints`, { credentials: 'include' }),
         fetch(`${API}/teacher/grouped-classes`, { credentials: 'include' })
       ]);
-      if (!userRes.ok || !dashboardRes.ok) throw new Error('Failed to fetch data');
-      setUser(await userRes.json());
-      const dashboardData = await dashboardRes.json();
-      setPendingAssignments(dashboardData.pending_assignments || []);
-      setApprovedStudents(dashboardData.approved_students || []);
-      if (proofsRes.ok) setProofs(await proofsRes.json());
-      if (notifRes.ok) setNotifications(await notifRes.json());
-      if (complaintsRes.ok) setStudentComplaints(await complaintsRes.json());
+      if (dashRes.ok) {
+        const data = await dashRes.json();
+        setDashboardData(data);
+      }
       if (groupedRes.ok) setGroupedData(await groupedRes.json());
-      // Fetch pending demo feedback
       try {
         const demoFbRes = await fetch(`${API}/teacher/pending-demo-feedback`, { credentials: 'include' });
         if (demoFbRes.ok) setPendingDemoFeedback(await demoFbRes.json());
       } catch {}
       setLoading(false);
-    } catch (error) {
-      toast.error('Failed to load dashboard');
-      setLoading(false);
+    } catch { setLoading(false); }
+  };
+
+  const fetchNotifications = async () => {
+    try {
+      const res = await fetch(`${API}/notifications`, { credentials: 'include' });
+      if (res.ok) { const data = await res.json(); setNotifications(data); setUnreadCount(data.filter(n => !n.read).length); }
+    } catch {}
+  };
+
+  const fetchRating = async () => {
+    try {
+      const res = await fetch(`${API}/teacher/my-rating`, { credentials: 'include' });
+      if (res.ok) setRatingData(await res.json());
+    } catch {}
+  };
+
+  const handleCreateClass = async () => {
+    if (!classForm.title || !classForm.date || !classForm.start_time || !classForm.end_time || !classForm.assigned_student_id) {
+      toast.error('Please fill all required fields'); return;
     }
-  };
-
-  const handleCreateClass = async (e) => {
-    e.preventDefault();
     try {
-      const response = await fetch(`${API}/classes/create`, {
+      const res = await fetch(`${API}/classes/create`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({
-          ...formData, max_students: parseInt(formData.max_students),
-          duration_days: parseInt(formData.duration_days), is_demo: formData.is_demo
-        })
+        body: JSON.stringify(classForm)
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
       toast.success('Class created!');
-      setShowCreateDialog(false);
-      setFormData({ title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '', max_students: '1', assigned_student_id: '', duration_days: '1', is_demo: false });
+      setShowCreateClass(false);
+      setClassForm({ title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '', max_students: 1, assigned_student_id: '', duration_days: 1, is_demo: false });
       fetchDashboardData();
-    } catch (error) { toast.error(error.message); }
-  };
-
-  const handleApproveAssignment = async (assignmentId, approved) => {
-    try {
-      const response = await fetch(`${API}/teacher/approve-assignment`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ assignment_id: assignmentId, approved })
-      });
-      if (!response.ok) throw new Error((await response.json()).detail);
-      toast.success(approved ? 'Student approved!' : 'Student rejected');
-      fetchDashboardData();
-    } catch (error) { toast.error(error.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleDeleteClass = async (classId) => {
     if (!window.confirm('Delete this class?')) return;
     try {
-      const response = await fetch(`${API}/classes/delete/${classId}`, { method: 'DELETE', credentials: 'include' });
-      if (!response.ok) throw new Error((await response.json()).detail);
-      toast.success('Class deleted');
+      const res = await fetch(`${API}/classes/delete/${classId}`, { method: 'DELETE', credentials: 'include' });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success('Class deleted'); fetchDashboardData();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleTeacherCancelClass = async (classId) => {
+    if (!window.confirm('Cancel this class? This will impact your rating and refund the student.')) return;
+    try {
+      const res = await fetch(`${API}/teacher/cancel-class/${classId}`, { method: 'POST', credentials: 'include' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      toast.success(data.message);
       fetchDashboardData();
-    } catch (error) { toast.error(error.message); }
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleApproveAssignment = async (assignmentId, approved) => {
+    try {
+      const res = await fetch(`${API}/teacher/approve-assignment`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ assignment_id: assignmentId, approved })
+      });
+      if (!res.ok) throw new Error((await res.json()).detail);
+      toast.success(approved ? 'Student approved!' : 'Student rejected');
+      fetchDashboardData();
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleSubmitProof = async () => {
-    if (!proofData.feedback_text || !proofData.topics_covered) { toast.error('Fill all required fields'); return; }
     try {
-      const response = await fetch(`${API}/teacher/submit-proof`, {
+      const res = await fetch(`${API}/proofs/submit`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ class_id: selectedClassForProof.class_id, ...proofData })
+        body: JSON.stringify({ class_id: proofClass.class_id, ...proofForm })
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      if (!res.ok) throw new Error((await res.json()).detail);
       toast.success('Proof submitted!');
-      setShowProofDialog(false);
-      setSelectedClassForProof(null);
-      setProofData({ feedback_text: '', student_performance: 'good', topics_covered: '', screenshot_base64: null });
-      fetchDashboardData();
-    } catch (error) { toast.error(error.message); }
-  };
-
-  const handleScreenshotUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { toast.error('Max 2MB'); return; }
-    const reader = new FileReader();
-    reader.onload = () => setProofData({ ...proofData, screenshot_base64: reader.result });
-    reader.readAsDataURL(file);
-  };
-
-  const handleMarkAllRead = async () => {
-    await fetch(`${API}/notifications/mark-all-read`, { method: 'POST', credentials: 'include' });
-    fetchDashboardData();
+      setShowProofDialog(false); setProofClass(null);
+      setProofForm({ feedback_text: '', student_performance: 'good', topics_covered: '' });
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleSendFeedback = async () => {
     if (!feedbackForm.feedback_text) { toast.error('Please enter feedback'); return; }
     try {
-      const response = await fetch(`${API}/teacher/feedback-to-student`, {
+      const res = await fetch(`${API}/teacher/feedback-to-student`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ student_id: feedbackTarget.student_id, ...feedbackForm })
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      if (!res.ok) throw new Error((await res.json()).detail);
       toast.success('Feedback sent!');
-      setShowFeedbackDialog(false);
-      setFeedbackTarget(null);
+      setShowFeedbackDialog(false); setFeedbackTarget(null);
       setFeedbackForm({ feedback_text: '', performance_rating: 'good' });
-    } catch (error) { toast.error(error.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleReschedule = async () => {
@@ -168,17 +168,16 @@ const TeacherDashboard = () => {
       toast.error('All reschedule fields required'); return;
     }
     try {
-      const response = await fetch(`${API}/teacher/reschedule-class/${rescheduleTarget.class_id}`, {
+      const res = await fetch(`${API}/teacher/reschedule-class/${rescheduleTarget.class_id}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify(rescheduleForm)
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      if (!res.ok) throw new Error((await res.json()).detail);
       toast.success('Session rescheduled!');
-      setShowRescheduleDialog(false);
-      setRescheduleTarget(null);
+      setShowRescheduleDialog(false); setRescheduleTarget(null);
       setRescheduleForm({ new_date: '', new_start_time: '', new_end_time: '' });
       fetchDashboardData();
-    } catch (error) { toast.error(error.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleSubmitDemoFeedback = async () => {
@@ -186,105 +185,112 @@ const TeacherDashboard = () => {
     try {
       const res = await fetch(`${API}/teacher/submit-demo-feedback`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({
-          demo_id: demoFeedbackTarget.demo_id,
-          student_id: demoFeedbackTarget.student_id || demoFeedbackTarget.student_user_id,
-          ...demoFeedbackForm
-        })
+        body: JSON.stringify({ demo_id: demoFeedbackTarget.demo_id, student_id: demoFeedbackTarget.student_id || demoFeedbackTarget.student_user_id, ...demoFeedbackForm })
       });
       if (!res.ok) throw new Error((await res.json()).detail);
-      toast.success('Demo feedback submitted! Counsellors notified.');
-      setShowDemoFeedbackDialog(false);
-      setDemoFeedbackTarget(null);
+      toast.success('Demo feedback submitted!');
+      setShowDemoFeedbackDialog(false); setDemoFeedbackTarget(null);
       setDemoFeedbackForm({ feedback_text: '', performance_rating: 'good', recommended_frequency: '' });
       fetchDashboardData();
-    } catch (error) { toast.error(error.message); }
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await fetch(`${API}/notifications/mark-all-read`, { method: 'POST', credentials: 'include' });
+      fetchNotifications();
+    } catch {}
   };
 
   const handleLogout = async () => {
-    try { await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' }); navigate('/login'); } catch {}
+    await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
+    navigate('/login');
   };
 
-  const getProofStatus = (classId) => proofs.find(p => p.class_id === classId);
-  const unreadCount = notifications.filter(n => !n.read).length;
-
-  // Filter students by search
-  const filteredStudents = groupedData.by_student.filter(s =>
-    !studentSearch || s.student_name?.toLowerCase().includes(studentSearch.toLowerCase())
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="w-16 h-16 border-4 border-sky-500 border-t-transparent rounded-full animate-spin" />
+    </div>
   );
 
-  const renderClassCard = (cls, compact) => {
-    const proof = getProofStatus(cls.class_id);
-    const cancellations = cls.cancellation_count || 0;
-    const isLive = cls.status === 'in_progress';
+  // SUSPENSION SCREEN
+  if (dashboardData?.is_suspended) {
     return (
-      <div key={cls.class_id} className={`bg-white rounded-2xl border-2 shadow-sm p-4 ${isLive ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-slate-200'} ${compact ? '' : 'shadow-[4px_4px_0px_0px_rgba(226,232,240,1)]'}`} data-testid={`class-card-${cls.class_id}`}>
+      <div className="min-h-screen bg-red-50 flex items-center justify-center p-8">
+        <div className="bg-white rounded-3xl shadow-xl p-10 max-w-lg text-center border-2 border-red-300" data-testid="suspended-screen">
+          <AlertTriangle className="w-20 h-20 text-red-500 mx-auto mb-4" />
+          <h1 className="text-3xl font-bold text-red-800 mb-2">Account Suspended</h1>
+          <p className="text-red-600 mb-4">Your account has been suspended due to excessive class cancellations.</p>
+          <div className="bg-red-100 rounded-xl p-4 mb-6">
+            <p className="text-sm text-red-700">Suspended until: <strong>{dashboardData.suspended_until ? new Date(dashboardData.suspended_until).toLocaleDateString() : 'N/A'}</strong></p>
+            <p className="text-sm text-red-700 mt-1">Current Rating: <strong>{dashboardData.star_rating}/5</strong></p>
+          </div>
+          <p className="text-xs text-slate-500">During suspension, you cannot create classes or accept new students. Contact admin for assistance.</p>
+          <Button onClick={handleLogout} variant="outline" className="mt-6 rounded-full" data-testid="logout-suspended"><LogOut className="w-4 h-4 mr-2" /> Logout</Button>
+        </div>
+      </div>
+    );
+  }
+
+  const todaySessions = dashboardData?.todays_sessions || [];
+  const upcomingClasses = dashboardData?.upcoming_classes || [];
+  const conductedClasses = dashboardData?.conducted_classes || [];
+
+  const renderClassCard = (cls, section) => {
+    const isLive = cls.status === 'in_progress';
+    const cancellations = cls.cancellation_count || 0;
+
+    return (
+      <div key={cls.class_id} className={`bg-white rounded-2xl border-2 p-4 ${isLive ? 'border-emerald-400 shadow-lg shadow-emerald-50' : cls.cancelled_today ? 'border-red-300' : 'border-slate-200'}`} data-testid={`class-card-${cls.class_id}`}>
         <div className="flex items-start justify-between mb-2">
-          <div className="flex gap-2 flex-wrap">
-            <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-xs font-semibold">{cls.subject}</span>
-            {cls.is_demo && <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full text-xs font-semibold">DEMO</span>}
-            {isLive && <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-xs font-semibold animate-pulse">LIVE</span>}
-            {cls.status === 'dismissed' && <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded-full text-xs font-semibold">DISMISSED</span>}
+          <div>
+            <h3 className="font-bold text-slate-900 text-sm">{cls.title}</h3>
+            <p className="text-xs text-slate-600">{cls.subject} | {cls.class_type}</p>
+            <p className="text-xs text-slate-500">{cls.date} {cls.start_time}-{cls.end_time} ({cls.duration_days}d)</p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            {isLive && <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-[10px] font-bold animate-pulse">LIVE</span>}
+            {cls.is_demo && <span className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-[10px] font-semibold">DEMO</span>}
+            {cls.status === 'completed' && <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-semibold">DONE</span>}
           </div>
         </div>
-        <h3 className="text-base font-bold text-slate-900 mb-1">{cls.title}</h3>
-        <div className="space-y-0.5 mb-2 text-xs text-slate-600">
-          <div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" /><span>{cls.date ? format(parseISO(cls.date), 'MMM dd') : ''}{cls.end_date ? ` - ${format(parseISO(cls.end_date), 'MMM dd')}` : ''}</span></div>
-          <div className="flex items-center gap-1.5"><Users className="w-3 h-3" /><span>{cls.duration_days}d | {cls.start_time}-{cls.end_time}</span></div>
-        </div>
+
         {cancellations > 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-1.5 mb-2 text-xs text-amber-800 font-semibold">Cancelled {cancellations}/{cls.max_cancellations || 3} sessions</div>}
+        {cls.cancelled_today && (
+          <div className="bg-red-50 rounded-lg p-2 text-center text-xs text-red-700 font-semibold border border-red-200 mb-2">
+            <AlertCircle className="w-3 h-3 inline mr-1" /> Session cancelled by student
+          </div>
+        )}
         {cls.cancelled_today && (
           <Button onClick={() => { setRescheduleTarget(cls); setShowRescheduleDialog(true); }} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full text-xs h-7 mb-2" data-testid={`reschedule-${cls.class_id}`}>
             <CalendarDays className="w-3 h-3 mr-1" /> Reschedule Session
           </Button>
         )}
-        {cls.rescheduled && (
-          <div className="bg-sky-50 border border-sky-200 rounded-lg p-1.5 mb-2 text-xs text-sky-800 font-medium">
-            Rescheduled to {cls.rescheduled_date} {cls.rescheduled_start_time}-{cls.rescheduled_end_time}
-          </div>
-        )}
-        {proof && <div className={`rounded-lg p-1.5 mb-2 text-center text-xs font-semibold ${proof.status === 'pending' ? 'bg-amber-50 text-amber-800' : proof.status === 'verified' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}><ShieldCheck className="w-3 h-3 inline mr-1" /> Proof: {proof.status}</div>}
+
         <div className="space-y-1.5">
-          {cls.cancelled_today && (
-            <div className="bg-red-50 rounded-lg p-2 text-center text-xs text-red-700 font-semibold border border-red-200">
-              <AlertCircle className="w-3 h-3 inline mr-1" /> Session cancelled by student
-            </div>
-          )}
-          {cls.status === 'scheduled' && !cls.cancelled_today && (
-            <>
-              <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8" data-testid={`start-class-${cls.class_id}`}>
-                <Play className="w-3 h-3 mr-1" /> Start Class
-              </Button>
-              <Button onClick={() => handleDeleteClass(cls.class_id)} variant="outline" className="w-full border border-red-200 hover:bg-red-50 text-red-600 rounded-full text-xs h-7" data-testid={`delete-class-${cls.class_id}`}>Delete</Button>
-            </>
+          {section === 'today' && cls.status === 'scheduled' && !cls.cancelled_today && (
+            <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8" data-testid={`start-class-${cls.class_id}`}>
+              <Play className="w-3 h-3 mr-1" /> Start Class
+            </Button>
           )}
           {isLive && !cls.cancelled_today && (
             <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8 animate-pulse" data-testid={`rejoin-class-${cls.class_id}`}>
               <Play className="w-3 h-3 mr-1" /> Rejoin Live
             </Button>
           )}
-          {!proof && cls.status !== 'dismissed' && (
-            <Button onClick={() => { setSelectedClassForProof(cls); setShowProofDialog(true); }} variant="outline" className="w-full border border-sky-200 text-sky-600 rounded-full text-xs h-7" data-testid={`submit-proof-${cls.class_id}`}>
-              <Upload className="w-3 h-3 mr-1" /> Submit Proof
-            </Button>
+          {section !== 'conducted' && cls.status !== 'completed' && (
+            <div className="flex gap-1.5">
+              <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="flex-1 rounded-full text-xs h-7"><Upload className="w-3 h-3 mr-1" /> Proof</Button>
+              <Button onClick={() => handleTeacherCancelClass(cls.class_id)} variant="outline" className="flex-1 rounded-full text-xs h-7 border-red-200 text-red-600 hover:bg-red-50" data-testid={`teacher-cancel-${cls.class_id}`}><XCircle className="w-3 h-3 mr-1" /> Cancel</Button>
+            </div>
+          )}
+          {section === 'today' && (
+            <Button onClick={() => handleDeleteClass(cls.class_id)} variant="outline" className="w-full border border-red-200 hover:bg-red-50 text-red-600 rounded-full text-xs h-7" data-testid={`delete-class-${cls.class_id}`}>Delete</Button>
           )}
         </div>
       </div>
     );
   };
-
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="w-16 h-16 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div></div>;
-
-  if (!user?.is_approved) return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center" data-testid="teacher-pending-approval">
-      <div className="bg-white rounded-3xl p-12 border-2 border-amber-200 max-w-md text-center">
-        <AlertCircle className="w-16 h-16 text-amber-500 mx-auto mb-4" />
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Approval Pending</h2>
-        <p className="text-slate-600 mb-6">Your teacher account is awaiting admin approval.</p>
-        <Button onClick={handleLogout} className="rounded-full" data-testid="logout-button">Logout</Button>
-      </div>
-    </div>
-  );
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -292,48 +298,46 @@ const TeacherDashboard = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <GraduationCap className="w-10 h-10 text-sky-500" strokeWidth={2.5} />
-              <div><h1 className="text-2xl font-bold text-slate-900">Teacher Dashboard</h1><p className="text-sm text-slate-600">Wallet: {user?.credits || 0} credits</p></div>
-            </div>
-            <div className="flex items-center gap-4">
-              <button onClick={() => setShowNotifDialog(true)} className="relative p-2 rounded-full hover:bg-slate-100" data-testid="notifications-bell">
-                <Bell className="w-6 h-6 text-slate-700" />
-                {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{unreadCount}</span>}
+              <GraduationCap className="w-8 h-8 text-sky-500" />
+              <div>
+                <h1 className="text-xl font-bold text-slate-900">{user?.name}</h1>
+                <p className="text-xs text-slate-500 font-mono">{user?.teacher_code}</p>
+              </div>
+              {/* Star Rating Badge */}
+              <button onClick={() => { fetchRating(); setShowRatingDialog(true); }} className="flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-full px-3 py-1 hover:bg-amber-100 transition-colors" data-testid="rating-badge">
+                <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+                <span className="text-sm font-bold text-amber-700">{dashboardData?.star_rating?.toFixed(1) || '5.0'}</span>
               </button>
-              <div className="text-right"><p className="text-sm text-slate-600">Welcome,</p><p className="font-semibold text-slate-900">{user?.name}</p></div>
-              <Button onClick={handleLogout} variant="outline" className="rounded-full" data-testid="logout-button"><LogOut className="w-4 h-4 mr-2" /> Logout</Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setShowNotifDialog(true)} variant="outline" className="rounded-full relative" data-testid="notif-button">
+                <Bell className="w-4 h-4" />
+                {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">{unreadCount}</span>}
+              </Button>
+              <Button onClick={() => navigate('/chat')} variant="outline" className="rounded-full" data-testid="chat-button"><MessageSquare className="w-4 h-4" /></Button>
+              <Button onClick={handleLogout} variant="outline" className="rounded-full" data-testid="logout-button"><LogOut className="w-4 h-4" /></Button>
             </div>
           </div>
         </div>
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Student Complaints */}
-        {studentComplaints.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold text-red-700 mb-4">Student Complaints ({studentComplaints.length})</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {studentComplaints.map(c => (
-                <div key={c.complaint_id} className="bg-red-50 rounded-2xl border-2 border-red-200 p-5">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-bold text-slate-900">{c.subject}</h3>
-                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${c.status === 'open' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>{c.status}</span>
-                  </div>
-                  <p className="text-sm text-slate-600 mb-1">{c.description}</p>
-                  <p className="text-xs text-slate-500">From: {c.raised_by_name}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Quick Actions */}
+        <div className="flex flex-wrap gap-3 mb-8">
+          <Button onClick={() => setShowCreateClass(true)} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full" data-testid="create-class-button"><Plus className="w-4 h-4 mr-2" /> Create Class</Button>
+          <Button onClick={() => navigate('/teacher-calendar')} variant="outline" className="rounded-full" data-testid="calendar-button"><Calendar className="w-4 h-4 mr-2" /> Schedule Planner</Button>
+          <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full"><CreditCard className="w-4 h-4 mr-2" /> Wallet</Button>
+          <Button onClick={() => navigate('/learning-kits')} variant="outline" className="rounded-full"><BookOpen className="w-4 h-4 mr-2" /> Learning Kit</Button>
+          <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full"><ShieldCheck className="w-4 h-4 mr-2" /> Complaints</Button>
+        </div>
 
-        {/* Pending Demo Feedback (Mandatory) */}
+        {/* Pending Demo Feedback */}
         {pendingDemoFeedback.length > 0 && (
           <div className="mb-8 bg-violet-50 rounded-3xl border-2 border-violet-300 p-6" data-testid="pending-demo-feedback-alert">
             <h2 className="text-lg font-bold text-violet-800 mb-2 flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-violet-600" /> Demo Feedback Required ({pendingDemoFeedback.length})
             </h2>
-            <p className="text-sm text-violet-600 mb-4">You must submit feedback for completed demos. This is mandatory and will be shared with the counsellor.</p>
+            <p className="text-sm text-violet-600 mb-4">You must submit feedback for completed demos.</p>
             <div className="space-y-2">
               {pendingDemoFeedback.map(demo => (
                 <div key={demo.demo_id} className="bg-white rounded-xl p-3 border border-violet-200 flex items-center justify-between">
@@ -352,19 +356,17 @@ const TeacherDashboard = () => {
         )}
 
         {/* Pending Assignments */}
-        {pendingAssignments.length > 0 && (
+        {dashboardData?.pending_assignments?.length > 0 && (
           <div className="mb-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-4">Pending Student Assignments</h2>
+            <h2 className="text-lg font-bold text-slate-900 mb-3">Pending Student Assignments</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {pendingAssignments.map(a => (
-                <div key={a.assignment_id} className="bg-amber-50 rounded-2xl border-2 border-amber-200 p-5">
-                  <div className="flex items-start justify-between mb-3">
-                    <div><h3 className="font-bold text-slate-900">{a.student_name}</h3><p className="text-sm text-slate-600">{a.student_email}</p></div>
-                    <span className="bg-amber-200 text-amber-900 px-3 py-1 rounded-full text-xs font-semibold">PENDING</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button onClick={() => handleApproveAssignment(a.assignment_id, true)} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full" data-testid={`approve-${a.assignment_id}`}>Approve</Button>
-                    <Button onClick={() => handleApproveAssignment(a.assignment_id, false)} variant="outline" className="flex-1 rounded-full" data-testid={`reject-${a.assignment_id}`}>Reject</Button>
+              {dashboardData.pending_assignments.map(a => (
+                <div key={a.assignment_id} className="bg-amber-50 rounded-2xl border-2 border-amber-200 p-5" data-testid={`assignment-${a.assignment_id}`}>
+                  <h3 className="font-bold text-slate-900">{a.student_name}</h3>
+                  <p className="text-sm text-slate-600">{a.student_email}</p>
+                  <div className="flex gap-2 mt-3">
+                    <Button onClick={() => handleApproveAssignment(a.assignment_id, true)} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full" data-testid={`approve-${a.assignment_id}`}><CheckCircle className="w-4 h-4 mr-1" /> Accept</Button>
+                    <Button onClick={() => handleApproveAssignment(a.assignment_id, false)} variant="outline" className="flex-1 rounded-full border-red-200 text-red-600" data-testid={`reject-${a.assignment_id}`}><XCircle className="w-4 h-4 mr-1" /> Reject</Button>
                   </div>
                 </div>
               ))}
@@ -372,208 +374,133 @@ const TeacherDashboard = () => {
           </div>
         )}
 
-        {/* Actions */}
-        <div className="flex flex-wrap gap-3 mb-8">
-          <Button onClick={() => setShowCreateDialog(true)} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full px-6 py-3 font-bold" data-testid="create-class-button"><Plus className="w-5 h-5 mr-2" /> Create New Class</Button>
-          <Button onClick={() => navigate('/demo-live-sheet')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-6 py-3 font-bold" data-testid="demo-live-sheet-button"><Zap className="w-4 h-4 mr-2" /> Demo Live Sheet</Button>
-          <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="wallet-button"><CreditCard className="w-4 h-4 mr-2" /> Wallet</Button>
-          <Button onClick={() => navigate('/teacher-calendar')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="calendar-button"><CalendarDays className="w-4 h-4 mr-2" /> Schedule Planner</Button>
-          <Button onClick={() => navigate('/learning-kit')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="learning-kit-button"><BookOpen className="w-4 h-4 mr-2" /> Learning Kit</Button>
-          <Button onClick={() => navigate('/teacher-classes')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="all-classes-button">All Classes</Button>
-          <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full px-6 py-3 font-bold" data-testid="complaints-button"><MessageSquare className="w-4 h-4 mr-2" /> My Complaints</Button>
-        </div>
+        {/* Class Sections - Tabbed */}
+        <Tabs value={classTab} onValueChange={setClassTab} className="mb-8">
+          <TabsList data-testid="class-tabs">
+            <TabsTrigger value="today" data-testid="tab-today">Today's Sessions ({todaySessions.length})</TabsTrigger>
+            <TabsTrigger value="upcoming" data-testid="tab-upcoming">Upcoming ({upcomingClasses.length})</TabsTrigger>
+            <TabsTrigger value="conducted" data-testid="tab-conducted">Conducted ({conductedClasses.length})</TabsTrigger>
+          </TabsList>
 
-        {/* Classes of the Day */}
-        <div className="mb-8">
-          <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-sky-500" /> Classes of the Day ({groupedData.today.length})
-          </h2>
-          {groupedData.today.length === 0 ? (
-            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
-              <p className="text-slate-500">No classes scheduled for today</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {groupedData.today.map(cls => renderClassCard(cls, false))}
-            </div>
-          )}
-        </div>
-
-        {/* Students & Their Classes (Grouped View) */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Users className="w-5 h-5 text-amber-500" /> My Students ({groupedData.by_student.length})
-            </h2>
-            {groupedData.ended_count > 0 && (
-              <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full">{groupedData.ended_count} ended classes in history</span>
+          <TabsContent value="today">
+            {todaySessions.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-500">No sessions scheduled for today</p></div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {todaySessions.map(cls => renderClassCard(cls, 'today'))}
+              </div>
             )}
-          </div>
-          {/* Student Search */}
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <Input
-              placeholder="Search students by name..."
-              value={studentSearch}
-              onChange={e => setStudentSearch(e.target.value)}
-              className="pl-10 rounded-xl border-2 border-slate-200 bg-white"
-              data-testid="student-search-input"
-            />
-          </div>
-          {filteredStudents.length === 0 ? (
-            <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center">
-              <p className="text-slate-500">{studentSearch ? 'No students match your search' : 'No active students yet'}</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {filteredStudents.map(studentGroup => {
-                const isExpanded = expandedStudent === studentGroup.student_id;
-                const details = studentGroup.student_details || {};
-                return (
-                  <div key={studentGroup.student_id} className="bg-white rounded-2xl border-2 border-slate-200 overflow-hidden" data-testid={`student-group-${studentGroup.student_id}`}>
-                    {/* Student Header (Clickable) */}
-                    <button
-                      onClick={() => setExpandedStudent(isExpanded ? null : studentGroup.student_id)}
-                      className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors text-left"
-                      data-testid={`toggle-student-${studentGroup.student_id}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-sky-400 to-sky-500 rounded-xl flex items-center justify-center text-white font-bold text-sm">
-                          {studentGroup.student_name?.charAt(0) || '?'}
-                        </div>
-                        <div>
-                          <p className="font-bold text-slate-900">{studentGroup.student_name}</p>
-                          <p className="text-xs text-slate-500">
-                            {details.email || ''} {details.student_code ? `| ${details.student_code}` : ''}
-                            {details.grade ? ` | Class ${details.grade}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="bg-sky-100 text-sky-700 px-3 py-1 rounded-full text-xs font-semibold">{studentGroup.classes.length} classes</span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          className="rounded-full p-1.5 hover:bg-slate-100 transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setFeedbackTarget(studentGroup);
-                            setShowFeedbackDialog(true);
-                          }}
-                          data-testid={`feedback-btn-${studentGroup.student_id}`}
-                        >
-                          <Star className="w-4 h-4 text-amber-500" />
-                        </span>
-                        {isExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-                      </div>
-                    </button>
-                    {/* Expanded: Student's Classes */}
-                    {isExpanded && (
-                      <div className="border-t border-slate-100 p-4 bg-slate-50">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {studentGroup.classes.map(cls => renderClassCard(cls, true))}
-                        </div>
-                      </div>
-                    )}
+          </TabsContent>
+
+          <TabsContent value="upcoming">
+            {upcomingClasses.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-500">No upcoming classes</p></div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {upcomingClasses.map(cls => renderClassCard(cls, 'upcoming'))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="conducted">
+            {conductedClasses.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-500">No conducted classes yet</p></div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {conductedClasses.map(cls => renderClassCard(cls, 'conducted'))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {/* My Students */}
+        {dashboardData?.approved_students?.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-lg font-bold text-slate-900 mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-sky-500" /> My Students</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {dashboardData.approved_students.map(s => (
+                <div key={s.assignment_id} className="bg-white rounded-xl border border-slate-200 p-3 flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900 text-sm">{s.student_name}</p>
+                    <p className="text-xs text-slate-500">{s.student_email}</p>
                   </div>
-                );
-              })}
+                  <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs"><MessageSquare className="w-3 h-3 mr-1" /> Feedback</Button>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Create Class Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Create New Class</DialogTitle></DialogHeader>
-          <form onSubmit={handleCreateClass} className="space-y-4 mt-4">
-            <div className="flex items-center gap-3 bg-violet-50 rounded-xl p-4 border-2 border-violet-200">
-              <input type="checkbox" id="is_demo" checked={formData.is_demo} onChange={e => setFormData({ ...formData, is_demo: e.target.checked })} className="w-5 h-5 rounded" data-testid="demo-toggle" />
-              <label htmlFor="is_demo" className="font-semibold text-violet-800">Demo Session</label>
-              <span className="text-xs text-violet-600 ml-auto">Uses demo pricing</span>
+      <Dialog open={showCreateClass} onOpenChange={setShowCreateClass}>
+        <DialogContent className="sm:max-w-lg rounded-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Create Class Session</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div><Label>Title</Label><Input value={classForm.title} onChange={e => setClassForm({...classForm, title: e.target.value})} placeholder="Class title" className="rounded-xl" data-testid="class-title-input" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Subject</Label><Input value={classForm.subject} onChange={e => setClassForm({...classForm, subject: e.target.value})} className="rounded-xl" /></div>
+              <div><Label>Type</Label>
+                <select value={classForm.class_type} onChange={e => setClassForm({...classForm, class_type: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm h-10">
+                  <option value="1:1">1:1</option><option value="group">Group</option>
+                </select>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div><Label>Title</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} className="rounded-xl" required data-testid="class-title-input" /></div>
-              <div><Label>Subject</Label><Input value={formData.subject} onChange={e => setFormData({ ...formData, subject: e.target.value })} className="rounded-xl" required data-testid="class-subject-input" /></div>
-              <div><Label>Type</Label><select value={formData.class_type} onChange={e => setFormData({ ...formData, class_type: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="class-type-select"><option value="1:1">1:1</option><option value="group">Group</option></select></div>
-              <div><Label>Date</Label><Input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="rounded-xl" required data-testid="class-date-input" /></div>
-              <div><Label>Start Time</Label><Input type="time" value={formData.start_time} onChange={e => setFormData({ ...formData, start_time: e.target.value })} className="rounded-xl" required data-testid="class-start-time-input" /></div>
-              <div><Label>End Time</Label><Input type="time" value={formData.end_time} onChange={e => setFormData({ ...formData, end_time: e.target.value })} className="rounded-xl" required data-testid="class-end-time-input" /></div>
-              <div><Label>For Student</Label><select value={formData.assigned_student_id} onChange={e => setFormData({ ...formData, assigned_student_id: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" required data-testid="student-select"><option value="">Select student...</option>{approvedStudents.map(a => <option key={a.student_id} value={a.student_id}>{a.student_name}</option>)}</select></div>
-              <div><Label>Duration (Days)</Label><Input type="number" min="1" value={formData.duration_days} onChange={e => setFormData({ ...formData, duration_days: e.target.value })} className="rounded-xl" required data-testid="class-duration-input" /></div>
-              <div><Label>Max Students</Label><Input type="number" value={formData.max_students} onChange={e => setFormData({ ...formData, max_students: e.target.value })} className="rounded-xl" required data-testid="class-max-students-input" /></div>
+            <div><Label>Student</Label>
+              <select value={classForm.assigned_student_id} onChange={e => setClassForm({...classForm, assigned_student_id: e.target.value})}
+                className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="class-student-select">
+                <option value="">Select student...</option>
+                {(dashboardData?.approved_students || []).map(s => <option key={s.student_id} value={s.student_id}>{s.student_name}</option>)}
+              </select>
             </div>
-            <Button type="submit" className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="submit-create-class-button">Create {formData.is_demo ? 'Demo Session' : 'Class'}</Button>
-          </form>
+            <div className="grid grid-cols-3 gap-3">
+              <div><Label>Date</Label><Input type="date" value={classForm.date} onChange={e => setClassForm({...classForm, date: e.target.value})} className="rounded-xl" data-testid="class-date-input" /></div>
+              <div><Label>Start</Label><Input type="time" value={classForm.start_time} onChange={e => setClassForm({...classForm, start_time: e.target.value})} className="rounded-xl" /></div>
+              <div><Label>End</Label><Input type="time" value={classForm.end_time} onChange={e => setClassForm({...classForm, end_time: e.target.value})} className="rounded-xl" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Duration (Days)</Label><Input type="number" min="1" value={classForm.duration_days} onChange={e => setClassForm({...classForm, duration_days: parseInt(e.target.value) || 1})} className="rounded-xl" data-testid="class-days-input" /></div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={classForm.is_demo} onChange={e => setClassForm({...classForm, is_demo: e.target.checked})} className="rounded" />
+                  <span className="text-sm font-medium text-slate-700">Demo Session</span>
+                </label>
+              </div>
+            </div>
+            <Button onClick={handleCreateClass} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="submit-create-class">Create Class</Button>
+          </div>
         </DialogContent>
       </Dialog>
 
-      {/* Submit Proof Dialog */}
+      {/* Proof Dialog */}
       <Dialog open={showProofDialog} onOpenChange={setShowProofDialog}>
-        <DialogContent className="sm:max-w-lg rounded-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Submit Class Proof</DialogTitle></DialogHeader>
-          {selectedClassForProof && (
-            <div className="space-y-4 mt-4">
-              <div className="bg-slate-50 rounded-xl p-3"><p className="font-semibold text-slate-900">{selectedClassForProof.title}</p><p className="text-sm text-slate-600">{selectedClassForProof.subject} | {selectedClassForProof.date}</p></div>
-              <div><Label>Performance *</Label><select value={proofData.student_performance} onChange={e => setProofData({ ...proofData, student_performance: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="performance-select"><option value="excellent">Excellent</option><option value="good">Good</option><option value="average">Average</option><option value="needs_improvement">Needs Improvement</option></select></div>
-              <div><Label>Topics Covered *</Label><textarea value={proofData.topics_covered} onChange={e => setProofData({ ...proofData, topics_covered: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={3} data-testid="topics-covered-input" /></div>
-              <div><Label>Feedback *</Label><textarea value={proofData.feedback_text} onChange={e => setProofData({ ...proofData, feedback_text: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={3} data-testid="feedback-text-input" /></div>
-              <div><Label>Screenshot (optional, max 2MB)</Label><input type="file" accept="image/*" onChange={handleScreenshotUpload} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="screenshot-upload" />{proofData.screenshot_base64 && <p className="text-xs text-emerald-600 mt-1">Attached</p>}</div>
-              <Button onClick={handleSubmitProof} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="submit-proof-confirm-button"><Upload className="w-5 h-5 mr-2" /> Submit Proof</Button>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader><DialogTitle>Submit Class Proof</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-4">
+            <div><Label>Topics Covered</Label><Input value={proofForm.topics_covered} onChange={e => setProofForm({...proofForm, topics_covered: e.target.value})} className="rounded-xl" /></div>
+            <div><Label>Student Performance</Label>
+              <select value={proofForm.student_performance} onChange={e => setProofForm({...proofForm, student_performance: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm">
+                <option value="excellent">Excellent</option><option value="good">Good</option><option value="average">Average</option><option value="needs_improvement">Needs Improvement</option>
+              </select>
             </div>
-          )}
+            <div><Label>Feedback</Label><textarea value={proofForm.feedback_text} onChange={e => setProofForm({...proofForm, feedback_text: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={3} /></div>
+            <Button onClick={handleSubmitProof} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold">Submit Proof</Button>
+          </div>
         </DialogContent>
       </Dialog>
 
       {/* Feedback Dialog */}
       <Dialog open={showFeedbackDialog} onOpenChange={setShowFeedbackDialog}>
         <DialogContent className="sm:max-w-md rounded-3xl">
-          <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Send Feedback</DialogTitle></DialogHeader>
-          {feedbackTarget && (
-            <div className="space-y-4 mt-4">
-              <div className="bg-slate-50 rounded-xl p-3">
-                <p className="font-semibold text-slate-900">To: {feedbackTarget.student_name}</p>
-              </div>
-              <div>
-                <Label>Rating</Label>
-                <select value={feedbackForm.performance_rating} onChange={e => setFeedbackForm({ ...feedbackForm, performance_rating: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="feedback-rating-select">
-                  <option value="excellent">Excellent</option>
-                  <option value="good">Good</option>
-                  <option value="average">Average</option>
-                  <option value="needs_improvement">Needs Improvement</option>
-                </select>
-              </div>
-              <div>
-                <Label>Feedback Message *</Label>
-                <textarea value={feedbackForm.feedback_text} onChange={e => setFeedbackForm({ ...feedbackForm, feedback_text: e.target.value })} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={4} data-testid="feedback-message-input" />
-              </div>
-              <Button onClick={handleSendFeedback} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="send-feedback-button">
-                <Star className="w-5 h-5 mr-2" /> Send Feedback
-              </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Notifications Dialog */}
-      <Dialog open={showNotifDialog} onOpenChange={setShowNotifDialog}>
-        <DialogContent className="sm:max-w-lg rounded-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center justify-between w-full">
-              <DialogTitle className="text-2xl font-bold text-slate-900">Notifications</DialogTitle>
-              {unreadCount > 0 && <Button onClick={handleMarkAllRead} variant="outline" className="rounded-full text-xs" data-testid="mark-all-read">Mark all read</Button>}
-            </div>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Send Feedback to Student</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-4">
-            {notifications.length === 0 ? <p className="text-slate-500 text-center py-8">No notifications</p> : notifications.map(n => (
-              <div key={n.notification_id} className={`rounded-xl p-4 border-2 ${n.read ? 'bg-slate-50 border-slate-200' : 'bg-sky-50 border-sky-200'}`} data-testid={`notif-${n.notification_id}`}>
-                <div className="flex items-start gap-3">
-                  {!n.read && <div className="w-2 h-2 rounded-full bg-sky-500 mt-2 flex-shrink-0"></div>}
-                  <div className="flex-1"><p className="font-semibold text-slate-900 text-sm">{n.title}</p><p className="text-slate-600 text-sm">{n.message}</p><p className="text-xs text-slate-400 mt-1">{new Date(n.created_at).toLocaleString()}</p></div>
-                </div>
-              </div>
-            ))}
+            <div><Label>Rating</Label>
+              <select value={feedbackForm.performance_rating} onChange={e => setFeedbackForm({...feedbackForm, performance_rating: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm">
+                <option value="excellent">Excellent</option><option value="good">Good</option><option value="average">Average</option><option value="needs_improvement">Needs Improvement</option>
+              </select>
+            </div>
+            <div><Label>Feedback</Label><textarea value={feedbackForm.feedback_text} onChange={e => setFeedbackForm({...feedbackForm, feedback_text: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={3} placeholder="Your feedback..." /></div>
+            <Button onClick={handleSendFeedback} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold">Send Feedback</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -581,76 +508,99 @@ const TeacherDashboard = () => {
       {/* Reschedule Dialog */}
       <Dialog open={showRescheduleDialog} onOpenChange={setShowRescheduleDialog}>
         <DialogContent className="sm:max-w-md rounded-3xl">
-          <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Reschedule Session</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Reschedule Session</DialogTitle></DialogHeader>
           {rescheduleTarget && (
             <div className="space-y-4 mt-4">
               <div className="bg-amber-50 rounded-xl p-3 border border-amber-200">
                 <p className="font-semibold text-slate-900">{rescheduleTarget.title}</p>
-                <p className="text-sm text-amber-700">Student cancelled today's session</p>
               </div>
-              <div>
-                <Label>New Date</Label>
-                <Input type="date" value={rescheduleForm.new_date} onChange={e => setRescheduleForm({...rescheduleForm, new_date: e.target.value})} className="rounded-xl" data-testid="reschedule-date" />
-              </div>
+              <div><Label>New Date</Label><Input type="date" value={rescheduleForm.new_date} onChange={e => setRescheduleForm({...rescheduleForm, new_date: e.target.value})} className="rounded-xl" data-testid="reschedule-date" /></div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Start Time</Label>
-                  <Input type="time" value={rescheduleForm.new_start_time} onChange={e => setRescheduleForm({...rescheduleForm, new_start_time: e.target.value})} className="rounded-xl" data-testid="reschedule-start" />
-                </div>
-                <div>
-                  <Label>End Time</Label>
-                  <Input type="time" value={rescheduleForm.new_end_time} onChange={e => setRescheduleForm({...rescheduleForm, new_end_time: e.target.value})} className="rounded-xl" data-testid="reschedule-end" />
-                </div>
+                <div><Label>Start</Label><Input type="time" value={rescheduleForm.new_start_time} onChange={e => setRescheduleForm({...rescheduleForm, new_start_time: e.target.value})} className="rounded-xl" /></div>
+                <div><Label>End</Label><Input type="time" value={rescheduleForm.new_end_time} onChange={e => setRescheduleForm({...rescheduleForm, new_end_time: e.target.value})} className="rounded-xl" /></div>
               </div>
-              <Button onClick={handleReschedule} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full py-6 font-bold" data-testid="confirm-reschedule-btn">
-                <CalendarDays className="w-5 h-5 mr-2" /> Confirm Reschedule
-              </Button>
+              <Button onClick={handleReschedule} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full py-6 font-bold" data-testid="confirm-reschedule-btn">Confirm Reschedule</Button>
             </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Demo Feedback Dialog (Mandatory) */}
+      {/* Demo Feedback Dialog */}
       <Dialog open={showDemoFeedbackDialog} onOpenChange={setShowDemoFeedbackDialog}>
         <DialogContent className="sm:max-w-md rounded-3xl">
-          <DialogHeader><DialogTitle className="text-2xl font-bold text-slate-900">Demo Feedback (Required)</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Demo Feedback (Required)</DialogTitle></DialogHeader>
           {demoFeedbackTarget && (
             <div className="space-y-4 mt-4">
               <div className="bg-violet-50 rounded-xl p-3 border border-violet-200">
-                <p className="font-semibold text-slate-900">{demoFeedbackTarget.student_name || demoFeedbackTarget.name || 'Student'}</p>
-                <p className="text-sm text-violet-700">{demoFeedbackTarget.subject || 'Demo'} - {demoFeedbackTarget.preferred_date}</p>
+                <p className="font-semibold text-slate-900">{demoFeedbackTarget.student_name || 'Student'}</p>
               </div>
-              <div>
-                <Label>Performance Rating</Label>
-                <select value={demoFeedbackForm.performance_rating} onChange={e => setDemoFeedbackForm({...demoFeedbackForm, performance_rating: e.target.value})}
-                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="demo-fb-rating">
-                  <option value="excellent">Excellent</option>
-                  <option value="good">Good</option>
-                  <option value="average">Average</option>
-                  <option value="needs_improvement">Needs Improvement</option>
+              <div><Label>Rating</Label>
+                <select value={demoFeedbackForm.performance_rating} onChange={e => setDemoFeedbackForm({...demoFeedbackForm, performance_rating: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="demo-fb-rating">
+                  <option value="excellent">Excellent</option><option value="good">Good</option><option value="average">Average</option><option value="needs_improvement">Needs Improvement</option>
                 </select>
               </div>
-              <div>
-                <Label>Recommended Frequency</Label>
-                <select value={demoFeedbackForm.recommended_frequency} onChange={e => setDemoFeedbackForm({...demoFeedbackForm, recommended_frequency: e.target.value})}
-                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="demo-fb-frequency">
-                  <option value="">Select...</option>
-                  <option value="daily">Daily</option>
-                  <option value="alternate_days">Alternate Days</option>
-                  <option value="3_per_week">3 Per Week</option>
-                  <option value="2_per_week">2 Per Week</option>
-                  <option value="weekly">Weekly</option>
+              <div><Label>Recommended Frequency</Label>
+                <select value={demoFeedbackForm.recommended_frequency} onChange={e => setDemoFeedbackForm({...demoFeedbackForm, recommended_frequency: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm">
+                  <option value="">Select...</option><option value="daily">Daily</option><option value="alternate_days">Alternate Days</option><option value="3_per_week">3 Per Week</option><option value="weekly">Weekly</option>
                 </select>
               </div>
-              <div>
-                <Label>Feedback Notes (Required)</Label>
-                <textarea value={demoFeedbackForm.feedback_text} onChange={e => setDemoFeedbackForm({...demoFeedbackForm, feedback_text: e.target.value})}
-                  placeholder="Your assessment of the student's demo performance, readiness, areas to focus on..."
-                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={4} data-testid="demo-fb-text" />
+              <div><Label>Feedback (Required)</Label><textarea value={demoFeedbackForm.feedback_text} onChange={e => setDemoFeedbackForm({...demoFeedbackForm, feedback_text: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={4} data-testid="demo-fb-text" /></div>
+              <Button onClick={handleSubmitDemoFeedback} className="w-full bg-violet-500 hover:bg-violet-600 text-white rounded-full py-6 font-bold" data-testid="submit-demo-fb-btn">Submit Feedback</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Notifications */}
+      <Dialog open={showNotifDialog} onOpenChange={setShowNotifDialog}>
+        <DialogContent className="sm:max-w-lg rounded-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center justify-between w-full">
+              <DialogTitle>Notifications</DialogTitle>
+              {unreadCount > 0 && <Button onClick={handleMarkAllRead} variant="outline" className="rounded-full text-xs">Mark all read</Button>}
+            </div>
+          </DialogHeader>
+          <div className="space-y-3 mt-4">
+            {notifications.length === 0 ? <p className="text-slate-500 text-center py-8">No notifications</p> : notifications.map(n => (
+              <div key={n.notification_id} className={`rounded-xl p-4 border-2 ${n.read ? 'bg-slate-50 border-slate-200' : 'bg-sky-50 border-sky-200'}`}>
+                <p className="font-semibold text-slate-900 text-sm">{n.title}</p>
+                <p className="text-slate-600 text-sm">{n.message}</p>
+                <p className="text-xs text-slate-400 mt-1">{new Date(n.created_at).toLocaleString()}</p>
               </div>
-              <Button onClick={handleSubmitDemoFeedback} className="w-full bg-violet-500 hover:bg-violet-600 text-white rounded-full py-6 font-bold" data-testid="submit-demo-fb-btn">
-                Submit Demo Feedback
-              </Button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rating Dialog */}
+      <Dialog open={showRatingDialog} onOpenChange={setShowRatingDialog}>
+        <DialogContent className="sm:max-w-md rounded-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Star className="w-5 h-5 text-amber-500 fill-amber-500" /> My Rating & History</DialogTitle></DialogHeader>
+          {ratingData && (
+            <div className="space-y-4 mt-4">
+              <div className="bg-amber-50 rounded-2xl p-5 text-center border border-amber-200">
+                <p className="text-4xl font-black text-amber-700">{ratingData.star_rating?.toFixed(1)}<span className="text-lg">/5</span></p>
+                {ratingData.is_suspended && <p className="text-red-600 font-bold mt-1">SUSPENDED until {new Date(ratingData.suspended_until).toLocaleDateString()}</p>}
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-center">
+                <div className="bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Avg Feedback</p><p className="font-bold">{ratingData.rating_details?.avg_feedback?.toFixed(1) || '-'}</p></div>
+                <div className="bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Monthly Cancellations</p><p className="font-bold text-red-600">{ratingData.rating_details?.monthly_cancellations || 0}</p></div>
+                <div className="bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Bad Feedbacks</p><p className="font-bold text-red-600">{ratingData.rating_details?.bad_feedbacks || 0}</p></div>
+                <div className="bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Penalty</p><p className="font-bold text-red-600">-{ratingData.rating_details?.penalty?.toFixed(1) || 0}</p></div>
+              </div>
+              {ratingData.recent_events?.length > 0 && (
+                <div>
+                  <p className="text-sm font-bold text-slate-700 mb-2">Recent Events</p>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {ratingData.recent_events.map(e => (
+                      <div key={e.event_id} className={`rounded-lg p-2 text-xs ${e.event === 'cancellation' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
+                        <span className="font-bold">{e.event === 'cancellation' ? 'Cancellation' : 'Bad Feedback'}</span>: {e.details}
+                        <span className="text-slate-400 ml-2">{new Date(e.created_at).toLocaleDateString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
