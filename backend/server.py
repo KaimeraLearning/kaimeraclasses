@@ -159,6 +159,9 @@ class StudentTeacherAssignment(BaseModel):
 class AssignStudentToTeacher(BaseModel):
     student_id: str
     teacher_id: str
+    class_frequency: Optional[str] = None
+    specific_days: Optional[str] = None
+    demo_performance_notes: Optional[str] = None
 
 class TeacherApprovalRequest(BaseModel):
     assignment_id: str
@@ -829,6 +832,62 @@ async def cancel_booking(class_id: str, request: Request, authorization: Optiona
     
     return {"message": "Booking cancelled and credits refunded"}
 
+
+@api_router.post("/classes/cancel-session/{class_id}")
+async def cancel_todays_session(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Student cancels today's live session (not the entire enrollment)"""
+    user = await get_current_user(request, authorization)
+
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    is_enrolled = any(s["user_id"] == user.user_id for s in cls.get("enrolled_students", []))
+    if not is_enrolled:
+        raise HTTPException(status_code=400, detail="Not enrolled")
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cancellations = cls.get("cancellations", [])
+    max_cancel = cls.get("max_cancellations", 3)
+
+    if len(cancellations) >= max_cancel:
+        raise HTTPException(status_code=400, detail=f"Maximum {max_cancel} cancellations reached")
+
+    if any(c.get("date") == today for c in cancellations):
+        raise HTTPException(status_code=400, detail="Already cancelled today's session")
+
+    cancellations.append({
+        "date": today,
+        "cancelled_by": user.user_id,
+        "cancelled_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    # Extend end_date by 1 day
+    end_date = cls.get("end_date", cls.get("date"))
+    new_end = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    await db.class_sessions.update_one(
+        {"class_id": class_id},
+        {"$set": {
+            "cancellations": cancellations,
+            "cancelled_today": True,
+            "end_date": new_end
+        }}
+    )
+
+    # Notify teacher
+    await db.notifications.insert_one({
+        "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+        "user_id": cls["teacher_id"],
+        "type": "session_cancelled",
+        "title": "Session Cancelled by Student",
+        "message": f"Student {user.name} cancelled today's session for '{cls['title']}'. You can reschedule.",
+        "read": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    return {"message": "Today's session cancelled. Teacher will reschedule."}
+
 @api_router.get("/student/dashboard")
 async def student_dashboard(request: Request, authorization: Optional[str] = Header(None)):
     """Get student dashboard data"""
@@ -1073,6 +1132,40 @@ async def approve_student_assignment(approval: TeacherApprovalRequest, request: 
             "approved_at": datetime.now(timezone.utc).isoformat()
         }}
     )
+    
+    # If approved, deduct credits from student wallet based on admin-set rates
+    if approval.approved:
+        pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+        class_fee = pricing.get("class_price_student", 0) if pricing else 0
+        credit_price = assignment.get("credit_price", class_fee)
+        
+        student = await db.users.find_one({"user_id": assignment["student_id"]}, {"_id": 0})
+        if student and credit_price > 0:
+            await db.users.update_one(
+                {"user_id": assignment["student_id"]},
+                {"$inc": {"credits": -credit_price}}
+            )
+            txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+            await db.transactions.insert_one({
+                "transaction_id": txn_id,
+                "user_id": assignment["student_id"],
+                "type": "enrollment_deduction",
+                "amount": -credit_price,
+                "description": f"Enrollment fee: assigned to teacher {user.name}",
+                "status": "completed",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+        
+        # Notify student
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": assignment["student_id"],
+            "type": "assignment_approved",
+            "title": "Teacher Accepted!",
+            "message": f"Teacher {user.name} has accepted your enrollment. {credit_price} credits deducted.",
+            "read": False,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
     
     action = "approved" if approval.approved else "rejected"
     return {"message": f"Student assignment {action}"}
@@ -1374,7 +1467,10 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         "assigned_at": assigned_at.isoformat(),
         "approved_at": None,
         "expires_at": expires_at.isoformat(),
-        "assigned_by": user.user_id  # Track who assigned
+        "assigned_by": user.user_id,
+        "class_frequency": assignment.class_frequency if hasattr(assignment, 'class_frequency') else None,
+        "specific_days": assignment.specific_days if hasattr(assignment, 'specific_days') else None,
+        "demo_performance_notes": assignment.demo_performance_notes if hasattr(assignment, 'demo_performance_notes') else None
     }
     
     await db.student_teacher_assignments.insert_one(assignment_doc)
@@ -4109,6 +4205,148 @@ async def admin_counsellor_tracking(request: Request, authorization: Optional[st
     return result
 
 
+# ==================== RESCHEDULE SESSION ====================
+
+@api_router.post("/teacher/reschedule-class/{class_id}")
+async def reschedule_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Teacher reschedules a session — only if student cancelled today's session"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teachers only")
+
+    body = await request.json()
+    new_date = body.get("new_date")
+    new_start_time = body.get("new_start_time")
+    new_end_time = body.get("new_end_time")
+
+    if not new_date or not new_start_time or not new_end_time:
+        raise HTTPException(status_code=400, detail="New date, start_time, and end_time required")
+
+    cls = await db.class_sessions.find_one({"class_id": class_id, "teacher_id": user.user_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cancelled_today = any(c.get("date") == today for c in (cls.get("cancellations") or []))
+    if not cancelled_today:
+        raise HTTPException(status_code=400, detail="Can only reschedule if student cancelled today's session")
+
+    await db.class_sessions.update_one(
+        {"class_id": class_id},
+        {"$set": {
+            "rescheduled": True,
+            "rescheduled_date": new_date,
+            "rescheduled_start_time": new_start_time,
+            "rescheduled_end_time": new_end_time,
+            "rescheduled_at": datetime.now(timezone.utc).isoformat(),
+            "cancelled_today": False
+        }}
+    )
+
+    for s in cls.get("enrolled_students", []):
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": s["user_id"],
+            "type": "class_rescheduled",
+            "title": "Session Rescheduled",
+            "message": f"Your class '{cls['title']}' has been rescheduled to {new_date} at {new_start_time}-{new_end_time}",
+            "read": False,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    return {"message": "Session rescheduled successfully"}
+
+
+# ==================== ADMIN EDIT STUDENT PROFILE ====================
+
+@api_router.post("/admin/edit-student/{user_id}")
+async def admin_edit_student(user_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin can edit ALL fields of a student's profile"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    body = await request.json()
+    target = await db.users.find_one({"user_id": user_id, "role": "student"}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    editable_fields = ["name", "email", "phone", "institute", "goal", "preferred_time_slot",
+                       "state", "city", "country", "grade", "credits", "bio"]
+    updates = {}
+    for field in editable_fields:
+        if field in body and body[field] is not None:
+            if field == "credits":
+                updates[field] = float(body[field])
+            else:
+                updates[field] = body[field]
+
+    if updates:
+        await db.users.update_one({"user_id": user_id}, {"$set": updates})
+
+    return {"message": "Student profile updated", "updated_fields": list(updates.keys())}
+
+
+# ==================== STUDENT ENROLLMENT STATUS ====================
+
+@api_router.get("/student/enrollment-status")
+async def student_enrollment_status(request: Request, authorization: Optional[str] = Header(None)):
+    """Check if student is enrolled in a paid course"""
+    user = await get_current_user(request, authorization)
+    if user.role != "student":
+        raise HTTPException(status_code=403, detail="Students only")
+
+    approved = await db.student_teacher_assignments.find_one(
+        {"student_id": user.user_id, "status": "approved"}, {"_id": 0}
+    )
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    active_classes = await db.class_sessions.find(
+        {"assigned_student_id": user.user_id, "is_demo": False,
+         "status": {"$in": ["scheduled", "in_progress"]},
+         "end_date": {"$gte": today}},
+        {"_id": 0}
+    ).to_list(100)
+
+    demo_classes = await db.class_sessions.find(
+        {"assigned_student_id": user.user_id, "is_demo": True},
+        {"_id": 0}
+    ).to_list(10)
+    demo_completed = len(demo_classes) > 0
+
+    is_enrolled = bool(approved) and len(active_classes) > 0
+
+    return {
+        "is_enrolled": is_enrolled,
+        "has_approved_teacher": bool(approved),
+        "active_class_count": len(active_classes),
+        "demo_completed": demo_completed,
+        "teacher_name": approved.get("teacher_name") if approved else None
+    }
+
+
+# ==================== STUDENT DEMO FEEDBACK VIEW ====================
+
+@api_router.get("/student/demo-feedback-received")
+async def student_demo_feedback_received(request: Request, authorization: Optional[str] = Header(None)):
+    """Student views feedback received from teachers on their demo sessions"""
+    user = await get_current_user(request, authorization)
+    if user.role != "student":
+        raise HTTPException(status_code=403, detail="Students only")
+
+    feedbacks = await db.demo_feedback.find(
+        {"student_id": user.user_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+
+    for fb in feedbacks:
+        if fb.get("teacher_id"):
+            teacher = await db.users.find_one({"user_id": fb["teacher_id"]}, {"_id": 0, "name": 1, "teacher_code": 1})
+            fb["teacher_name"] = teacher.get("name") if teacher else "Unknown"
+            fb["teacher_code"] = teacher.get("teacher_code") if teacher else ""
+
+    return feedbacks
+
+
 # ==================== ADMIN DELETE/BLOCK USER ====================
 
 @api_router.post("/admin/block-user")
@@ -4245,6 +4483,122 @@ async def startup_event():
         await db.users.update_one({"user_id": s["user_id"]}, {"$set": {"student_code": code}})
         logger.info(f"Backfilled student_code {code} for {s.get('name', s['email'])}")
     logger.info("Kaimera Learning API started")
+    # Start background tasks
+    asyncio.create_task(background_cleanup_task())
+    asyncio.create_task(background_preclass_alert_task())
+
+
+async def background_cleanup_task():
+    """Check every hour: Students with no enrollment/demo for 5 days get notified then deleted"""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Check every hour
+            five_days_ago = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+            
+            students = await db.users.find(
+                {"role": "student"}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "created_at": 1}
+            ).to_list(5000)
+            
+            for s in students:
+                sid = s["user_id"]
+                # Check for any active assignment
+                has_assignment = await db.student_teacher_assignments.find_one(
+                    {"student_id": sid, "status": {"$in": ["pending", "approved"]}}, {"_id": 0}
+                )
+                if has_assignment:
+                    continue
+                
+                # Check for any scheduled classes or demos
+                has_class = await db.class_sessions.find_one(
+                    {"assigned_student_id": sid, "status": {"$in": ["scheduled", "in_progress"]}}, {"_id": 0}
+                )
+                if has_class:
+                    continue
+                
+                # Check for any demo requests
+                has_demo = await db.demo_requests.find_one(
+                    {"student_id": sid, "status": {"$in": ["pending", "accepted"]}}, {"_id": 0}
+                )
+                if has_demo:
+                    continue
+                
+                # Check if created > 5 days ago
+                created = s.get("created_at", "")
+                if created and created < five_days_ago:
+                    # Check if already warned
+                    warned = await db.notifications.find_one(
+                        {"user_id": sid, "type": "inactivity_warning"}, {"_id": 0}
+                    )
+                    if not warned:
+                        # Send warning notification
+                        await db.notifications.insert_one({
+                            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+                            "user_id": sid,
+                            "type": "inactivity_warning",
+                            "title": "Account Inactivity Warning",
+                            "message": "Your account has been inactive for 5 days with no enrollment or demo. Please book a demo or enroll to keep your account active.",
+                            "read": False,
+                            "created_at": datetime.now(timezone.utc).isoformat()
+                        })
+                        await send_email(s.get("email", ""), "Kaimera Learning - Account Inactivity",
+                            f"<p>Hi {s.get('name', '')}, your Kaimera Learning account has been inactive for 5 days. Please book a demo or enroll to keep your account active.</p>")
+                        logger.info(f"Sent inactivity warning to {s.get('name', '')} ({s.get('email', '')})")
+                    else:
+                        # Already warned, check if 7+ days (2 more days grace after warning)
+                        warn_date = warned.get("created_at", "")
+                        if warn_date and warn_date < (datetime.now(timezone.utc) - timedelta(days=2)).isoformat():
+                            await db.users.delete_one({"user_id": sid})
+                            await db.user_sessions.delete_many({"user_id": sid})
+                            logger.info(f"Auto-deleted inactive student: {s.get('name', '')} ({s.get('email', '')})")
+        except Exception as e:
+            logger.error(f"Background cleanup error: {e}")
+
+
+async def background_preclass_alert_task():
+    """Check every 10 min: Send notification 30 min before class"""
+    while True:
+        try:
+            await asyncio.sleep(600)  # Check every 10 minutes
+            now = datetime.now(timezone.utc)
+            today = now.strftime("%Y-%m-%d")
+            alert_time = (now + timedelta(minutes=30)).strftime("%H:%M")
+            current_time = now.strftime("%H:%M")
+            
+            # Find classes today starting in ~30 minutes
+            classes_today = await db.class_sessions.find(
+                {"date": {"$lte": today}, "end_date": {"$gte": today},
+                 "status": {"$in": ["scheduled", "in_progress"]},
+                 "start_time": {"$lte": alert_time, "$gt": current_time}},
+                {"_id": 0}
+            ).to_list(100)
+            
+            for cls in classes_today:
+                alert_key = f"preclass_alert_{cls['class_id']}_{today}"
+                already_sent = await db.notifications.find_one(
+                    {"notification_id": alert_key}, {"_id": 0}
+                )
+                if already_sent:
+                    continue
+                
+                for s in cls.get("enrolled_students", []):
+                    await db.notifications.insert_one({
+                        "notification_id": alert_key,
+                        "user_id": s["user_id"],
+                        "type": "preclass_alert",
+                        "title": "Class Starting Soon!",
+                        "message": f"Your class '{cls['title']}' starts at {cls['start_time']} today. Get ready!",
+                        "read": False,
+                        "created_at": datetime.now(timezone.utc).isoformat()
+                    })
+                    # Send email
+                    student = await db.users.find_one({"user_id": s["user_id"]}, {"_id": 0, "email": 1, "name": 1})
+                    if student:
+                        await send_email(student.get("email", ""), "Kaimera - Class Starting Soon!",
+                            f"<p>Hi {student.get('name', '')}, your class <b>{cls['title']}</b> starts at <b>{cls['start_time']}</b> today!</p>")
+                
+                logger.info(f"Sent pre-class alerts for {cls['title']}")
+        except Exception as e:
+            logger.error(f"Pre-class alert error: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
