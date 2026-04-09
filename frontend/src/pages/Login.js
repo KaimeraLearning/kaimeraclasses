@@ -26,7 +26,7 @@ const Login = () => {
   const [regPassword, setRegPassword] = useState('');
 
   const handleGoogleLogin = () => {
-    const redirectUrl = window.location.origin + '/student-dashboard';
+    const redirectUrl = window.location.origin;
     window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
   };
 
