@@ -73,18 +73,21 @@ async def get_payment_status(session_id: str, request: Request, authorization: O
         raise HTTPException(status_code=404, detail="Payment not found")
 
     if checkout_status.payment_status == "paid" and payment_doc['payment_status'] != "paid":
-        credits = float(checkout_status.metadata.get('credits', 0))
-        await db.users.update_one({"user_id": user.user_id}, {"$inc": {"credits": credits}})
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
+        # Atomic update to prevent race condition between webhook and status check
+        result = await db.payment_transactions.update_one(
+            {"session_id": session_id, "payment_status": {"$ne": "paid"}},
             {"$set": {"payment_status": "paid", "status": "completed", "updated_at": datetime.now(timezone.utc).isoformat()}}
         )
-        transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
-        await db.transactions.insert_one({
-            "transaction_id": transaction_id, "user_id": user.user_id, "type": "purchase",
-            "amount": credits, "description": f"Purchased {credits} credits",
-            "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
-        })
+        # Only credit if we were the one to update (prevents double-credit)
+        if result.modified_count > 0:
+            credits = float(checkout_status.metadata.get('credits', 0))
+            await db.users.update_one({"user_id": user.user_id}, {"$inc": {"credits": credits}})
+            transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+            await db.transactions.insert_one({
+                "transaction_id": transaction_id, "user_id": user.user_id, "type": "purchase",
+                "amount": credits, "description": f"Purchased {credits} credits",
+                "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
+            })
 
     return {
         "status": checkout_status.status, "payment_status": checkout_status.payment_status,
@@ -109,28 +112,39 @@ async def stripe_webhook(request: Request):
             {"session_id": webhook_response.session_id}, {"_id": 0}
         )
 
-        await db.payment_transactions.update_one(
-            {"session_id": webhook_response.session_id},
-            {"$set": {
-                "payment_status": webhook_response.payment_status,
-                "status": "completed" if webhook_response.payment_status == "paid" else "pending",
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }}
-        )
-
         if webhook_response.payment_status == "paid" and payment_doc and payment_doc['payment_status'] != "paid":
-            user_id = payment_doc.get('user_id')
-            credits = float(payment_doc['metadata'].get('credits', 0))
+            # Atomic update to prevent double-credit race condition
+            result = await db.payment_transactions.update_one(
+                {"session_id": webhook_response.session_id, "payment_status": {"$ne": "paid"}},
+                {"$set": {
+                    "payment_status": webhook_response.payment_status,
+                    "status": "completed",
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            # Only credit if we were the one to update
+            if result.modified_count > 0:
+                user_id = payment_doc.get('user_id')
+                credits = float(payment_doc['metadata'].get('credits', 0))
 
-            if user_id and credits > 0:
-                await db.users.update_one({"user_id": user_id}, {"$inc": {"credits": credits}})
-                transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
-                await db.transactions.insert_one({
-                    "transaction_id": transaction_id, "user_id": user_id, "type": "purchase",
-                    "amount": credits, "description": f"Purchased {credits} credits via Stripe",
-                    "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
-                })
-                logger.info(f"Webhook: Credited {credits} to user {user_id}")
+                if user_id and credits > 0:
+                    await db.users.update_one({"user_id": user_id}, {"$inc": {"credits": credits}})
+                    transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
+                    await db.transactions.insert_one({
+                        "transaction_id": transaction_id, "user_id": user_id, "type": "purchase",
+                        "amount": credits, "description": f"Purchased {credits} credits via Stripe",
+                        "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
+                    })
+                    logger.info(f"Webhook: Credited {credits} to user {user_id}")
+        else:
+            await db.payment_transactions.update_one(
+                {"session_id": webhook_response.session_id},
+                {"$set": {
+                    "payment_status": webhook_response.payment_status,
+                    "status": "completed" if webhook_response.payment_status == "paid" else "pending",
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
 
         return {"received": True}
     except Exception as e:

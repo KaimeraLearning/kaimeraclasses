@@ -125,6 +125,11 @@ async def update_student_profile(profile: StudentProfileUpdate, request: Request
     # Students can only update contact info, NOT academic fields (grade, institute, goal)
     update_fields = {}
     if profile.phone is not None:
+        # Phone uniqueness check
+        if profile.phone.strip():
+            phone_exists = await db.users.find_one({"phone": profile.phone.strip(), "user_id": {"$ne": user.user_id}}, {"_id": 0, "email": 1})
+            if phone_exists:
+                raise HTTPException(status_code=400, detail="Phone number already registered with another account")
         update_fields['phone'] = profile.phone
     if profile.state is not None:
         update_fields['state'] = profile.state

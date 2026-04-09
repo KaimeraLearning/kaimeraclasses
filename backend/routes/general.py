@@ -337,7 +337,7 @@ async def list_learning_kits(grade: Optional[str] = None, request: Request = Non
 
 @router.get("/learning-kit/download/{kit_id}")
 async def download_learning_kit(kit_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    user = await get_current_user(request, authorization)
+    await get_current_user(request, authorization)
     kit = await db.learning_kits.find_one({"kit_id": kit_id}, {"_id": 0})
     if not kit:
         raise HTTPException(status_code=404, detail="Kit not found")
@@ -348,6 +348,6 @@ async def download_learning_kit(kit_id: str, request: Request, authorization: Op
 
 @router.get("/learning-kit/grades")
 async def get_available_grades(request: Request, authorization: Optional[str] = Header(None)):
-    user = await get_current_user(request, authorization)
+    await get_current_user(request, authorization)
     grades = await db.learning_kits.distinct("grade")
     return sorted(grades)

@@ -253,9 +253,19 @@ async def submit_class_proof(proof: ClassProofSubmit, request: Request, authoriz
 
     existing = await db.class_proofs.find_one({"class_id": proof.class_id}, {"_id": 0})
     if existing:
-        raise HTTPException(status_code=400, detail="Proof already submitted for this class")
+        # For multi-day classes, check if proof already submitted today
+        today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        if cls.get("duration_days", 1) > 1:
+            existing_today = await db.class_proofs.find_one(
+                {"class_id": proof.class_id, "proof_date": today_str}, {"_id": 0}
+            )
+            if existing_today:
+                raise HTTPException(status_code=400, detail="Proof already submitted for today's session")
+        else:
+            raise HTTPException(status_code=400, detail="Proof already submitted for this class")
 
     proof_id = f"proof_{uuid.uuid4().hex[:12]}"
+    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     proof_doc = {
         "proof_id": proof_id, "class_id": proof.class_id, "class_title": cls['title'],
         "teacher_id": user.user_id, "teacher_name": user.name,
@@ -263,6 +273,7 @@ async def submit_class_proof(proof: ClassProofSubmit, request: Request, authoriz
         "feedback_text": proof.feedback_text, "student_performance": proof.student_performance,
         "topics_covered": proof.topics_covered, "screenshot_base64": proof.screenshot_base64,
         "status": "pending", "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "proof_date": today_str,
         "reviewed_by": None, "reviewed_at": None, "reviewer_notes": None
     }
     await db.class_proofs.insert_one(proof_doc)

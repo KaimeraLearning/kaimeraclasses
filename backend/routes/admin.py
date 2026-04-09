@@ -131,6 +131,9 @@ async def adjust_credits(adjustment: CreditAdjustment, request: Request, authori
         await db.users.update_one({"user_id": adjustment.user_id}, {"$inc": {"credits": adjustment.amount}})
         description = f"Admin added {adjustment.amount} credits"
     else:
+        # Prevent negative balance
+        if target_user.get("credits", 0) < adjustment.amount:
+            raise HTTPException(status_code=400, detail=f"Cannot deduct {adjustment.amount} credits. User only has {target_user.get('credits', 0)} credits.")
         await db.users.update_one({"user_id": adjustment.user_id}, {"$inc": {"credits": -adjustment.amount}})
         description = f"Admin deducted {adjustment.amount} credits"
 
@@ -306,6 +309,13 @@ async def admin_create_user(request: Request, authorization: Optional[str] = Hea
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    # Phone uniqueness check
+    phone = body.get("phone")
+    if phone and str(phone).strip():
+        phone_exists = await db.users.find_one({"phone": str(phone).strip()}, {"_id": 0, "email": 1})
+        if phone_exists:
+            raise HTTPException(status_code=400, detail=f"Phone number already registered with {phone_exists['email']}")
+
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     password_hash_val = hash_password(password)
     user_code = None
@@ -313,7 +323,7 @@ async def admin_create_user(request: Request, authorization: Optional[str] = Hea
     base_doc = {
         "user_id": user_id, "email": email, "name": name, "role": role,
         "credits": 0.0, "picture": None, "password_hash": password_hash_val,
-        "is_approved": True, "phone": body.get("phone"), "bio": None, "badges": [],
+        "is_approved": True, "phone": phone, "bio": None, "badges": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
 
@@ -372,6 +382,12 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    # Phone uniqueness check
+    if student_data.phone and student_data.phone.strip():
+        phone_exists = await db.users.find_one({"phone": student_data.phone.strip()}, {"_id": 0, "email": 1})
+        if phone_exists:
+            raise HTTPException(status_code=400, detail=f"Phone number already registered with {phone_exists['email']}")
+
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     password_hash_val = bcrypt.hashpw(student_data.password.encode('utf-8'), bcrypt.gensalt(int(os.environ.get('BCRYPT_ROUNDS', 12)))).decode('utf-8')
     student_code = await generate_student_code()
@@ -411,7 +427,9 @@ async def admin_reset_password(request: Request, authorization: Optional[str] = 
 
     password_hash_val = hash_password(new_password)
     await db.users.update_one({"user_id": target["user_id"]}, {"$set": {"password_hash": password_hash_val}})
-    return {"message": f"Password reset for {target['name']} ({target['email']})", "role": target["role"], "email": target["email"], "user_id": target["user_id"]}
+    # Invalidate all existing sessions for this user
+    await db.user_sessions.delete_many({"user_id": target["user_id"]})
+    return {"message": f"Password reset for {target['name']} ({target['email']}). All sessions invalidated.", "role": target["role"], "email": target["email"], "user_id": target["user_id"]}
 
 
 @router.get("/admin/search-users-for-reset")
@@ -704,6 +722,19 @@ async def admin_edit_student(user_id: str, request: Request, authorization: Opti
     target = await db.users.find_one({"user_id": user_id, "role": "student"}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="Student not found")
+
+    # Email uniqueness check if changing email
+    if "email" in body and body["email"] and body["email"] != target.get("email"):
+        email_exists = await db.users.find_one({"email": body["email"], "user_id": {"$ne": user_id}}, {"_id": 0})
+        if email_exists:
+            raise HTTPException(status_code=400, detail="Email already registered with another account")
+
+    # Phone uniqueness check if changing phone
+    if "phone" in body and body["phone"] and str(body["phone"]).strip():
+        phone_exists = await db.users.find_one({"phone": str(body["phone"]).strip(), "user_id": {"$ne": user_id}}, {"_id": 0})
+        if phone_exists:
+            raise HTTPException(status_code=400, detail="Phone number already registered with another account")
+
     editable_fields = ["name", "email", "phone", "institute", "goal", "preferred_time_slot", "state", "city", "country", "grade", "credits", "bio"]
     updates = {}
     for field in editable_fields:

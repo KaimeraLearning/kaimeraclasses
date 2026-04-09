@@ -58,6 +58,11 @@ async def get_current_user(request: Request, authorization: Optional[str] = Head
     if not user_doc:
         raise HTTPException(status_code=401, detail="User not found")
 
+    # Check if account is blocked
+    if user_doc.get('is_blocked'):
+        await db.user_sessions.delete_many({"user_id": session_doc["user_id"]})
+        raise HTTPException(status_code=403, detail="Your account has been blocked by the administrator.")
+
     # Convert datetime
     if isinstance(user_doc['created_at'], str):
         user_doc['created_at'] = datetime.fromisoformat(user_doc['created_at'])

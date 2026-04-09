@@ -23,6 +23,12 @@ async def register(user_data: UserRegister):
     if user_data.role != "student":
         raise HTTPException(status_code=403, detail="Only students can self-register. Teachers are created by admin.")
 
+    # Phone uniqueness check
+    if user_data.phone and user_data.phone.strip():
+        phone_exists = await db.users.find_one({"phone": user_data.phone.strip()}, {"_id": 0, "email": 1})
+        if phone_exists:
+            raise HTTPException(status_code=400, detail="Phone number already registered with another account")
+
     # Check OTP verification
     otp_record = await db.otp_codes.find_one(
         {"email": user_data.email, "verified": True}, {"_id": 0}
@@ -110,8 +116,16 @@ async def verify_otp(request: Request):
     if not email or not otp:
         raise HTTPException(status_code=400, detail="Email and OTP required")
 
+    # Rate limit: max 5 failed attempts per email
+    failed_count = await db.otp_codes.count_documents({"email": email, "failed_attempts": {"$gte": 5}})
+    if failed_count > 0:
+        await db.otp_codes.delete_many({"email": email})
+        raise HTTPException(status_code=429, detail="Too many failed attempts. Please request a new OTP.")
+
     record = await db.otp_codes.find_one({"email": email, "otp": otp}, {"_id": 0})
     if not record:
+        # Increment failed attempts
+        await db.otp_codes.update_one({"email": email}, {"$inc": {"failed_attempts": 1}})
         raise HTTPException(status_code=400, detail="Invalid OTP code")
 
     if datetime.fromisoformat(record["expires_at"]) < datetime.now(timezone.utc):
@@ -184,6 +198,10 @@ async def process_session(session_data: SessionData, response: Response):
     user_doc = await db.users.find_one({"email": oauth_data['email']}, {"_id": 0})
 
     if user_doc:
+        # Check if account is blocked
+        if user_doc.get('is_blocked'):
+            raise HTTPException(status_code=403, detail="Your account has been blocked by the administrator. Please contact support.")
+
         # Update existing user
         await db.users.update_one(
             {"email": oauth_data['email']},

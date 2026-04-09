@@ -58,6 +58,10 @@ app.include_router(general_router, prefix="/api")
 @app.on_event("startup")
 async def startup_event():
     await seed_admin()
+    # Create unique indexes for security
+    await db.users.create_index("email", unique=True, sparse=True)
+    await db.users.create_index("user_id", unique=True)
+    await db.user_sessions.create_index("session_token", unique=True)
     # Backfill teacher_code for existing teachers without one
     teachers_without_code = await db.users.find(
         {"role": "teacher", "$or": [{"teacher_code": None}, {"teacher_code": {"$exists": False}}]},

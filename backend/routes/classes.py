@@ -289,7 +289,7 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
 
 @router.delete("/classes/delete/{class_id}")
 async def delete_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Teacher deletes a class"""
+    """Teacher deletes a class - refunds student credits if charged"""
     user = await get_current_user(request, authorization)
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
@@ -300,8 +300,21 @@ async def delete_class(class_id: str, request: Request, authorization: Optional[
     if cls['teacher_id'] != user.user_id:
         raise HTTPException(status_code=403, detail="Not your class")
 
+    # Refund student credits if class was charged
+    refund_amount = cls.get("credits_required", 0)
+    student_id = cls.get("assigned_student_id")
+    if student_id and refund_amount > 0 and cls.get("status") != "completed":
+        await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": refund_amount}})
+        await db.transactions.insert_one({
+            "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+            "user_id": student_id, "type": "class_delete_refund",
+            "amount": refund_amount,
+            "description": f"Refund: Class '{cls['title']}' deleted by teacher",
+            "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
     await db.class_sessions.delete_one({"class_id": class_id})
-    return {"message": "Class deleted successfully"}
+    return {"message": "Class deleted successfully", "refunded": refund_amount if student_id and refund_amount > 0 else 0}
 
 
 @router.post("/classes/start/{class_id}")
@@ -367,12 +380,19 @@ async def end_class(class_id: str, request: Request, authorization: Optional[str
 
 @router.get("/classes/status/{class_id}")
 async def get_class_status(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Get class current status and room info"""
+    """Get class current status and room info - restricted to involved users"""
     user = await get_current_user(request, authorization)
 
     cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
     if not cls:
         raise HTTPException(status_code=404, detail="Class not found")
+
+    # Only allow involved users or admin/counsellor
+    if user.role not in ["admin", "counsellor"]:
+        if user.role == "teacher" and cls['teacher_id'] != user.user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to view this class")
+        if user.role == "student" and cls.get('assigned_student_id') != user.user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to view this class")
 
     return {
         "class_id": cls['class_id'], "title": cls['title'],
