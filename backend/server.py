@@ -324,6 +324,21 @@ async def send_email(to_email: str, subject: str, html_content: str):
         logger.error(f"Email send failed to {to_email}: {e}")
         return None
 
+import random
+
+async def generate_otp(email: str) -> str:
+    """Generate and store a 6-digit OTP for email verification"""
+    otp = f"{random.randint(100000, 999999)}"
+    await db.otp_codes.delete_many({"email": email})
+    await db.otp_codes.insert_one({
+        "email": email,
+        "otp": otp,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+        "verified": False
+    })
+    return otp
+
 def hash_password(password: str) -> str:
     """Hash password using bcrypt"""
     salt = bcrypt.gensalt(rounds=int(os.environ.get('BCRYPT_ROUNDS', 12)))
@@ -414,26 +429,31 @@ async def seed_admin():
 
 @api_router.post("/auth/register")
 async def register(user_data: UserRegister):
-    """Register new user - ONLY creates students with 0 credits"""
-    # Check if user exists
+    """Register new student - requires OTP verification first"""
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    # Force role to student - only students can self-register
     if user_data.role != "student":
         raise HTTPException(status_code=403, detail="Only students can self-register. Teachers are created by admin.")
     
-    # Create user
+    # Check OTP verification
+    otp_record = await db.otp_codes.find_one(
+        {"email": user_data.email, "verified": True}, {"_id": 0}
+    )
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Please verify your email with OTP first")
+    
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     password_hash = hash_password(user_data.password)
+    student_code = await generate_student_code()
     
     user_doc = {
         "user_id": user_id,
         "email": user_data.email,
         "name": user_data.name,
-        "role": "student",  # Always student
-        "credits": 0.0,  # Always start with 0 credits
+        "role": "student",
+        "credits": 0.0,
         "picture": None,
         "password_hash": password_hash,
         "is_approved": True,
@@ -442,22 +462,79 @@ async def register(user_data: UserRegister):
         "institute": user_data.institute,
         "goal": user_data.goal,
         "preferred_time_slot": user_data.preferred_time_slot,
+        "student_code": student_code,
+        "state": user_data.state,
+        "city": user_data.city,
+        "country": user_data.country,
+        "grade": user_data.grade,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
     await db.users.insert_one(user_doc)
+    await db.otp_codes.delete_many({"email": user_data.email})
     
-    # Create session
     session_token = await create_session(user_id)
-    
     user_doc['created_at'] = datetime.fromisoformat(user_doc['created_at'])
     user = User(**user_doc)
     
     return {
         "user": user.model_dump(),
         "session_token": session_token,
-        "message": "Student account created successfully with 0 credits. Please contact admin to purchase credits."
+        "message": f"Student account created! Your ID: {student_code}"
     }
+
+
+@api_router.post("/auth/send-otp")
+async def send_otp(request: Request):
+    """Send OTP to email for self-signup verification"""
+    body = await request.json()
+    email = body.get("email", "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    otp = await generate_otp(email)
+    
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 16px;">
+        <h2 style="color: #0ea5e9; margin-bottom: 16px;">Kaimera Learning - Email Verification</h2>
+        <p style="color: #475569; font-size: 16px; margin-bottom: 24px;">Your verification code is:</p>
+        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 24px;">
+            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0f172a;">{otp}</span>
+        </div>
+        <p style="color: #94a3b8; font-size: 14px;">This code expires in 10 minutes. Do not share it with anyone.</p>
+    </div>
+    """
+    
+    await send_email(email, "Kaimera Learning - Verify Your Email", html_content)
+    
+    return {"message": "OTP sent to your email. Please check your inbox."}
+
+
+@api_router.post("/auth/verify-otp")
+async def verify_otp(request: Request):
+    """Verify OTP code sent to email"""
+    body = await request.json()
+    email = body.get("email", "").strip().lower()
+    otp = body.get("otp", "").strip()
+    
+    if not email or not otp:
+        raise HTTPException(status_code=400, detail="Email and OTP required")
+    
+    record = await db.otp_codes.find_one({"email": email, "otp": otp}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=400, detail="Invalid OTP code")
+    
+    if datetime.fromisoformat(record["expires_at"]) < datetime.now(timezone.utc):
+        await db.otp_codes.delete_many({"email": email})
+        raise HTTPException(status_code=400, detail="OTP expired. Please request a new one.")
+    
+    await db.otp_codes.update_one({"email": email, "otp": otp}, {"$set": {"verified": True}})
+    
+    return {"message": "Email verified successfully!", "verified": True}
 
 @api_router.post("/auth/login")
 async def login(credentials: UserLogin, response: Response):
@@ -1134,18 +1211,78 @@ async def get_all_classes(request: Request, authorization: Optional[str] = Heade
     return classes
 
 @api_router.get("/admin/transactions")
-async def get_transactions(request: Request, authorization: Optional[str] = Header(None)):
-    """Get all transactions"""
+async def get_transactions(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    role: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    search: Optional[str] = None,
+    view: Optional[str] = None
+):
+    """Get all transactions with filtering. view=daily returns grouped daily revenue."""
     user = await get_current_user(request, authorization)
-    
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access only")
     
-    transactions = await db.transactions.find({}, {"_id": 0}).to_list(1000)
+    query = {}
     
+    if date_from or date_to:
+        date_q = {}
+        if date_from:
+            date_q["$gte"] = date_from
+        if date_to:
+            date_q["$lte"] = date_to + "T23:59:59"
+        query["created_at"] = date_q
+    
+    if role and role != "all":
+        user_ids = [u["user_id"] for u in await db.users.find({"role": role}, {"_id": 0, "user_id": 1}).to_list(5000)]
+        query["user_id"] = {"$in": user_ids}
+    
+    if search:
+        user_ids_search = [u["user_id"] for u in await db.users.find(
+            {"$or": [
+                {"name": {"$regex": search, "$options": "i"}},
+                {"email": {"$regex": search, "$options": "i"}},
+                {"student_code": {"$regex": search, "$options": "i"}},
+                {"teacher_code": {"$regex": search, "$options": "i"}}
+            ]},
+            {"_id": 0, "user_id": 1}
+        ).to_list(5000)]
+        if "user_id" in query:
+            query["user_id"] = {"$in": list(set(query["user_id"]["$in"]) & set(user_ids_search))}
+        else:
+            query["user_id"] = {"$in": user_ids_search}
+    
+    transactions = await db.transactions.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    
+    # Enrich with user info
+    user_cache = {}
     for txn in transactions:
-        if isinstance(txn['created_at'], str):
-            txn['created_at'] = datetime.fromisoformat(txn['created_at'])
+        uid = txn.get("user_id")
+        if uid and uid not in user_cache:
+            u = await db.users.find_one({"user_id": uid}, {"_id": 0, "name": 1, "role": 1, "student_code": 1, "teacher_code": 1, "email": 1})
+            user_cache[uid] = u or {}
+        info = user_cache.get(uid, {})
+        txn["user_name"] = info.get("name", "Unknown")
+        txn["user_role"] = info.get("role", "")
+        txn["user_code"] = info.get("student_code") or info.get("teacher_code") or ""
+    
+    if view == "daily":
+        from collections import defaultdict
+        daily = defaultdict(lambda: {"date": "", "total_revenue": 0, "total_credits_added": 0, "total_deductions": 0, "count": 0})
+        for txn in transactions:
+            day = txn.get("created_at", "")[:10]
+            if day:
+                daily[day]["date"] = day
+                daily[day]["count"] += 1
+                amt = txn.get("amount", 0)
+                if amt > 0:
+                    daily[day]["total_credits_added"] += amt
+                else:
+                    daily[day]["total_deductions"] += abs(amt)
+                daily[day]["total_revenue"] += amt
+        return sorted(daily.values(), key=lambda x: x["date"], reverse=True)
     
     return transactions
 
@@ -1385,6 +1522,80 @@ async def create_counsellor_account(counsellor_data: CreateTeacherAccount, reque
     await db.users.insert_one(counsellor_doc)
     
     return {"message": "Counsellor account created successfully", "user_id": user_id, "email": counsellor_data.email}
+
+
+@api_router.post("/admin/create-user")
+async def admin_create_user(request: Request, authorization: Optional[str] = Header(None)):
+    """Unified endpoint: Admin creates any user type (student, teacher, counsellor)"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+
+    body = await request.json()
+    role = body.get("role", "student")
+    name = body.get("name", "").strip()
+    email = body.get("email", "").strip().lower()
+    password = body.get("password", "")
+
+    if not name or not email or not password:
+        raise HTTPException(status_code=400, detail="Name, email and password are required")
+    if role not in ["student", "teacher", "counsellor"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    password_hash = hash_password(password)
+    user_code = None
+
+    base_doc = {
+        "user_id": user_id,
+        "email": email,
+        "name": name,
+        "role": role,
+        "credits": 0.0,
+        "picture": None,
+        "password_hash": password_hash,
+        "is_approved": True,
+        "phone": body.get("phone"),
+        "bio": None,
+        "badges": [],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+
+    if role == "student":
+        user_code = await generate_student_code()
+        base_doc.update({
+            "student_code": user_code,
+            "institute": body.get("institute"),
+            "goal": body.get("goal"),
+            "preferred_time_slot": body.get("preferred_time_slot"),
+            "state": body.get("state"),
+            "city": body.get("city"),
+            "country": body.get("country"),
+            "grade": body.get("grade")
+        })
+    elif role == "teacher":
+        user_code = await generate_teacher_code()
+        base_doc.update({
+            "teacher_code": user_code,
+            "bank_details": None
+        })
+    elif role == "counsellor":
+        pass
+
+    await db.users.insert_one(base_doc)
+
+    return {
+        "message": f"{role.capitalize()} account created successfully",
+        "user_id": user_id,
+        "email": email,
+        "user_code": user_code,
+        "credentials": {"email": email, "password": password, "code": user_code}
+    }
+
 
 @api_router.post("/admin/set-pricing")
 async def set_system_pricing(pricing: SystemPricing, request: Request, authorization: Optional[str] = Header(None)):
