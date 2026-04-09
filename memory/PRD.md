@@ -15,75 +15,91 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
 
 ## Architecture (Updated Apr 9, 2026)
 
+### 1. Enrollment & Assignment Chain
+- **Demo-First Constraint**: Counsellors cannot assign a student to a teacher until a demo class is marked successful
+- **Matured Lead Logic**: Lead is MATURED when: (Demo Conducted) + (Assigned to same Demo Teacher) + (First regular class started)
+- **Teacher Rating Filter**: Counsellor assignment modal filters teachers by Star Rating (1-5) buttons
+
+### 2. Financial & Duplication Logic
+- **Single Charge Rule**: NO charge on lead acceptance. Charge student wallet ONLY when teacher creates class (price_per_day × duration_days)
+- **Insufficient Funds Trigger**: If Student_Wallet < Class_Cost → error: "Action Failed: Insufficient funds"
+- **Duplicate Prevention**: Only 1 active class per student-teacher pair at a time
+- **System Pricing**: 4 global rates set by Admin (Demo Student Rate, Class Student Rate, Demo Teacher Credit, Class Teacher Pay)
+
+### 3. Smart Dashboard & Session State
+- **Teacher Dashboard**: Tabbed layout — Today's Sessions / Upcoming / Conducted Classes
+- **Student Dashboard**: Live classes section / Pending Rating / Upcoming / Completed Classes
+- **Multi-Day Logic**: Class with N days auto-tracks current_day. After final day → Completed status → prompts student rating
+- **Cleanup**: Sessions auto-complete when past end_date
+
+### 4. Teacher Rating & Penalty System
+- **Star Rating (0-5)**: Calculated from student feedback average minus penalties
+- **Cancellation Impact**: Every teacher cancellation records a rating event, -0.2 per cancellation
+- **Bad Feedback Impact**: Student rating <=2 records bad_feedback event, -0.3 per bad feedback
+- **Suspension Trigger**: 5+ cancellations/month → 3-day account suspension (dashboard blocked, shows "Suspended" screen)
+- **Visibility**: Detailed ratings (avg feedback, monthly cancellations, bad feedbacks, penalty) visible to Admin, Counsellor, and teacher themselves
+
+### 5. Permission-Based Chat
+- **Teachers**: Can only search/message their assigned students
+- **Students**: Can only message their assigned teacher or any counsellor
+- **Admin/Counsellor**: Global access to message any user
+- **Identity**: User IDs (Student Code/Teacher Code) displayed in chat header + message bubbles
+
 ### Admin Dashboard = "Operations Center"
-Three main sections with sub-tabs:
-1. **User Management**: Identity Creator, Staff & Student Directory, Credentials & Access
-2. **Financials**: Transaction Ledger, Proofs & Approvals, **System Pricing** (4 global rates + Purge System)
-3. **Reports**: Counsellor Tracking, Class Overview, Complaints
+- User Management: Identity Creator, Staff & Student Directory, Credentials & Access
+- Financials: Transaction Ledger, Proofs & Approvals, System Pricing (+ Purge System)
+- Reports: Counsellor Tracking, Class Overview, Complaints
 
-### System Pricing (Unified Rates Dashboard)
-- 4 global rate fields: Demo Class Rate (student), Regular Class Fee (student), Demo Session Credit (teacher), Regular Class Pay (teacher)
-- All financial transactions pull from `system_pricing` collection — no hardcoded values
-- **System Purge**: One-click clean slate — deletes all non-admin data, resets counters to zero
-
-### Admin Student Profile Override
-- Edit Profile button in User Drawer (students only)
-- All fields editable: name, email, phone, credits, grade, institute, goal, preferred_time_slot, state, city, country, bio
-
-### Counsellor Dashboard (Refactored Apr 9, 2026)
-- **Tabbed layout**: Available / Active / Rejected / Reassignment / Renewals
-- **Pagination**: 10 items per page with page controls
-- Student cards show: Demo Teacher Name + Demo Feedback from teacher
-- Assignment modal: Teacher selection, Class Frequency, Specific Days, Demo Performance Notes
-- Active assignments show frequency/days/notes metadata
-
-### Teacher Dashboard
-- **Cancel disables Join Live**: When student cancels, Start/Rejoin buttons hide, showing "Session cancelled by student"
-- **Reschedule**: Button appears only for current cancelled session
-- **Mandatory Demo Feedback**: Violet alert banner shows pending demos requiring feedback
-- Demo Feedback Dialog: Performance rating, Recommended frequency, Feedback notes — auto-notifies counsellors
-- **Schedule Planner** (replaces Content Planner): Calendar view of booked classes with day-detail panel
-
-### Student Dashboard
-- **Locked profile**: Grade, Institute, Goal are READ-ONLY (only Admin can edit)
-- Students can only update: Phone, State, City, Country, Preferred Time
-- **Book Demo hidden** after demo is conducted
-- UI Lockdown Mode for unenrolled students
-
-### Security & Auto-Deletion
-- **24h/48h Auto-Delete**: Students with no demo/class after 24h get warning notification + email. After another 24h (48h total), auto-deleted
-- **Pre-class alerts**: 30 min before booked session, notification + email sent
-
-## Implemented Features (All DONE)
-
-### System Overhaul (DONE - Apr 9, 2026)
-- Phase 1: System Purge endpoint + Admin UI button
-- Phase 2: Dynamic pricing — all transactions read from system_pricing
-- Phase 3: Counsellor tabbed dashboard with pagination, demo teacher visibility
-- Phase 3: Teacher Schedule Planner (replaced Content Planner)
-- Phase 4: Student profile locked, Book Demo hidden after demo, 24h/48h auto-delete
-- Phase 5: Cancel disables Join Live, mandatory teacher demo feedback
-
-### Previous (All DONE)
-- Operations & Logic Refactor: Assignment fields, reschedule UI, admin pricing, student edit
-- Operations Center Refactoring: Identity Creator, unified list, drill-down drawer
-- OTP Email Verification, Login Page Redesign
-- Teacher Dashboard overhaul, Wallet colors, Badge templates
-- Global search, credential management, counsellor tracking
-- Demo Booking, Video (Jitsi), Learning Kit, Email Notifications
-- Proof Pipeline, Complaints, Notifications, Stripe webhooks
+### Student Profile Security
+- **Locked Profile**: Students cannot change Grade/Institute/Goal — only Admin can edit
+- **Book Demo Hidden**: After demo is conducted, Book Demo tab/banner disappears
+- **Auto-Delete**: 24h warning → 48h total deletion for idle students (no demo/class)
 
 ## Key API Endpoints
-- Auth: /api/auth/register, login, send-otp, verify-otp, session, me, logout
-- Admin: /api/admin/create-user, block-user, delete-user, reset-password, purge-system
-- Admin: /api/admin/set-pricing, get-pricing, edit-student/{user_id}
-- Counsellor: /api/counsellor/dashboard (includes demo_teacher_name), student-profile/{id}
-- Teacher: /api/teacher/submit-demo-feedback, pending-demo-feedback, schedule, reschedule-class
-- Student: /api/student/update-profile (locked: only contact fields)
+
+### Auth
+POST /api/auth/register, /login, /send-otp, /verify-otp, /me, /logout
+
+### Admin
+POST /api/admin/create-user, /block-user, /delete-user, /reset-password, /purge-system
+POST /api/admin/set-pricing, GET /get-pricing
+POST /api/admin/edit-student/{user_id}
+GET /api/admin/teacher-ratings (all teacher ratings)
+
+### Teacher
+GET /api/teacher/dashboard → {todays_sessions, upcoming_classes, conducted_classes, star_rating, is_suspended}
+POST /api/teacher/cancel-class/{id} → records rating event, refunds student
+GET /api/teacher/my-rating → {star_rating, rating_details, recent_events}
+POST /api/teacher/submit-demo-feedback (mandatory)
+GET /api/teacher/pending-demo-feedback, /schedule, /reschedule-class
+
+### Student
+GET /api/student/dashboard → {live_classes, upcoming_classes, completed_classes, pending_rating}
+POST /api/student/rate-class → {class_id, rating(1-5), comments} → impacts teacher rating
+POST /api/student/update-profile (locked: only contact fields)
+
+### Counsellor
+GET /api/counsellor/dashboard → includes demo_teacher_name + demo_feedback on unassigned students
+
+### Chat
+POST /api/chat/send → scoped permission check
+GET /api/chat/contacts → role-based filtered contacts
+GET /api/chat/conversations → grouped by partner
+GET /api/chat/messages/{partner_id} → auto marks as read
+
+### Classes
+POST /api/classes/create → insufficient funds check + duplicate prevention + multi-day charging
+
+## DB Collections
+users, user_sessions, otp_codes, class_sessions, student_teacher_assignments, transactions,
+payment_transactions, complaints, class_proofs, feedback, notifications, system_pricing,
+demo_requests, demo_extras, demo_feedback, history_logs, teacher_student_feedback,
+renewal_meetings, counters, learning_kits, teacher_calendar, badge_templates,
+teacher_rating_events, chat_messages
 
 ## Remaining Backlog
 - P2: Jitsi screenshot fix (captureLargeVideoScreenshot API)
 - P2: Verify Resend domain for production email delivery
 - P3: Modular refactor of server.py into route files
-- P3: Real-time WebSocket notifications
+- P3: Real-time WebSocket notifications / chat
 - P3: Student progress PDF reports
