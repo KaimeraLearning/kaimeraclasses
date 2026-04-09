@@ -13,7 +13,34 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
 - Video: Jitsi Meet (free, CDN-loaded)
 - Email: Resend API (transactional + OTP emails)
 
-## Architecture (Updated Apr 9, 2026)
+## Architecture (Updated Apr 10, 2026)
+
+### Backend Structure (Modular - Refactored)
+```
+/app/backend/
+  server.py              # Thin orchestrator (~90 lines) - CORS, startup, routers
+  database.py            # Shared MongoDB connection (client + db)
+  models/
+    schemas.py           # All Pydantic request/response models
+  services/
+    auth.py              # get_current_user, hash_password, verify_password, create_session, seed_admin
+    helpers.py           # generate_teacher_code, generate_student_code, send_email, generate_otp
+    rating.py            # recalc_teacher_rating, record_rating_event
+  tasks/
+    background.py        # background_cleanup_task, background_preclass_alert_task
+  routes/
+    auth.py              # 7 endpoints - register, login, logout, session, me, OTP
+    admin.py             # 38 endpoints - user mgmt, pricing, assignments, proofs, badges, purge
+    teacher.py           # 18 endpoints - dashboard, rating, proofs, calendar, feedback
+    student.py           # 6 endpoints - dashboard, profile, rate-class, enrollment, feedback
+    classes.py           # 10 endpoints - CRUD, booking, start/end, cancel
+    chat.py              # 4 endpoints - send, contacts, conversations, messages
+    counsellor.py        # 8 endpoints - dashboard, proofs, reassign, search, student-profile
+    demo.py              # 8 endpoints - request, assign, accept, feedback, live-sheet
+    payments.py          # 3 endpoints - checkout, status, webhook
+    general.py           # 19 endpoints - notifications, complaints, wallet, history, search, filter, renewal, learning kit
+```
+Total: **121 API endpoints**
 
 ### 1. Enrollment & Assignment Chain
 - **Demo-First Constraint**: Counsellors cannot assign a student to a teacher until a demo class is marked successful
@@ -21,22 +48,22 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
 - **Teacher Rating Filter**: Counsellor assignment modal filters teachers by Star Rating (1-5) buttons
 
 ### 2. Financial & Duplication Logic
-- **Single Charge Rule**: NO charge on lead acceptance. Charge student wallet ONLY when teacher creates class (price_per_day × duration_days)
-- **Insufficient Funds Trigger**: If Student_Wallet < Class_Cost → error: "Action Failed: Insufficient funds"
+- **Single Charge Rule**: NO charge on lead acceptance. Charge student wallet ONLY when teacher creates class (price_per_day x duration_days)
+- **Insufficient Funds Trigger**: If Student_Wallet < Class_Cost -> error: "Action Failed: Insufficient funds"
 - **Duplicate Prevention**: Only 1 active class per student-teacher pair at a time
 - **System Pricing**: 4 global rates set by Admin (Demo Student Rate, Class Student Rate, Demo Teacher Credit, Class Teacher Pay)
 
 ### 3. Smart Dashboard & Session State
-- **Teacher Dashboard**: Tabbed layout — Today's Sessions / Upcoming / Conducted Classes
+- **Teacher Dashboard**: Tabbed layout - Today's Sessions / Upcoming / Conducted Classes
 - **Student Dashboard**: Live classes section / Pending Rating / Upcoming / Completed Classes
-- **Multi-Day Logic**: Class with N days auto-tracks current_day. After final day → Completed status → prompts student rating
+- **Multi-Day Logic**: Class with N days auto-tracks current_day. After final day -> Completed status -> prompts student rating
 - **Cleanup**: Sessions auto-complete when past end_date
 
 ### 4. Teacher Rating & Penalty System
 - **Star Rating (0-5)**: Calculated from student feedback average minus penalties
 - **Cancellation Impact**: Every teacher cancellation records a rating event, -0.2 per cancellation
 - **Bad Feedback Impact**: Student rating <=2 records bad_feedback event, -0.3 per bad feedback
-- **Suspension Trigger**: 5+ cancellations/month → 3-day account suspension (dashboard blocked, shows "Suspended" screen)
+- **Suspension Trigger**: 5+ cancellations/month -> 3-day account suspension (dashboard blocked, shows "Suspended" screen)
 - **Visibility**: Detailed ratings (avg feedback, monthly cancellations, bad feedbacks, penalty) visible to Admin, Counsellor, and teacher themselves
 
 ### 5. Permission-Based Chat
@@ -51,44 +78,9 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
 - Reports: Counsellor Tracking, Class Overview, Complaints
 
 ### Student Profile Security
-- **Locked Profile**: Students cannot change Grade/Institute/Goal — only Admin can edit
+- **Locked Profile**: Students cannot change Grade/Institute/Goal - only Admin can edit
 - **Book Demo Hidden**: After demo is conducted, Book Demo tab/banner disappears
-- **Auto-Delete**: 24h warning → 48h total deletion for idle students (no demo/class)
-
-## Key API Endpoints
-
-### Auth
-POST /api/auth/register, /login, /send-otp, /verify-otp, /me, /logout
-
-### Admin
-POST /api/admin/create-user, /block-user, /delete-user, /reset-password, /purge-system
-POST /api/admin/set-pricing, GET /get-pricing
-POST /api/admin/edit-student/{user_id}
-GET /api/admin/teacher-ratings (all teacher ratings)
-
-### Teacher
-GET /api/teacher/dashboard → {todays_sessions, upcoming_classes, conducted_classes, star_rating, is_suspended}
-POST /api/teacher/cancel-class/{id} → records rating event, refunds student
-GET /api/teacher/my-rating → {star_rating, rating_details, recent_events}
-POST /api/teacher/submit-demo-feedback (mandatory)
-GET /api/teacher/pending-demo-feedback, /schedule, /reschedule-class
-
-### Student
-GET /api/student/dashboard → {live_classes, upcoming_classes, completed_classes, pending_rating}
-POST /api/student/rate-class → {class_id, rating(1-5), comments} → impacts teacher rating
-POST /api/student/update-profile (locked: only contact fields)
-
-### Counsellor
-GET /api/counsellor/dashboard → includes demo_teacher_name + demo_feedback on unassigned students
-
-### Chat
-POST /api/chat/send → scoped permission check
-GET /api/chat/contacts → role-based filtered contacts
-GET /api/chat/conversations → grouped by partner
-GET /api/chat/messages/{partner_id} → auto marks as read
-
-### Classes
-POST /api/classes/create → insufficient funds check + duplicate prevention + multi-day charging
+- **Auto-Delete**: 24h warning -> 48h total deletion for idle students (no demo/class)
 
 ## DB Collections
 users, user_sessions, otp_codes, class_sessions, student_teacher_assignments, transactions,
@@ -97,9 +89,13 @@ demo_requests, demo_extras, demo_feedback, history_logs, teacher_student_feedbac
 renewal_meetings, counters, learning_kits, teacher_calendar, badge_templates,
 teacher_rating_events, chat_messages
 
+## Completed Work
+- [Apr 10, 2026] **Backend Modular Refactor COMPLETE** - 5220-line monolithic server.py refactored into 10 route modules + services + models + tasks. All 121 endpoints preserved. 100% regression pass (56/56 backend tests, all frontend dashboards verified).
+- [Apr 9, 2026] Jitsi Screenshot CORS fix applied (captureLargeVideoScreenshot API) - TESTING PENDING
+- Full EdTech CRM with all 4 role dashboards, Operations Center, wallet system, demo booking, chat, complaints, teacher rating/suspension, learning kits, etc.
+
 ## Remaining Backlog
-- P2: Jitsi screenshot fix (captureLargeVideoScreenshot API)
+- P1: Verify Jitsi screenshot fix works in live video class
+- P2: Student progress PDF reports
 - P2: Verify Resend domain for production email delivery
-- P3: Modular refactor of server.py into route files
-- P3: Real-time WebSocket notifications / chat
-- P3: Student progress PDF reports
+- P3: Real-time WebSocket notifications/chat
