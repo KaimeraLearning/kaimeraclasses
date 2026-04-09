@@ -12,7 +12,7 @@ from database import db
 from models.schemas import (
     TeacherApproval, CreditAdjustment, AssignStudentToTeacher,
     SystemPricing, CreateTeacherAccount, CreateStudentAccount,
-    AdminProofApproval, BadgeAssign, DemoExtraGrant
+    AdminProofApproval, BadgeAssign, DemoExtraGrant, ComplaintResolve
 )
 from services.auth import get_current_user, hash_password
 from services.helpers import generate_teacher_code, generate_student_code
