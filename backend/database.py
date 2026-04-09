@@ -1,9 +1,10 @@
-"""Shared database connection and utilities"""
+"""Shared database connection"""
 import os
+from pathlib import Path
+from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 
-MONGO_URL = os.environ.get('MONGO_URL')
-DB_NAME = os.environ.get('DB_NAME')
+load_dotenv(Path(__file__).parent / '.env')
 
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+client = AsyncIOMotorClient(os.environ['MONGO_URL'])
+db = client[os.environ['DB_NAME']]

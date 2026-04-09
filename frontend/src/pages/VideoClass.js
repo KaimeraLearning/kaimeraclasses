@@ -126,8 +126,25 @@ const VideoClass = () => {
   };
 
   const handleTakeScreenshot = async () => {
+    // Primary: Use Jitsi's native API (avoids CORS on iframe)
+    if (jitsiApiRef.current) {
+      try {
+        const data = await jitsiApiRef.current.captureLargeVideoScreenshot();
+        if (data && data.dataURL) {
+          const a = document.createElement('a');
+          a.href = data.dataURL;
+          a.download = `class-screenshot-${classId}-${Date.now()}.png`;
+          a.click();
+          toast.success('Screenshot captured and saved!');
+          return;
+        }
+      } catch (err) {
+        console.warn('Jitsi screenshot failed, trying fallback:', err);
+      }
+    }
+
+    // Fallback: Screen Capture API (user picks screen/tab)
     try {
-      // Use screen capture API for cross-origin iframe
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser' } });
       const track = stream.getVideoTracks()[0];
       const imageCapture = new ImageCapture(track);
@@ -137,8 +154,7 @@ const VideoClass = () => {
       const canvas = document.createElement('canvas');
       canvas.width = bitmap.width;
       canvas.height = bitmap.height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(bitmap, 0, 0);
+      canvas.getContext('2d').drawImage(bitmap, 0, 0);
 
       canvas.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
@@ -147,25 +163,10 @@ const VideoClass = () => {
         a.download = `class-screenshot-${classId}-${Date.now()}.png`;
         a.click();
         URL.revokeObjectURL(url);
-        toast.success('Screenshot saved to your device!');
+        toast.success('Screenshot saved!');
       }, 'image/png');
-    } catch (error) {
-      // Fallback: try html2canvas on the page
-      try {
-        const html2canvas = (await import('html2canvas')).default;
-        const canvas = await html2canvas(document.body);
-        canvas.toBlob((blob) => {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `class-screenshot-${classId}-${Date.now()}.png`;
-          a.click();
-          URL.revokeObjectURL(url);
-          toast.success('Screenshot saved!');
-        });
-      } catch (fallbackError) {
-        toast.error('Screenshot failed. Try your device\'s screenshot feature.');
-      }
+    } catch (fallbackError) {
+      toast.error('Screenshot failed. Ensure video is unmuted or use your device\'s screenshot feature.');
     }
   };
 
