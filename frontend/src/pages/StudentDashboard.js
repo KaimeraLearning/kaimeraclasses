@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { toast } from 'sonner';
 import { GraduationCap, LogOut, Calendar, CreditCard, BookOpen, Play, MessageSquare, Bell, AlertCircle, Lock, Star, Clock, User, XCircle } from 'lucide-react';
 import { getApiError } from '../utils/api';
+import { ViewProfilePopup } from '../components/ViewProfilePopup';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND}/api`;
@@ -30,8 +31,20 @@ const StudentDashboard = () => {
   const [ratingTarget, setRatingTarget] = useState(null);
   const [ratingForm, setRatingForm] = useState({ rating: 5, comments: '' });
   const [profileForm, setProfileForm] = useState({});
+  const [viewProfileOpen, setViewProfileOpen] = useState(false);
+  const [viewProfileUserId, setViewProfileUserId] = useState(null);
+  const [viewProfileRole, setViewProfileRole] = useState(null);
+
+  const openProfile = (userId, role) => { setViewProfileUserId(userId); setViewProfileRole(role); setViewProfileOpen(true); };
 
   useEffect(() => { fetchData(); }, []);
+
+  // Auto-refresh on tab focus
+  useEffect(() => {
+    const handleVisibility = () => { if (document.visibilityState === 'visible') fetchData(); };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
 
   const fetchData = async () => {
     try {
@@ -172,7 +185,7 @@ const StudentDashboard = () => {
                     <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full text-xs">DEMO</span>
                   </div>
                   <h4 className="font-bold text-slate-900 mb-1">{cls.title}</h4>
-                  <p className="text-xs text-slate-600 mb-3">{cls.start_time} - {cls.end_time} | Teacher: {cls.teacher_name}</p>
+                  <p className="text-xs text-slate-600 mb-3">{cls.start_time} - {cls.end_time} | Teacher: <button onClick={(e) => { e.stopPropagation(); openProfile(cls.teacher_id, 'teacher'); }} className="text-sky-600 hover:underline font-semibold cursor-pointer">{cls.teacher_name}</button></p>
                   <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold animate-pulse" data-testid={`join-demo-live-${cls.class_id}`}>
                     <Play className="w-4 h-4 mr-2" /> Join Demo Class
                   </Button>
@@ -192,7 +205,7 @@ const StudentDashboard = () => {
                     <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full text-xs">DEMO</span>
                   </div>
                   <h4 className="font-bold text-slate-900 mb-1">{cls.title}</h4>
-                  <p className="text-xs text-slate-600">Date: {cls.date} | {cls.start_time} - {cls.end_time} | Teacher: {cls.teacher_name}</p>
+                  <p className="text-xs text-slate-600">Date: {cls.date} | {cls.start_time} - {cls.end_time} | Teacher: <button onClick={(e) => { e.stopPropagation(); openProfile(cls.teacher_id, 'teacher'); }} className="text-sky-600 hover:underline font-semibold cursor-pointer">{cls.teacher_name}</button></p>
                 </div>
               ))}
             </div>
@@ -232,6 +245,7 @@ const StudentDashboard = () => {
         {/* Profile & Notification Dialogs */}
         {renderProfileDialog()}
         {renderNotifDialog()}
+        <ViewProfilePopup open={viewProfileOpen} onOpenChange={setViewProfileOpen} userId={viewProfileUserId} userRole={viewProfileRole} />
       </div>
     );
   }
@@ -280,7 +294,7 @@ const StudentDashboard = () => {
                     <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-xs">{cls.subject}</span>
                   </div>
                   <h3 className="font-bold text-slate-900 mb-1">{cls.title}</h3>
-                  <p className="text-xs text-slate-600 mb-3">{cls.start_time} - {cls.end_time} | Teacher: {cls.teacher_name}</p>
+                  <p className="text-xs text-slate-600 mb-3">{cls.start_time} - {cls.end_time} | Teacher: <button onClick={(e) => { e.stopPropagation(); openProfile(cls.teacher_id, 'teacher'); }} className="text-sky-600 hover:underline font-semibold cursor-pointer" data-testid={`view-teacher-${cls.teacher_id}`}>{cls.teacher_name}</button></p>
                   {!cls.cancelled_today ? (
                     <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold animate-pulse" data-testid={`join-live-${cls.class_id}`}>
                       <Play className="w-4 h-4 mr-2" /> Join Live Class
@@ -304,7 +318,7 @@ const StudentDashboard = () => {
               {pendingRating.map(cls => (
                 <div key={cls.class_id} className="bg-amber-50 rounded-2xl border-2 border-amber-200 p-5" data-testid={`pending-rating-${cls.class_id}`}>
                   <h3 className="font-bold text-slate-900 mb-1">{cls.title}</h3>
-                  <p className="text-xs text-slate-600 mb-3">{cls.subject} | Teacher: {cls.teacher_name} | {cls.date}</p>
+                  <p className="text-xs text-slate-600 mb-3">{cls.subject} | Teacher: <button onClick={(e) => { e.stopPropagation(); openProfile(cls.teacher_id, 'teacher'); }} className="text-sky-600 hover:underline font-semibold cursor-pointer" data-testid={`view-teacher-rating-${cls.teacher_id}`}>{cls.teacher_name}</button> | {cls.date}</p>
                   <Button onClick={() => { setRatingTarget(cls); setShowRatingDialog(true); }}
                     className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full font-bold" data-testid={`rate-class-${cls.class_id}`}>
                     <Star className="w-4 h-4 mr-2" /> Rate & Review
@@ -330,7 +344,7 @@ const StudentDashboard = () => {
                   </div>
                   <h3 className="font-bold text-slate-900 mb-1">{cls.title}</h3>
                   <p className="text-xs text-slate-600 mb-1">{cls.date} | {cls.start_time} - {cls.end_time}</p>
-                  <p className="text-xs text-slate-500">Teacher: {cls.teacher_name} | {cls.duration_days}d</p>
+                  <p className="text-xs text-slate-500">Teacher: <button onClick={(e) => { e.stopPropagation(); openProfile(cls.teacher_id, 'teacher'); }} className="text-sky-600 hover:underline font-semibold cursor-pointer" data-testid={`view-teacher-upcoming-${cls.teacher_id}`}>{cls.teacher_name}</button> | {cls.duration_days}d</p>
                   {cls.status === 'scheduled' && !cls.cancelled_today && (
                     <Button onClick={() => handleCancelSession(cls.class_id)} variant="outline" className="w-full mt-3 rounded-full border-red-200 text-red-600 text-xs" data-testid={`cancel-session-${cls.class_id}`}>
                       <XCircle className="w-3 h-3 mr-1" /> Cancel Today's Session
@@ -350,7 +364,7 @@ const StudentDashboard = () => {
               {completedClasses.map(cls => (
                 <div key={cls.class_id} className="bg-slate-50 rounded-2xl border border-slate-200 p-4" data-testid={`completed-class-${cls.class_id}`}>
                   <h3 className="font-semibold text-slate-700 text-sm">{cls.title}</h3>
-                  <p className="text-xs text-slate-500">{cls.subject} | {cls.date} | Teacher: {cls.teacher_name}</p>
+                  <p className="text-xs text-slate-500">{cls.subject} | {cls.date} | Teacher: <button onClick={(e) => { e.stopPropagation(); openProfile(cls.teacher_id, 'teacher'); }} className="text-sky-600 hover:underline font-semibold cursor-pointer" data-testid={`view-teacher-completed-${cls.teacher_id}`}>{cls.teacher_name}</button></p>
                 </div>
               ))}
             </div>
@@ -408,6 +422,7 @@ const StudentDashboard = () => {
 
       {renderProfileDialog()}
       {renderNotifDialog()}
+      <ViewProfilePopup open={viewProfileOpen} onOpenChange={setViewProfileOpen} userId={viewProfileUserId} userRole={viewProfileRole} />
     </div>
   );
 

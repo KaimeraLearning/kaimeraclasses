@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { toast } from 'sonner';
 import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle, XCircle, CheckCircle, Clock, Camera } from 'lucide-react';
 import { getApiError } from '../utils/api';
+import { ViewProfilePopup } from '../components/ViewProfilePopup';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -38,6 +39,11 @@ const TeacherDashboard = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showRatingDialog, setShowRatingDialog] = useState(false);
   const [ratingData, setRatingData] = useState(null);
+  const [viewProfileOpen, setViewProfileOpen] = useState(false);
+  const [viewProfileUserId, setViewProfileUserId] = useState(null);
+  const [viewProfileRole, setViewProfileRole] = useState(null);
+
+  const openProfile = (userId, role) => { setViewProfileUserId(userId); setViewProfileRole(role); setViewProfileOpen(true); };
 
   // Create class form
   const [classForm, setClassForm] = useState({
@@ -45,6 +51,13 @@ const TeacherDashboard = () => {
   });
 
   useEffect(() => { fetchUser(); fetchDashboardData(); fetchNotifications(); }, []);
+
+  // Auto-refresh on tab focus
+  useEffect(() => {
+    const handleVisibility = () => { if (document.visibilityState === 'visible') { fetchDashboardData(); fetchNotifications(); } };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
 
   const fetchUser = async () => {
     try {
@@ -430,12 +443,17 @@ const TeacherDashboard = () => {
             <h2 className="text-lg font-bold text-slate-900 mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-sky-500" /> My Students</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {dashboardData.approved_students.map(s => (
-                <div key={s.assignment_id} className="bg-white rounded-xl border border-slate-200 p-3 flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold text-slate-900 text-sm">{s.student_name}</p>
-                    <p className="text-xs text-slate-500">{s.student_email}</p>
+                <div key={s.assignment_id} className="bg-white rounded-xl border border-slate-200 p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-900 text-sm">{s.student_name}</p>
+                      <p className="text-xs text-slate-500">{s.student_email}</p>
+                      {s.counselor_name && (
+                        <p className="text-xs text-slate-400 mt-0.5">Assigned by: <button onClick={() => openProfile(s.counselor_id, 'counsellor')} className="text-violet-600 hover:underline font-semibold cursor-pointer" data-testid={`view-counselor-${s.counselor_id}`}>{s.counselor_name}</button></p>
+                      )}
+                    </div>
+                    <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs"><MessageSquare className="w-3 h-3 mr-1" /> Feedback</Button>
                   </div>
-                  <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs"><MessageSquare className="w-3 h-3 mr-1" /> Feedback</Button>
                 </div>
               ))}
             </div>
@@ -660,6 +678,8 @@ const TeacherDashboard = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      <ViewProfilePopup open={viewProfileOpen} onOpenChange={setViewProfileOpen} userId={viewProfileUserId} userRole={viewProfileRole} />
     </div>
   );
 };

@@ -47,6 +47,13 @@ const CounsellorDashboard = () => {
 
   useEffect(() => { fetchDashboardData(); }, []);
 
+  // Auto-refresh on tab focus
+  useEffect(() => {
+    const handleVisibility = () => { if (document.visibilityState === 'visible') fetchDashboardData(); };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
+
   const fetchDashboardData = async () => {
     try {
       const [userRes, dashboardRes, proofsRes, expiredRes] = await Promise.all([

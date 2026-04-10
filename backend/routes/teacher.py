@@ -106,6 +106,22 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         {"teacher_id": user.user_id, "status": "approved"}, {"_id": 0}
     ).to_list(1000)
 
+    # Enrich assignments with counselor name
+    counselor_ids = set()
+    for a in pending_assignments + approved_students:
+        if a.get("assigned_by"):
+            counselor_ids.add(a["assigned_by"])
+    if counselor_ids:
+        counselors = await db.users.find(
+            {"user_id": {"$in": list(counselor_ids)}},
+            {"_id": 0, "user_id": 1, "name": 1}
+        ).to_list(100)
+        counselor_map = {c["user_id"]: c["name"] for c in counselors}
+        for a in pending_assignments + approved_students:
+            if a.get("assigned_by"):
+                a["counselor_name"] = counselor_map.get(a["assigned_by"], "")
+                a["counselor_id"] = a["assigned_by"]
+
     # Check proof submission status for conducted classes
     all_check_classes = conducted_classes + [c for c in todays_sessions if c.get('status') == 'completed']
     class_ids = [c['class_id'] for c in all_check_classes]
