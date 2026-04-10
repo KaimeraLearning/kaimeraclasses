@@ -276,16 +276,17 @@ async def create_counsellor_account(counsellor_data: CreateTeacherAccount, reque
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user_id = f"user_{uuid.uuid4().hex[:12]}"
+    counselor_id = f"KLC-{uuid.uuid4().hex[:6].upper()}"
     password_hash_val = hash_password(counsellor_data.password)
     counsellor_doc = {
         "user_id": user_id, "email": counsellor_data.email, "name": counsellor_data.name,
         "role": "counsellor", "credits": 0.0, "picture": None,
         "password_hash": password_hash_val, "is_approved": True,
-        "phone": None, "bio": None,
+        "phone": None, "bio": None, "counselor_id": counselor_id,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.users.insert_one(counsellor_doc)
-    return {"message": "Counsellor account created successfully", "user_id": user_id, "email": counsellor_data.email}
+    return {"message": "Counselor account created successfully", "user_id": user_id, "email": counsellor_data.email, "counselor_id": counselor_id}
 
 
 @router.post("/admin/create-user")
@@ -490,7 +491,7 @@ async def assign_badge(data: BadgeAssign, request: Request, authorization: Optio
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     if target["role"] not in ["teacher", "counsellor"]:
-        raise HTTPException(status_code=400, detail="Badges can only be assigned to teachers or counsellors")
+        raise HTTPException(status_code=400, detail="Badges can only be assigned to teachers or counselors")
     await db.users.update_one({"user_id": data.user_id}, {"$addToSet": {"badges": data.badge_name}})
     await db.notifications.insert_one({"notification_id": f"notif_{uuid.uuid4().hex[:12]}", "user_id": data.user_id, "type": "badge_assigned", "title": "New Badge Earned!", "message": f"You've been awarded the '{data.badge_name}' badge by admin.", "read": False, "related_id": data.badge_name, "created_at": datetime.now(timezone.utc).isoformat()})
     return {"message": f"Badge '{data.badge_name}' assigned to {target['name']}"}
@@ -806,3 +807,27 @@ async def admin_purge_system(request: Request, authorization: Optional[str] = He
     await db.counters.delete_many({})
 
     return {"message": "System purged. Only admin accounts remain. All counters reset to zero."}
+
+
+
+@router.post("/admin/update-bank-details/{user_id}")
+async def admin_update_bank_details(user_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin-only: update bank details for teacher or counselor"""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    body = await request.json()
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("role") not in ["teacher", "counsellor"]:
+        raise HTTPException(status_code=400, detail="Bank details can only be set for teachers or counselors")
+
+    updates = {}
+    for field in ["bank_name", "bank_account_number", "bank_ifsc_code"]:
+        if field in body and body[field]:
+            updates[field] = body[field]
+
+    if updates:
+        await db.users.update_one({"user_id": user_id}, {"$set": updates})
+    return {"message": "Bank details updated", "updated_fields": list(updates.keys())}

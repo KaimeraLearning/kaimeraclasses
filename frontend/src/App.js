@@ -20,6 +20,8 @@ import HistoryPage from './pages/HistoryPage';
 import WalletPage from './pages/WalletPage';
 import LearningKit from './pages/LearningKit';
 import TeacherCalendar from './pages/TeacherCalendar';
+import TeacherProfile from './pages/TeacherProfile';
+import CounselorProfile from './pages/CounselorProfile';
 import ChatPage from './pages/ChatPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from './components/ui/sonner';
@@ -68,11 +70,21 @@ function AppRouter() {
             <TeacherClasses />
           </ProtectedRoute>
         } />
+        <Route path="/teacher-profile" element={
+          <ProtectedRoute requiredRole="teacher">
+            <TeacherProfile />
+          </ProtectedRoute>
+        } />
         
         {/* Counsellor Routes */}
         <Route path="/counsellor-dashboard" element={
           <ProtectedRoute requiredRole="counsellor">
             <CounsellorDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/counselor-profile" element={
+          <ProtectedRoute requiredRole="counsellor">
+            <CounselorProfile />
           </ProtectedRoute>
         } />
         <Route path="/counsellor/students" element={

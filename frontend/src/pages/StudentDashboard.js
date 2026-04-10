@@ -6,6 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { GraduationCap, LogOut, Calendar, CreditCard, BookOpen, Play, MessageSquare, Bell, AlertCircle, Lock, Star, Clock, User, XCircle } from 'lucide-react';
+import { getApiError } from '../utils/api';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND}/api`;
@@ -70,7 +71,7 @@ const StudentDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profileForm)
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Profile updated!');
       setShowProfileDialog(false);
       fetchData();
@@ -84,7 +85,7 @@ const StudentDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success("Session cancelled. Teacher will reschedule.");
       fetchData();
     } catch (err) { toast.error(err.message); }
@@ -148,7 +149,7 @@ const StudentDashboard = () => {
                 ? "You're not enrolled yet. Book a free demo to get started!"
                 : hasTeacher
                   ? "Your teacher enrollment is being processed. Hang tight!"
-                  : "Your demo is complete! A counsellor will assign you to a teacher soon."}
+                  : "Your demo is complete! A counselor will assign you to a teacher soon."}
             </p>
             <div className="flex flex-wrap gap-3 justify-center">
               {!demoCompleted && (

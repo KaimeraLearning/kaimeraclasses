@@ -12,6 +12,7 @@ import {
   Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { getApiError } from '../utils/api';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND}/api`;
@@ -146,7 +147,7 @@ const AdminDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
       toast.success(data.message);
       setCredsResult(data.credentials);
@@ -173,10 +174,10 @@ const AdminDashboard = () => {
         body: JSON.stringify({ user_id: userId, blocked })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
+      if (!res.ok) throw new Error(data.detail || 'Operation failed');
       toast.success(data.message || `User ${blocked ? 'blocked' : 'unblocked'}`);
       fetchAll();
-    } catch (err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message || 'Failed to update user status'); }
   };
 
   const handleDelete = async (userId) => {
@@ -186,7 +187,7 @@ const AdminDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('User deleted');
       setDrawerUser(null);
       fetchAll();
@@ -205,10 +206,10 @@ const AdminDashboard = () => {
         body: JSON.stringify(body)
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
+      if (!res.ok) throw new Error(data.detail || 'Password reset failed');
       toast.success(`Password reset for ${data.email} (${data.role})`);
       setResetEmail(''); setResetPassword(''); setResetSelectedUser(null); setResetSearchResults([]);
-    } catch (err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message || 'Failed to reset password'); }
   };
 
   const handleResetSearch = async () => {
@@ -240,7 +241,7 @@ const AdminDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ proof_id: proofId, approved, admin_notes: notes })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success(approved ? 'Proof approved & teacher credited!' : 'Proof rejected');
       fetchAll();
     } catch (err) { toast.error(err.message); }
@@ -253,7 +254,7 @@ const AdminDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newTemplateName.trim(), description: newTemplateDesc })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Template created');
       setNewTemplateName('');
       setNewTemplateDesc('');
@@ -274,7 +275,7 @@ const AdminDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: badgeTarget, badge_name: badge })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Badge assigned');
       setBadgeName('');
       setSelectedTemplateBadge('');
@@ -354,7 +355,7 @@ const AdminDashboard = () => {
           class_earning_teacher: parseFloat(pricingForm.class_earning_teacher) || 0
         })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('System pricing updated!');
     } catch (err) { toast.error(err.message); }
   };
@@ -384,7 +385,7 @@ const AdminDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm)
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Student profile updated!');
       setEditingStudent(false);
       setDrawerUser(null);
@@ -393,11 +394,11 @@ const AdminDashboard = () => {
   };
 
   const handlePurgeSystem = async () => {
-    if (!window.confirm('WARNING: This will delete ALL students, teachers, counsellors, classes, demos, assignments, and pricing. Only the Admin account will remain. This action is IRREVERSIBLE. Are you sure?')) return;
+    if (!window.confirm('WARNING: This will delete ALL students, teachers, counselors, classes, demos, assignments, and pricing. Only the Admin account will remain. This action is IRREVERSIBLE. Are you sure?')) return;
     if (!window.confirm('FINAL CONFIRMATION: Type "yes" to proceed. Everything will be deleted.')) return;
     try {
       const res = await fetch(`${API}/admin/purge-system`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('System purged! Fresh install state.');
       fetchAll();
     } catch (err) { toast.error(err.message); }
@@ -523,19 +524,6 @@ const AdminDashboard = () => {
                             <div><Label>City</Label><Input value={createForm.city} onChange={e => setCreateForm({...createForm, city: e.target.value})} className="rounded-xl" data-testid="create-city" /></div>
                             <div><Label>Country</Label><Input value={createForm.country} onChange={e => setCreateForm({...createForm, country: e.target.value})} className="rounded-xl" data-testid="create-country" /></div>
                             <div><Label>Goal</Label><Input value={createForm.goal} onChange={e => setCreateForm({...createForm, goal: e.target.value})} className="rounded-xl" data-testid="create-goal" /></div>
-                            <div className="col-span-2">
-                              <Label>Preferred Time</Label>
-                              <div className="grid grid-cols-2 gap-2">
-                                <Input type="datetime-local" value={createForm.preferred_time_slot?.split(' to ')[0] || ''} onChange={e => {
-                                  const end = createForm.preferred_time_slot?.split(' to ')[1] || '';
-                                  setCreateForm({...createForm, preferred_time_slot: `${e.target.value}${end ? ` to ${end}` : ''}`});
-                                }} className="rounded-xl text-sm" data-testid="create-time-from" />
-                                <Input type="datetime-local" value={createForm.preferred_time_slot?.split(' to ')[1] || ''} onChange={e => {
-                                  const start = createForm.preferred_time_slot?.split(' to ')[0] || '';
-                                  setCreateForm({...createForm, preferred_time_slot: `${start} to ${e.target.value}`});
-                                }} className="rounded-xl text-sm" data-testid="create-time-to" />
-                              </div>
-                            </div>
                           </div>
                         )}
                         <Button type="submit" className={`w-full rounded-full py-6 font-bold text-white ${createRole === 'student' ? 'bg-sky-500 hover:bg-sky-600' : createRole === 'teacher' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-violet-500 hover:bg-violet-600'}`} data-testid="create-user-submit">
@@ -648,7 +636,7 @@ const AdminDashboard = () => {
                           <option value="all">All Roles</option>
                           <option value="student">Student</option>
                           <option value="teacher">Teacher</option>
-                          <option value="counsellor">Counsellor</option>
+                          <option value="counsellor">Counselor</option>
                         </select>
                         <Input value={resetSearchQuery} onChange={e => setResetSearchQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleResetSearch(); }} placeholder="Search by name, email, or User ID..." className="flex-1 rounded-xl" data-testid="reset-search-input" />
                         <Button onClick={handleResetSearch} variant="outline" className="rounded-full" data-testid="reset-search-btn"><Search className="w-4 h-4" /></Button>
@@ -889,7 +877,7 @@ const AdminDashboard = () => {
                   {/* System Reset */}
                   <div className="mt-8 bg-red-50 rounded-2xl p-5 border border-red-200">
                     <h4 className="text-sm font-bold text-red-800 mb-2">Danger Zone</h4>
-                    <p className="text-xs text-red-600 mb-3">Purge all system data (students, teachers, counsellors, classes, demos, pricing). Only Admin account will remain. This is irreversible.</p>
+                    <p className="text-xs text-red-600 mb-3">Purge all system data (students, teachers, counselors, classes, demos, pricing). Only Admin account will remain. This is irreversible.</p>
                     <Button onClick={handlePurgeSystem} variant="outline" className="border-red-300 text-red-600 hover:bg-red-100 rounded-full" data-testid="purge-system-btn">
                       <Trash2 className="w-4 h-4 mr-2" /> Purge System (Fresh Install)
                     </Button>
@@ -903,15 +891,15 @@ const AdminDashboard = () => {
           <TabsContent value="reports">
             <Tabs defaultValue="counsellors">
               <TabsList className="mb-4">
-                <TabsTrigger value="counsellors" data-testid="counsellors-report-tab">Counsellor Tracking</TabsTrigger>
+                <TabsTrigger value="counsellors" data-testid="counsellors-report-tab">Counselor Tracking</TabsTrigger>
                 <TabsTrigger value="classes" data-testid="classes-report-tab">Class Overview</TabsTrigger>
                 <TabsTrigger value="complaints" data-testid="complaints-report-tab">Complaints ({complaints.length})</TabsTrigger>
               </TabsList>
 
-              {/* ── Counsellor Tracking ── */}
+              {/* ── Counselor Tracking ── */}
               <TabsContent value="counsellors">
                 {counsellorTracking.length === 0 ? (
-                  <div className="bg-white rounded-3xl p-12 border-2 border-slate-100 text-center"><p className="text-slate-500">No counsellors found</p></div>
+                  <div className="bg-white rounded-3xl p-12 border-2 border-slate-100 text-center"><p className="text-slate-500">No counselors found</p></div>
                 ) : (
                   <div className="space-y-4">
                     {counsellorTracking.map(c => (

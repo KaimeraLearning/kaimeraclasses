@@ -1,3 +1,4 @@
+import { getApiError } from '../utils/api';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -69,7 +70,7 @@ const ComplaintsPage = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ subject, description })
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      if (!response.ok) throw new Error(await getApiError(response));
       toast.success('Complaint submitted!');
       setShowCreateDialog(false);
       setSubject('');
@@ -84,7 +85,7 @@ const ComplaintsPage = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ complaint_id: selectedComplaint.complaint_id, resolution, status })
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      if (!response.ok) throw new Error(await getApiError(response));
       toast.success(`Complaint ${status}`);
       setShowResolveDialog(false);
       setSelectedComplaint(null);

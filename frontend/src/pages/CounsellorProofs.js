@@ -1,3 +1,4 @@
+import { getApiError } from '../utils/api';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -48,7 +49,7 @@ const CounsellorProofs = () => {
           reviewer_notes: reviewerNotes
         })
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      if (!response.ok) throw new Error(await getApiError(response));
       toast.success(`Proof ${approved ? 'approved' : 'rejected'}!`);
       setShowDetailDialog(false);
       setSelectedProof(null);

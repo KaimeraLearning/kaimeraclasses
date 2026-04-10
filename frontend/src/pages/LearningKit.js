@@ -1,3 +1,4 @@
+import { getApiError } from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -57,7 +58,7 @@ const LearningKit = () => {
       const res = await fetch(`${API}/admin/learning-kit/upload`, {
         method: 'POST', credentials: 'include', body: formData
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Learning kit uploaded!');
       setUploadForm({ title: '', grade: '', description: '' });
       setFile(null);
@@ -70,7 +71,7 @@ const LearningKit = () => {
     if (!window.confirm('Delete this kit?')) return;
     try {
       const res = await fetch(`${API}/admin/learning-kit/${kitId}`, { method: 'DELETE', credentials: 'include' });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Kit deleted');
       fetchData();
     } catch (err) { toast.error(err.message); }

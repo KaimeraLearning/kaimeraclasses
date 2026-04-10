@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { Camera, PhoneOff, ArrowLeft, Loader2 } from 'lucide-react';
+import { getApiError } from '../utils/api';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -107,7 +108,7 @@ const VideoClass = () => {
   const handleStartClass = async () => {
     try {
       const res = await fetch(`${API}/classes/start/${classId}`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Class started! Students can now join.');
       fetchData();
     } catch (error) { toast.error(error.message); }
@@ -117,7 +118,7 @@ const VideoClass = () => {
     if (!window.confirm('End the class session? Students will be disconnected.')) return;
     try {
       const res = await fetch(`${API}/classes/end/${classId}`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
       if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
       toast.success(data.message);

@@ -1,3 +1,4 @@
+import { getApiError } from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -44,7 +45,7 @@ const DemoLiveSheet = () => {
       const res = await fetch(`${API}/demo/accept/${demoId}`, {
         method: 'POST', credentials: 'include'
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
       toast.success(data.message);
       if (data.student_credentials) {
@@ -65,7 +66,7 @@ const DemoLiveSheet = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ demo_id: demoId, teacher_id: teacherId })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
       toast.success(data.message);
       fetchData();

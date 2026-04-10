@@ -1,3 +1,4 @@
+import { getApiError } from '../utils/api';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -49,7 +50,7 @@ const BrowseClasses = () => {
       const response = await fetch(`${API}/payments/checkout?package_id=${pkg.id}&origin_url=${encodeURIComponent(originUrl)}`, {
         method: 'POST', credentials: 'include'
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      if (!response.ok) throw new Error(await getApiError(response));
       window.location.href = (await response.json()).url;
     } catch (error) {
       toast.error(error.message);

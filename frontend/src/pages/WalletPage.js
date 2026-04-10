@@ -1,3 +1,4 @@
+import { getApiError } from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -49,7 +50,7 @@ const WalletPage = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bank_details: bankForm })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Bank details saved!');
     } catch (err) { toast.error(err.message); }
     finally { setSavingBank(false); }

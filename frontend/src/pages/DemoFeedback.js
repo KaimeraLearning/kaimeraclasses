@@ -1,3 +1,4 @@
+import { getApiError } from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -59,8 +60,8 @@ const DemoFeedback = () => {
           preferred_teacher_id: form.preferred_teacher_id || null
         })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
-      toast.success('Feedback submitted! A counsellor will assign you a regular teacher soon.');
+      if (!res.ok) throw new Error(await getApiError(res));
+      toast.success('Feedback submitted! A counselor will assign you a regular teacher soon.');
       fetchData();
     } catch (err) { toast.error(err.message); }
     finally { setSubmitting(null); }
@@ -158,7 +159,7 @@ const DemoFeedback = () => {
                       className="w-full bg-slate-50 border-2 border-slate-200 rounded-xl h-11 px-4 text-sm"
                       data-testid={`preferred-teacher-${demo.demo_id}`}
                     >
-                      <option value="">No preference / Let counsellor decide</option>
+                      <option value="">No preference / Let counselor decide</option>
                       {teachers.map(t => (
                         <option key={t.id} value={t.id}>{t.name}</option>
                       ))}

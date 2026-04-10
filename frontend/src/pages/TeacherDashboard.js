@@ -6,7 +6,8 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle, XCircle, CheckCircle, Clock } from 'lucide-react';
+import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle, XCircle, CheckCircle, Clock, Camera } from 'lucide-react';
+import { getApiError } from '../utils/api';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -20,7 +21,7 @@ const TeacherDashboard = () => {
   const [showCreateClass, setShowCreateClass] = useState(false);
   const [showProofDialog, setShowProofDialog] = useState(false);
   const [proofClass, setProofClass] = useState(null);
-  const [proofForm, setProofForm] = useState({ feedback_text: '', student_performance: 'good', topics_covered: '' });
+  const [proofForm, setProofForm] = useState({ feedback_text: '', student_performance: 'good', topics_covered: '', screenshot_base64: '' });
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [feedbackTarget, setFeedbackTarget] = useState(null);
   const [feedbackForm, setFeedbackForm] = useState({ feedback_text: '', performance_rating: 'good' });
@@ -108,7 +109,7 @@ const TeacherDashboard = () => {
     if (!window.confirm('Delete this class?')) return;
     try {
       const res = await fetch(`${API}/classes/delete/${classId}`, { method: 'DELETE', credentials: 'include' });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Class deleted'); fetchDashboardData();
     } catch (err) { toast.error(err.message); }
   };
@@ -130,7 +131,7 @@ const TeacherDashboard = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ assignment_id: assignmentId, approved })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success(approved ? 'Student approved!' : 'Student rejected');
       fetchDashboardData();
     } catch (err) { toast.error(err.message); }
@@ -142,10 +143,10 @@ const TeacherDashboard = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ class_id: proofClass.class_id, ...proofForm })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Proof submitted!');
       setShowProofDialog(false); setProofClass(null);
-      setProofForm({ feedback_text: '', student_performance: 'good', topics_covered: '' });
+      setProofForm({ feedback_text: '', student_performance: 'good', topics_covered: '', screenshot_base64: '' });
     } catch (err) { toast.error(err.message); }
   };
 
@@ -156,7 +157,7 @@ const TeacherDashboard = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ student_id: feedbackTarget.student_id, ...feedbackForm })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Feedback sent!');
       setShowFeedbackDialog(false); setFeedbackTarget(null);
       setFeedbackForm({ feedback_text: '', performance_rating: 'good' });
@@ -172,7 +173,7 @@ const TeacherDashboard = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify(rescheduleForm)
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Session rescheduled!');
       setShowRescheduleDialog(false); setRescheduleTarget(null);
       setRescheduleForm({ new_date: '', new_start_time: '', new_end_time: '' });
@@ -187,7 +188,7 @@ const TeacherDashboard = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ demo_id: demoFeedbackTarget.demo_id, student_id: demoFeedbackTarget.student_id || demoFeedbackTarget.student_user_id, ...demoFeedbackForm })
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Demo feedback submitted!');
       setShowDemoFeedbackDialog(false); setDemoFeedbackTarget(null);
       setDemoFeedbackForm({ feedback_text: '', performance_rating: 'good', recommended_frequency: '' });
@@ -332,6 +333,7 @@ const TeacherDashboard = () => {
           <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full"><CreditCard className="w-4 h-4 mr-2" /> Wallet</Button>
           <Button onClick={() => navigate('/learning-kits')} variant="outline" className="rounded-full"><BookOpen className="w-4 h-4 mr-2" /> Learning Kit</Button>
           <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full"><ShieldCheck className="w-4 h-4 mr-2" /> Complaints</Button>
+          <Button onClick={() => navigate('/teacher-profile')} variant="outline" className="rounded-full" data-testid="my-profile-button"><User className="w-4 h-4 mr-2" /> My Profile</Button>
         </div>
 
         {/* Pending Demo Feedback */}
@@ -477,7 +479,7 @@ const TeacherDashboard = () => {
                       <Input type="number" min="1" value={classForm.duration_days}
                         onChange={e => { if (!locked) setClassForm({...classForm, duration_days: parseInt(e.target.value) || 1}); }}
                         readOnly={locked} className={`rounded-xl ${locked ? 'bg-slate-100 cursor-not-allowed' : ''}`} data-testid="class-days-input" />
-                      {locked && <p className="text-[10px] text-amber-600 mt-0.5">Set by counsellor</p>}
+                      {locked && <p className="text-[10px] text-amber-600 mt-0.5">Set by counselor</p>}
                     </>
                   );
                 })()}
@@ -499,14 +501,39 @@ const TeacherDashboard = () => {
         <DialogContent className="sm:max-w-md rounded-3xl">
           <DialogHeader><DialogTitle>Submit Class Proof</DialogTitle></DialogHeader>
           <div className="space-y-3 mt-4">
-            <div><Label>Topics Covered</Label><Input value={proofForm.topics_covered} onChange={e => setProofForm({...proofForm, topics_covered: e.target.value})} className="rounded-xl" /></div>
+            <div><Label>Topics Covered</Label><Input value={proofForm.topics_covered} onChange={e => setProofForm({...proofForm, topics_covered: e.target.value})} className="rounded-xl" data-testid="proof-topics" /></div>
             <div><Label>Student Performance</Label>
-              <select value={proofForm.student_performance} onChange={e => setProofForm({...proofForm, student_performance: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm">
+              <select value={proofForm.student_performance} onChange={e => setProofForm({...proofForm, student_performance: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="proof-performance">
                 <option value="excellent">Excellent</option><option value="good">Good</option><option value="average">Average</option><option value="needs_improvement">Needs Improvement</option>
               </select>
             </div>
-            <div><Label>Feedback</Label><textarea value={proofForm.feedback_text} onChange={e => setProofForm({...proofForm, feedback_text: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={3} /></div>
-            <Button onClick={handleSubmitProof} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold">Submit Proof</Button>
+            <div><Label>Feedback</Label><textarea value={proofForm.feedback_text} onChange={e => setProofForm({...proofForm, feedback_text: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={3} data-testid="proof-feedback" /></div>
+            <div>
+              <Label>Screenshot (required)</Label>
+              <div className="mt-1">
+                {proofForm.screenshot_base64 ? (
+                  <div className="relative">
+                    <img src={proofForm.screenshot_base64} alt="Proof screenshot" className="w-full rounded-xl border-2 border-emerald-200 max-h-48 object-contain bg-slate-50" />
+                    <button onClick={() => setProofForm({...proofForm, screenshot_base64: ''})} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600">X</button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:border-sky-400 hover:bg-sky-50 transition-colors" data-testid="proof-screenshot-upload">
+                    <Camera className="w-8 h-8 text-slate-400 mb-1" />
+                    <span className="text-sm text-slate-500">Click to upload screenshot</span>
+                    <input type="file" accept="image/*" className="hidden" onChange={e => {
+                      const file = e.target.files[0];
+                      if (file) {
+                        if (file.size > 5 * 1024 * 1024) { toast.error('Image must be under 5MB'); return; }
+                        const reader = new FileReader();
+                        reader.onload = () => setProofForm(prev => ({...prev, screenshot_base64: reader.result}));
+                        reader.readAsDataURL(file);
+                      }
+                    }} />
+                  </label>
+                )}
+              </div>
+            </div>
+            <Button onClick={handleSubmitProof} disabled={!proofForm.screenshot_base64} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold disabled:opacity-50" data-testid="submit-proof-btn">Submit Proof</Button>
           </div>
         </DialogContent>
       </Dialog>

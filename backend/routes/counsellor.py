@@ -200,3 +200,83 @@ async def counsellor_search_students(q: str = "", request: Request = None, autho
     else:
         students = await db.users.find({"role": "student"}, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(1000)
     return students
+
+
+
+# ── COUNSELOR PROFILE MANAGEMENT ──
+
+@router.get("/counsellor/profile")
+async def get_counselor_profile(request: Request, authorization: Optional[str] = Header(None)):
+    """Get full counselor profile"""
+    user = await get_current_user(request, authorization)
+    if user.role != "counsellor":
+        raise HTTPException(status_code=403, detail="Counselor access only")
+    doc = await db.users.find_one({"user_id": user.user_id}, {"_id": 0, "password_hash": 0})
+    return doc
+
+
+@router.post("/counsellor/update-full-profile")
+async def update_counselor_full_profile(request: Request, authorization: Optional[str] = Header(None)):
+    """Update counselor profile fields (bank details locked after first entry)"""
+    user = await get_current_user(request, authorization)
+    if user.role != "counsellor":
+        raise HTTPException(status_code=403, detail="Counselor access only")
+    body = await request.json()
+    current = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+
+    editable = ["bio", "age", "date_of_birth", "address", "education_qualification",
+                 "interests_hobbies", "experience", "profile_picture"]
+    updates = {}
+    for field in editable:
+        if field in body and body[field] is not None:
+            updates[field] = body[field]
+
+    # Bank details: can only be set once, then locked
+    bank_fields = ["bank_name", "bank_account_number", "bank_ifsc_code"]
+    existing_bank = current.get("bank_name")
+    if not existing_bank:
+        for bf in bank_fields:
+            if bf in body and body[bf]:
+                updates[bf] = body[bf]
+    else:
+        for bf in bank_fields:
+            if bf in body and body[bf] and body[bf] != current.get(bf):
+                raise HTTPException(status_code=403, detail="Bank details are locked. Only admin can update them.")
+
+    if updates:
+        await db.users.update_one({"user_id": user.user_id}, {"$set": updates})
+    return {"message": "Profile updated successfully", "updated_fields": list(updates.keys())}
+
+
+@router.post("/counsellor/upload-resume")
+async def upload_counselor_resume(request: Request, authorization: Optional[str] = Header(None)):
+    """Upload PDF resume as base64"""
+    user = await get_current_user(request, authorization)
+    if user.role != "counsellor":
+        raise HTTPException(status_code=403, detail="Counselor access only")
+    body = await request.json()
+    resume_data = body.get("resume_base64")
+    resume_name = body.get("resume_name", "resume.pdf")
+    if not resume_data:
+        raise HTTPException(status_code=400, detail="No resume data provided")
+    await db.users.update_one({"user_id": user.user_id}, {"$set": {
+        "resume_base64": resume_data, "resume_name": resume_name
+    }})
+    return {"message": "Resume uploaded successfully"}
+
+
+@router.get("/counsellor/view-profile/{counselor_id}")
+async def view_counselor_profile(counselor_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """View counselor profile - accessible by admin, students"""
+    user = await get_current_user(request, authorization)
+    doc = await db.users.find_one({"user_id": counselor_id, "role": "counsellor"}, {"_id": 0, "password_hash": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Counselor not found")
+
+    # Remove bank details for non-admin users
+    if user.role != "admin":
+        doc.pop("bank_name", None)
+        doc.pop("bank_account_number", None)
+        doc.pop("bank_ifsc_code", None)
+
+    return doc

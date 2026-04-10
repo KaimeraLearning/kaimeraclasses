@@ -575,3 +575,84 @@ async def reschedule_class(class_id: str, request: Request, authorization: Optio
         })
 
     return {"message": "Session rescheduled successfully"}
+
+
+
+# ── PROFILE MANAGEMENT ──
+
+@router.get("/teacher/profile")
+async def get_teacher_profile(request: Request, authorization: Optional[str] = Header(None)):
+    """Get full teacher profile"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    doc = await db.users.find_one({"user_id": user.user_id}, {"_id": 0, "password_hash": 0})
+    return doc
+
+
+@router.post("/teacher/update-full-profile")
+async def update_teacher_full_profile(request: Request, authorization: Optional[str] = Header(None)):
+    """Update teacher profile fields (bank details locked after first entry)"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    body = await request.json()
+    current = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+
+    editable = ["bio", "age", "date_of_birth", "address", "education_qualification",
+                 "interests_hobbies", "teaching_experience", "profile_picture"]
+    updates = {}
+    for field in editable:
+        if field in body and body[field] is not None:
+            updates[field] = body[field]
+
+    # Bank details: can only be set once by teacher, then locked
+    bank_fields = ["bank_name", "bank_account_number", "bank_ifsc_code"]
+    existing_bank = current.get("bank_name")
+    if not existing_bank:
+        for bf in bank_fields:
+            if bf in body and body[bf]:
+                updates[bf] = body[bf]
+    else:
+        # Bank already set - teacher cannot change
+        for bf in bank_fields:
+            if bf in body and body[bf] and body[bf] != current.get(bf):
+                raise HTTPException(status_code=403, detail="Bank details are locked. Only admin can update them.")
+
+    if updates:
+        await db.users.update_one({"user_id": user.user_id}, {"$set": updates})
+    return {"message": "Profile updated successfully", "updated_fields": list(updates.keys())}
+
+
+@router.post("/teacher/upload-resume")
+async def upload_teacher_resume(request: Request, authorization: Optional[str] = Header(None)):
+    """Upload PDF resume as base64"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+    body = await request.json()
+    resume_data = body.get("resume_base64")
+    resume_name = body.get("resume_name", "resume.pdf")
+    if not resume_data:
+        raise HTTPException(status_code=400, detail="No resume data provided")
+    await db.users.update_one({"user_id": user.user_id}, {"$set": {
+        "resume_base64": resume_data, "resume_name": resume_name
+    }})
+    return {"message": "Resume uploaded successfully"}
+
+
+@router.get("/teacher/view-profile/{teacher_id}")
+async def view_teacher_profile(teacher_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """View teacher profile - accessible by admin, counselor, students assigned to teacher"""
+    user = await get_current_user(request, authorization)
+    doc = await db.users.find_one({"user_id": teacher_id, "role": "teacher"}, {"_id": 0, "password_hash": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    # Remove bank details for non-admin users
+    if user.role != "admin":
+        doc.pop("bank_name", None)
+        doc.pop("bank_account_number", None)
+        doc.pop("bank_ifsc_code", None)
+
+    return doc

@@ -7,6 +7,7 @@ import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { GraduationCap, LogOut, Users, BookOpen, UserPlus, ShieldCheck, MessageSquare, Clock, User, MapPin, Target, CalendarClock, Zap, FileText, CalendarDays, Repeat, ChevronLeft, ChevronRight } from 'lucide-react';
+import { getApiError } from '../utils/api';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -104,7 +105,7 @@ const CounsellorDashboard = () => {
           assigned_days: assignedDays ? parseInt(assignedDays) : null
         })
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      if (!response.ok) throw new Error(await getApiError(response));
       toast.success('Student assigned to teacher successfully!');
       setShowAssignDialog(false);
       setSelectedStudent(null);
@@ -143,7 +144,7 @@ const CounsellorDashboard = () => {
         credentials: 'include',
         body: JSON.stringify({ student_id: studentId, action })
       });
-      if (!response.ok) throw new Error((await response.json()).detail);
+      if (!response.ok) throw new Error(await getApiError(response));
       toast.success(action === 'release' ? 'Student released for reassignment' : 'Student kept with teacher');
       fetchDashboardData();
     } catch (error) {
@@ -173,7 +174,7 @@ const CounsellorDashboard = () => {
       const res = await fetch(`${API}/renewal/schedule-meeting?class_id=${classId}&meeting_date=${meetingDate}`, {
         method: 'POST', credentials: 'include'
       });
-      if (!res.ok) throw new Error((await res.json()).detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Renewal meeting scheduled!');
     } catch (err) { toast.error(err.message); }
   };
@@ -207,13 +208,13 @@ const CounsellorDashboard = () => {
             <div className="flex items-center gap-3">
               <GraduationCap className="w-10 h-10 text-sky-500" strokeWidth={2.5} />
               <div>
-                <h1 className="text-2xl font-bold text-slate-900">Counsellor Dashboard</h1>
+                <h1 className="text-2xl font-bold text-slate-900">Counselor Dashboard</h1>
                 <p className="text-sm text-slate-600">Manage student-teacher assignments</p>
               </div>
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <p className="text-sm text-slate-600">Counsellor</p>
+                <p className="text-sm text-slate-600">Counselor</p>
                 <p className="font-semibold text-slate-900">{user?.name}</p>
               </div>
               <Button onClick={handleLogout} variant="outline" className="rounded-full" data-testid="logout-button">
@@ -268,6 +269,9 @@ const CounsellorDashboard = () => {
           </Button>
           <Button onClick={() => navigate('/chat')} variant="outline" className="rounded-full" data-testid="chat-link">
             <MessageSquare className="w-4 h-4 mr-2" /> Chat
+          </Button>
+          <Button onClick={() => navigate('/counselor-profile')} variant="outline" className="rounded-full" data-testid="my-profile-link">
+            <User className="w-4 h-4 mr-2" /> My Profile
           </Button>
         </div>
 
