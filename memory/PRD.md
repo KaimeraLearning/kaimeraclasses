@@ -13,7 +13,7 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
 - Video: Jitsi Meet (free, CDN-loaded)
 - Email: Resend API (transactional + OTP emails)
 
-## Architecture (Updated Apr 10, 2026)
+## Architecture
 
 ### Backend Structure (Modular)
 ```
@@ -21,32 +21,30 @@ Flow: Counsellor assigns Student -> Teacher approves -> Teacher creates class ->
   server.py              # Thin orchestrator (~90 lines)
   database.py            # Shared MongoDB connection
   models/schemas.py      # All Pydantic models
-  services/auth.py       # Auth helpers + blocked user check
+  services/auth.py       # Auth helpers + blocked user check + single device session
   services/helpers.py    # Code generators, email, OTP
   services/rating.py     # Teacher rating system
   tasks/background.py    # Cleanup + pre-class alerts
   routes/               # 10 route modules, 121 endpoints total
 ```
 
-### Security Architecture (Implemented Apr 10, 2026)
-1. **Blocked User Enforcement**: `get_current_user()` checks `is_blocked` flag, deletes sessions, returns 403
-2. **Email Uniqueness**: MongoDB unique index on email + application-level checks on all create/edit endpoints
-3. **Phone Uniqueness**: Application-level checks on register, create-user, create-student, create-teacher, edit-student, student profile update
-4. **Session Invalidation**: Password reset deletes all user sessions; blocking a user deletes all sessions
-5. **Credit Security**: Deduction floor prevents negative balance; atomic payment updates prevent double-crediting
-6. **Proof Integrity**: One proof per class (single-day) or one proof per day (multi-day), tracked via `proof_date`
-7. **Access Control**: Class status restricted to involved users; admin accounts protected from block/delete
-8. **OTP Brute Force Protection**: Max 5 failed attempts per email, then OTP is invalidated
-9. **Google OAuth**: Checks blocked status before allowing login
-10. **Payment Race Condition Fix**: Atomic `$ne` filter on `payment_status` prevents concurrent double-credit
+### Security Architecture
+1. **Single Device Session**: `create_session()` deletes all existing sessions before creating new one
+2. **Blocked User Enforcement**: `get_current_user()` checks `is_blocked`, purges sessions, returns 403
+3. **Email/Phone Uniqueness**: DB index + app-level checks on all create/edit endpoints
+4. **Credit Security**: Deduction floor, atomic payment updates, class delete refunds
+5. **Proof Integrity**: One proof per class/day, tracked via `proof_date`
+6. **OTP Brute Force Protection**: Max 5 failed attempts per email
+7. **Session Invalidation**: Password reset and user blocking purge all sessions
 
-### Business Logic (Summary)
-- Demo-First Constraint: Must complete demo before teacher assignment
-- Single Charge Rule: Charge student wallet only on class creation
-- Teacher Rating (0-5): Calculated from feedback average minus penalties
-- Suspension: 5+ cancellations/month -> 3-day suspension
-- Permission-Based Chat: Role-scoped messaging
-- Locked Student Profile: Only admin can edit Grade/Institute/Goal
+### Chat System
+- **Demo-aware contacts**: Chat contacts include teachers/students from accepted demo classes (not just formal assignments)
+- **Permission scoping**: Teachers can message their assigned + demo students; Students can message assigned + demo teachers + counsellors
+- Admin/Counsellor: global chat access
+
+### Student Dashboard
+- **Locked View** (not enrolled): Shows demo classes with Join button, Chat button, Profile, Wallet, Book Demo
+- **Enrolled View**: Full dashboard with live/upcoming/completed/pending rating sections
 
 ## DB Collections
 users, user_sessions, otp_codes, class_sessions, student_teacher_assignments, transactions,
@@ -56,9 +54,9 @@ renewal_meetings, counters, learning_kits, teacher_calendar, badge_templates,
 teacher_rating_events, chat_messages
 
 ## Completed Work
-- [Apr 10, 2026] **Security Hardening** — 12 fixes: blocked user enforcement, email/phone uniqueness, credit floor, session invalidation on password reset, class delete refunds, atomic payment updates, proof per-day tracking, OTP rate limiting, cross-account access restrictions. All verified (23/23 backend + all frontend tests passed).
-- [Apr 10, 2026] **Backend Modular Refactor** — 5220-line server.py -> thin orchestrator + 10 route modules. All 121 endpoints preserved. 100% regression (56/56 tests).
-- [Apr 9, 2026] Jitsi Screenshot CORS fix (captureLargeVideoScreenshot API) - TESTING PENDING
+- [Apr 10, 2026] **3 Feature Updates**: Single device session enforcement, demo-based chat contacts (teacher accepts demo -> both see each other in chat), student locked view shows demo classes + Chat button. All verified (18/18 backend + all frontend passed).
+- [Apr 10, 2026] **Security Hardening** — 12 fixes: blocked user enforcement, email/phone uniqueness, credit floor, session invalidation, class delete refunds, atomic payments, proof per-day, OTP rate limiting.
+- [Apr 10, 2026] **Backend Modular Refactor** — 5220-line server.py -> thin orchestrator + 10 route modules. 121 endpoints preserved.
 - Full EdTech CRM: 4-role dashboards, Operations Center, wallet, demo booking, chat, complaints, teacher rating/suspension, learning kits.
 
 ## Remaining Backlog
