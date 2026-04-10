@@ -1,46 +1,58 @@
-# Kaimera Learning - EdTech CRM Platform PRD
+# Kaimera Learning - Product Requirements Document
 
 ## Original Problem Statement
-Complete EdTech CRM/Management Platform with 4 roles: Admin, Counselor, Teacher, Student.
-Flow: Counselor assigns Student -> Teacher approves -> Teacher creates class -> Video (Jitsi) -> Proofs -> Admin approves & credits teacher.
+EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. Features wallet-based credits, Stripe integration, Counselor dashboard, Teacher schedule management, class proofs with screenshots, complaint system, Video integration (Jitsi), Demo Booking & Tracking workflow, Email Notifications, Global Financial Controls, Conditional Student UI Lockdown.
 
-## Tech Stack
-- Frontend: React + Shadcn/UI + Tailwind CSS + Recharts
-- Backend: FastAPI (Python), Modular architecture (routes/, models/, services/, tasks/)
-- Database: MongoDB (Motor async driver)
+## Architecture
+- **Frontend**: React + Shadcn/UI + Tailwind CSS
+- **Backend**: FastAPI (modular routes)
+- **Database**: MongoDB
+- **Video**: Jitsi Meet API
+- **Auth**: Cookie-based sessions + Google Auth (Emergent)
+- **Payments**: Stripe
+- **Email**: Resend
 
-## Key Fixes (Apr 10, 2026)
+## Code Structure
+```
+/app/backend/
+  server.py, database.py
+  models/schemas.py
+  services/auth.py, helpers.py, rating.py
+  tasks/background.py
+  routes/admin.py, auth.py, chat.py, classes.py, counsellor.py, demo.py, general.py, payments.py, student.py, teacher.py
+/app/frontend/src/
+  components/ (ViewProfilePopup.js, ui/)
+  pages/ (*Dashboard.js, *Profile.js)
+  utils/api.js
+```
 
-### Demo-First Assignment Flow (FIXED)
-- Demo completion now properly transitions demo_request status to "completed" when demo class ends
-- Assignment constraint checks: demo_requests.student_id, demo_requests.student_user_id, AND completed demo class_sessions
-- Counselor can now successfully assign students after demo is conducted
+## Spelling Convention
+- Internal: `counsellor` (DB, API paths, filenames)
+- User-facing: `Counselor`
 
-### Class Lifecycle (FIXED)  
-- Classes auto-move to conducted tab after end time passes (within same day)
-- Submit Proof button visible on conducted classes (hidden if already submitted)
-- Cancel button disabled after click (prevents double-cancel/double-rating-deduction)
-- Backend rejects cancel on already-cancelled class (400 error)
+## Completed Features
+- Full role-based dashboard (Admin, Teacher, Student, Counselor)
+- Wallet-based credit system + Stripe integration
+- Demo-first enrollment workflow
+- Jitsi video class integration
+- Teacher rating & penalty/suspension system
+- Permission-based scoped chat
+- Single-device session enforcement
+- KLAT/KL-CAT scoring + PDF resume upload
+- Class proofs with screenshot upload
+- Complaint system
+- Notification system
+- Email OTP (Resend)
+- Global dynamic financial controls (Admin)
+- Modular backend architecture (routes/, models/, services/, tasks/)
+- **ViewProfilePopup** - unified profile popup across all dashboards (Feb 2026)
+- **Auto-refresh on tab focus** - all 3 dashboards refresh data on visibilitychange (Feb 2026)
+- **One-time proof/feedback UI lockdown** - frontend properly guards duplicate submissions (Feb 2026)
 
-### Profile System
-- KLAT Score (Teacher) / KL-CAT Score (Counselor) — manual text fields, separate from star_rating
-- Full profile: bio, age, DOB, address, education, interests, experience, profile pic, resume
-- Bank details locked after first entry, admin-only override
-- Profile popups show full details when clicking names
+## Backlog
+### P2
+- Verify Resend domain for production email
 
-### Security
-- Single device sessions, blocked user enforcement, email/phone uniqueness
-- Credit floor, atomic payments, class delete refunds, proof per-day tracking
-
-## Completed Work (Latest First)
-- [Apr 10] Fixed counselor assignment after demo + proof button visibility + demo auto-completion
-- [Apr 10] KLAT/KL-CAT manual scores, cancel double-click prevention, profile popups
-- [Apr 10] Spelling (Counselor), proof screenshot, teacher/counselor profiles, error handling
-- [Apr 10] Single device session, demo-based chat, student locked view
-- [Apr 10] Security hardening (12 fixes) + Backend modular refactor
-
-## Remaining Backlog
-- P1: Verify Jitsi screenshot fix in live video class
-- P2: Student progress PDF reports
-- P2: Verify Resend domain for production email delivery
-- P3: Real-time WebSocket notifications/chat
+### P3
+- Real-time WebSocket notifications/chat
+- Student progress PDF reports
