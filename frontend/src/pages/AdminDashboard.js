@@ -164,6 +164,17 @@ const AdminDashboard = () => {
       const res = await fetch(`${API}/admin/user-detail/${userId}`, { credentials: 'include' });
       if (res.ok) setDrawerData(await res.json());
     } catch {}
+    // Fetch full profile for teacher/counselor to show extended details + bank info
+    if (u && (u.role === 'teacher' || u.role === 'counsellor')) {
+      try {
+        const endpoint = u.role === 'teacher' ? 'teacher/view-profile' : 'counsellor/view-profile';
+        const pRes = await fetch(`${API}/${endpoint}/${userId}`, { credentials: 'include' });
+        if (pRes.ok) {
+          const profileData = await pRes.json();
+          setDrawerUser(prev => prev ? { ...prev, ...profileData } : prev);
+        }
+      } catch {}
+    }
   };
 
   const handleBlock = async (userId, blocked) => {
@@ -1048,7 +1059,6 @@ const AdminDashboard = () => {
                     </div>
                     <div><Label className="text-xs">Institute</Label><Input value={editForm.institute} onChange={e => setEditForm({...editForm, institute: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-institute" /></div>
                     <div><Label className="text-xs">Goal</Label><Input value={editForm.goal} onChange={e => setEditForm({...editForm, goal: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-goal" /></div>
-                    <div><Label className="text-xs">Preferred Time</Label><Input value={editForm.preferred_time_slot} onChange={e => setEditForm({...editForm, preferred_time_slot: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-time" /></div>
                     <div><Label className="text-xs">State</Label><Input value={editForm.state} onChange={e => setEditForm({...editForm, state: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-state" /></div>
                     <div><Label className="text-xs">City</Label><Input value={editForm.city} onChange={e => setEditForm({...editForm, city: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-city" /></div>
                     <div><Label className="text-xs">Country</Label><Input value={editForm.country} onChange={e => setEditForm({...editForm, country: e.target.value})} className="rounded-xl bg-white text-sm" data-testid="edit-student-country" /></div>
@@ -1061,11 +1071,43 @@ const AdminDashboard = () => {
                 </div>
               ) : (
                 <>
+                  {/* Profile Info Grid */}
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">Credits</p><p className="text-lg font-bold">{drawerUser.credits || 0}</p></div>
                     <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">Phone</p><p className="text-xs font-medium">{drawerUser.phone || 'N/A'}</p></div>
-                    <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">Grade</p><p className="text-xs font-medium">{drawerUser.grade ? `Class ${drawerUser.grade}` : 'N/A'}</p></div>
+                    <div className="bg-slate-50 rounded-xl p-2 text-center"><p className="text-[10px] text-slate-500">{drawerUser.role === 'teacher' ? 'KLAT' : drawerUser.role === 'counsellor' ? 'KL-CAT' : 'Grade'}</p><p className="text-xs font-medium">{drawerUser.klat_score || drawerUser.klcat_score || (drawerUser.grade ? `Class ${drawerUser.grade}` : 'N/A')}</p></div>
                   </div>
+                  {/* Extended Profile Details */}
+                  {(drawerUser.bio || drawerUser.education_qualification || drawerUser.teaching_experience || drawerUser.experience || drawerUser.address || drawerUser.date_of_birth) && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {drawerUser.profile_picture && <div className="col-span-2 flex justify-center"><img src={drawerUser.profile_picture} alt="" className="w-20 h-20 rounded-full object-cover border-2 border-slate-200" /></div>}
+                      {drawerUser.bio && <div className="col-span-2 bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Bio</p><p className="text-xs">{drawerUser.bio}</p></div>}
+                      {drawerUser.age && <div className="bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Age</p><p className="text-xs font-medium">{drawerUser.age}</p></div>}
+                      {drawerUser.date_of_birth && <div className="bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">DOB</p><p className="text-xs font-medium">{drawerUser.date_of_birth}</p></div>}
+                      {drawerUser.education_qualification && <div className="bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Education</p><p className="text-xs font-medium">{drawerUser.education_qualification}</p></div>}
+                      {drawerUser.address && <div className="bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Address</p><p className="text-xs font-medium">{drawerUser.address}</p></div>}
+                      {drawerUser.interests_hobbies && <div className="bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Interests</p><p className="text-xs font-medium">{drawerUser.interests_hobbies}</p></div>}
+                      {(drawerUser.teaching_experience || drawerUser.experience) && <div className="col-span-2 bg-slate-50 rounded-xl p-2"><p className="text-[10px] text-slate-500">Experience</p><p className="text-xs">{drawerUser.teaching_experience || drawerUser.experience}</p></div>}
+                    </div>
+                  )}
+                  {/* Bank Details - Admin only */}
+                  {(drawerUser.role === 'teacher' || drawerUser.role === 'counsellor') && drawerUser.bank_name && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      <p className="text-xs font-bold text-amber-800 mb-2">Bank Details (Admin Only)</p>
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div><p className="text-[10px] text-amber-600">Bank</p><p className="font-medium">{drawerUser.bank_name}</p></div>
+                        <div><p className="text-[10px] text-amber-600">A/C No</p><p className="font-medium">{drawerUser.bank_account_number}</p></div>
+                        <div><p className="text-[10px] text-amber-600">IFSC</p><p className="font-medium">{drawerUser.bank_ifsc_code}</p></div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Resume */}
+                  {drawerUser.resume_name && (
+                    <div className="bg-sky-50 border border-sky-200 rounded-xl p-2 flex items-center gap-2 text-xs">
+                      <span className="font-medium text-sky-800">{drawerUser.resume_name}</span>
+                      {drawerUser.resume_base64 && <a href={drawerUser.resume_base64} target="_blank" rel="noreferrer" className="ml-auto text-sky-600 hover:underline">View</a>}
+                    </div>
+                  )}
                   {/* Admin Actions */}
                   {drawerUser.role !== 'admin' && (
                     <div className="flex gap-2 flex-wrap">

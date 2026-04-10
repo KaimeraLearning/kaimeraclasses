@@ -32,7 +32,8 @@ export default function CounselorProfile() {
         address: data.address || '', education_qualification: data.education_qualification || '',
         interests_hobbies: data.interests_hobbies || '', experience: data.experience || '',
         bank_name: data.bank_name || '', bank_account_number: data.bank_account_number || '',
-        bank_ifsc_code: data.bank_ifsc_code || '', profile_picture: data.profile_picture || ''
+        bank_ifsc_code: data.bank_ifsc_code || '', profile_picture: data.profile_picture || '',
+        klcat_score: data.klcat_score || ''
       });
     } catch (err) { toast.error(err.message); }
     setLoading(false);
@@ -123,7 +124,7 @@ export default function CounselorProfile() {
               <p className="text-xs text-slate-400 mt-1">Counselor ID: <span className="font-mono font-bold text-violet-600">{profile?.counselor_id || profile?.user_id?.slice(-8)?.toUpperCase() || 'N/A'}</span></p>
               <div className="flex items-center gap-2 mt-2">
                 <Star className="w-4 h-4 text-violet-500" />
-                <span className="text-sm font-semibold text-slate-700">KL-CAT Score: <span className="text-violet-600">{profile?.star_rating ?? 'N/A'}</span></span>
+                <span className="text-sm font-semibold text-slate-700">KL-CAT Score: <span className="text-violet-600">{profile?.klcat_score || 'Not set'}</span></span>
               </div>
             </div>
           </div>
@@ -133,6 +134,7 @@ export default function CounselorProfile() {
         <div className="bg-white rounded-3xl border-2 border-slate-100 p-6 space-y-4" data-testid="personal-info-card">
           <h3 className="font-bold text-slate-900 text-lg">Personal Information</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2"><Label>KL-CAT Score</Label><Input value={form.klcat_score} onChange={e => setForm({...form, klcat_score: e.target.value})} placeholder="Enter your KL-CAT score" className="rounded-xl" data-testid="profile-klcat-score" /></div>
             <div><Label>Bio</Label><textarea value={form.bio} onChange={e => setForm({...form, bio: e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={3} data-testid="profile-bio" /></div>
             <div><Label>Age</Label><Input type="number" value={form.age} onChange={e => setForm({...form, age: e.target.value})} className="rounded-xl" data-testid="profile-age" /></div>
             <div><Label>Date of Birth</Label><Input type="date" value={form.date_of_birth} onChange={e => setForm({...form, date_of_birth: e.target.value})} className="rounded-xl" data-testid="profile-dob" /></div>

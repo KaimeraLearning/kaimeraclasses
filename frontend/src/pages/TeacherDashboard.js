@@ -114,15 +114,18 @@ const TeacherDashboard = () => {
     } catch (err) { toast.error(err.message); }
   };
 
+  const [cancellingClassId, setCancellingClassId] = useState(null);
   const handleTeacherCancelClass = async (classId) => {
     if (!window.confirm('Cancel this class? This will impact your rating and refund the student.')) return;
+    setCancellingClassId(classId);
     try {
       const res = await fetch(`${API}/teacher/cancel-class/${classId}`, { method: 'POST', credentials: 'include' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
+      if (!res.ok) throw new Error(data.detail || 'Failed to cancel class');
       toast.success(data.message);
       fetchDashboardData();
     } catch (err) { toast.error(err.message); }
+    setCancellingClassId(null);
   };
 
   const handleApproveAssignment = async (assignmentId, approved) => {
@@ -279,12 +282,15 @@ const TeacherDashboard = () => {
               <Play className="w-3 h-3 mr-1" /> Rejoin Live
             </Button>
           )}
-          {section === 'conducted' && (
-            <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="w-full rounded-full text-xs h-7"><Upload className="w-3 h-3 mr-1" /> Submit Proof</Button>
+          {section === 'conducted' && cls.status !== 'cancelled' && !cls.proof_submitted && (
+            <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="w-full rounded-full text-xs h-7" data-testid={`submit-proof-${cls.class_id}`}><Upload className="w-3 h-3 mr-1" /> Submit Proof</Button>
           )}
-          {section !== 'conducted' && cls.status !== 'completed' && (
+          {section === 'conducted' && cls.proof_submitted && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1 text-center text-xs text-emerald-700 font-medium" data-testid={`proof-submitted-${cls.class_id}`}><CheckCircle className="w-3 h-3 inline mr-1" />Proof Submitted</div>
+          )}
+          {section !== 'conducted' && cls.status !== 'completed' && cls.status !== 'cancelled' && (
             <div className="flex gap-1.5">
-              <Button onClick={() => handleTeacherCancelClass(cls.class_id)} variant="outline" className="flex-1 rounded-full text-xs h-7 border-red-200 text-red-600 hover:bg-red-50" data-testid={`teacher-cancel-${cls.class_id}`}><XCircle className="w-3 h-3 mr-1" /> Cancel</Button>
+              <Button onClick={() => handleTeacherCancelClass(cls.class_id)} disabled={cancellingClassId === cls.class_id} variant="outline" className="flex-1 rounded-full text-xs h-7 border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed" data-testid={`teacher-cancel-${cls.class_id}`}><XCircle className="w-3 h-3 mr-1" /> {cancellingClassId === cls.class_id ? 'Cancelling...' : 'Cancel'}</Button>
             </div>
           )}
           {section === 'today' && (

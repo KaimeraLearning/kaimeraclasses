@@ -120,9 +120,16 @@ const CounsellorDashboard = () => {
     }
   };
 
-  const handleViewTeacher = (teacher) => {
+  const handleViewTeacher = async (teacher) => {
     setSelectedTeacher(teacher);
     setShowTeacherDialog(true);
+    try {
+      const res = await fetch(`${API}/teacher/view-profile/${teacher.user_id}`, { credentials: 'include' });
+      if (res.ok) {
+        const fullProfile = await res.json();
+        setSelectedTeacher(prev => ({ ...prev, ...fullProfile }));
+      }
+    } catch (error) { console.error(error); }
   };
 
   const handleViewStudent = async (student) => {
@@ -583,35 +590,49 @@ const CounsellorDashboard = () => {
 
       {/* Teacher Profile Dialog */}
       <Dialog open={showTeacherDialog} onOpenChange={setShowTeacherDialog}>
-        <DialogContent className="sm:max-w-2xl rounded-3xl">
+        <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold text-slate-900">Teacher Profile</DialogTitle>
           </DialogHeader>
           {selectedTeacher && (
-            <div className="space-y-6">
+            <div className="space-y-4">
               <div className="bg-gradient-to-br from-amber-400 to-amber-500 rounded-2xl p-6 text-white">
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                    <GraduationCap className="w-8 h-8" />
+                  <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center overflow-hidden">
+                    {selectedTeacher.profile_picture ? (
+                      <img src={selectedTeacher.profile_picture} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <GraduationCap className="w-8 h-8" />
+                    )}
                   </div>
                   <div>
                     <h3 className="text-2xl font-bold">{selectedTeacher.name}</h3>
                     <p className="text-amber-100">{selectedTeacher.email}</p>
                     {selectedTeacher.teacher_code && <p className="text-amber-200 font-mono text-sm mt-1">ID: {selectedTeacher.teacher_code}</p>}
+                    {selectedTeacher.klat_score && <p className="text-amber-100 text-sm mt-1">KLAT Score: <span className="font-bold">{selectedTeacher.klat_score}</span></p>}
                   </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-slate-50 rounded-xl p-4">
-                  <p className="text-sm text-slate-600 mb-1">Wallet Balance</p>
-                  <p className="text-2xl font-bold text-emerald-600">{selectedTeacher.credits}</p>
-                </div>
-                <div className="bg-slate-50 rounded-xl p-4">
-                  <p className="text-sm text-slate-600 mb-1">Status</p>
-                  <p className="text-2xl font-bold text-slate-900">{selectedTeacher.is_approved ? 'Approved' : 'Pending'}</p>
-                </div>
+              {/* Personal Info */}
+              <div className="grid grid-cols-2 gap-3">
+                {selectedTeacher.bio && <div className="col-span-2 bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500 mb-1">Bio</p><p className="text-sm text-slate-800">{selectedTeacher.bio}</p></div>}
+                {selectedTeacher.age && <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500 mb-1">Age</p><p className="text-sm font-medium">{selectedTeacher.age}</p></div>}
+                {selectedTeacher.date_of_birth && <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500 mb-1">Date of Birth</p><p className="text-sm font-medium">{selectedTeacher.date_of_birth}</p></div>}
+                {selectedTeacher.education_qualification && <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500 mb-1">Education</p><p className="text-sm font-medium">{selectedTeacher.education_qualification}</p></div>}
+                {selectedTeacher.address && <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500 mb-1">Address</p><p className="text-sm font-medium">{selectedTeacher.address}</p></div>}
+                {selectedTeacher.interests_hobbies && <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500 mb-1">Interests & Hobbies</p><p className="text-sm font-medium">{selectedTeacher.interests_hobbies}</p></div>}
+                {selectedTeacher.teaching_experience && <div className="col-span-2 bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500 mb-1">Teaching Experience</p><p className="text-sm text-slate-800">{selectedTeacher.teaching_experience}</p></div>}
+                {selectedTeacher.phone && <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs text-slate-500 mb-1">Phone</p><p className="text-sm font-medium">{selectedTeacher.phone}</p></div>}
               </div>
-              {/* Teacher Rating Card */}
+              {/* Resume */}
+              {selectedTeacher.resume_name && (
+                <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-sky-600" />
+                  <span className="text-sm font-medium text-sky-800">{selectedTeacher.resume_name}</span>
+                  {selectedTeacher.resume_base64 && <a href={selectedTeacher.resume_base64} target="_blank" rel="noreferrer" className="ml-auto text-xs text-sky-600 hover:underline">View Resume</a>}
+                </div>
+              )}
+              {/* Star Rating */}
               <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-sm font-bold text-amber-800">Star Rating</p>
@@ -624,7 +645,6 @@ const CounsellorDashboard = () => {
                     <div className="bg-white rounded-lg p-1.5"><p className="text-[10px] text-slate-500">Penalty</p><p className="text-xs font-bold text-red-600">-{selectedTeacher.rating_details.penalty?.toFixed(1) || 0}</p></div>
                   </div>
                 )}
-                {selectedTeacher.is_suspended && <p className="text-xs text-red-600 font-bold mt-2 bg-red-100 rounded-lg p-1.5 text-center">SUSPENDED until {new Date(selectedTeacher.suspended_until).toLocaleDateString()}</p>}
               </div>
               {selectedTeacher.badges?.length > 0 && (
                 <div className="flex flex-wrap gap-2">

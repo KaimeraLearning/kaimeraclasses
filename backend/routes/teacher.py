@@ -49,16 +49,33 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         cls_end_date = cls.get('end_date', cls_date)
         status = cls.get('status', 'scheduled')
 
-        if status == 'completed':
+        if status in ('cancelled',):
             conducted_classes.append(cls)
-        elif cls_date == today_str or (cls_date <= today_str and cls_end_date >= today_str):
-            todays_sessions.append(cls)
-        elif cls_date > today_str and status in ('scheduled', 'in_progress'):
-            upcoming_classes.append(cls)
-        elif cls_end_date < today_str and status != 'completed':
+        elif status == 'completed':
+            conducted_classes.append(cls)
+        elif cls_end_date < today_str:
+            # Past end date - auto-complete
             await db.class_sessions.update_one({"class_id": cls['class_id']}, {"$set": {"status": "completed"}})
             cls['status'] = 'completed'
             conducted_classes.append(cls)
+        elif cls_date == today_str or (cls_date <= today_str and cls_end_date >= today_str):
+            # Check if today's session time has passed
+            end_time_str = cls.get('end_time', '23:59')
+            try:
+                end_time = datetime.strptime(f"{today_str} {end_time_str}", '%Y-%m-%d %H:%M')
+                end_time = end_time.replace(tzinfo=timezone.utc)
+                if now > end_time and status in ('scheduled', 'in_progress'):
+                    # Time passed today - show in conducted for proof submission
+                    if cls_end_date == today_str:
+                        await db.class_sessions.update_one({"class_id": cls['class_id']}, {"$set": {"status": "completed"}})
+                        cls['status'] = 'completed'
+                    conducted_classes.append(cls)
+                else:
+                    todays_sessions.append(cls)
+            except (ValueError, TypeError):
+                todays_sessions.append(cls)
+        elif cls_date > today_str and status in ('scheduled', 'in_progress'):
+            upcoming_classes.append(cls)
         else:
             conducted_classes.append(cls)
 
@@ -68,6 +85,16 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
     approved_students = await db.student_teacher_assignments.find(
         {"teacher_id": user.user_id, "status": "approved"}, {"_id": 0}
     ).to_list(1000)
+
+    # Check proof submission status for conducted classes
+    class_ids = [c['class_id'] for c in conducted_classes]
+    if class_ids:
+        proofs = await db.class_proofs.find(
+            {"class_id": {"$in": class_ids}}, {"_id": 0, "class_id": 1}
+        ).to_list(1000)
+        proof_class_ids = set(p['class_id'] for p in proofs)
+        for cls in conducted_classes:
+            cls['proof_submitted'] = cls['class_id'] in proof_class_ids
 
     return {
         "is_approved": user.is_approved, "is_suspended": False,
@@ -137,6 +164,8 @@ async def teacher_cancel_class(class_id: str, request: Request, authorization: O
         raise HTTPException(status_code=403, detail="Not your class")
     if cls.get('status') == 'completed':
         raise HTTPException(status_code=400, detail="Cannot cancel completed class")
+    if cls.get('status') == 'cancelled':
+        raise HTTPException(status_code=400, detail="This class is already cancelled")
 
     await db.class_sessions.update_one(
         {"class_id": class_id},
@@ -600,7 +629,7 @@ async def update_teacher_full_profile(request: Request, authorization: Optional[
     current = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
 
     editable = ["bio", "age", "date_of_birth", "address", "education_qualification",
-                 "interests_hobbies", "teaching_experience", "profile_picture"]
+                 "interests_hobbies", "teaching_experience", "profile_picture", "klat_score"]
     updates = {}
     for field in editable:
         if field in body and body[field] is not None:

@@ -225,7 +225,7 @@ async def update_counselor_full_profile(request: Request, authorization: Optiona
     current = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
 
     editable = ["bio", "age", "date_of_birth", "address", "education_qualification",
-                 "interests_hobbies", "experience", "profile_picture"]
+                 "interests_hobbies", "experience", "profile_picture", "klcat_score"]
     updates = {}
     for field in editable:
         if field in body and body[field] is not None:
