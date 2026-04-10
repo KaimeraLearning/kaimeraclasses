@@ -71,7 +71,10 @@ async def get_current_user(request: Request, authorization: Optional[str] = Head
 
 
 async def create_session(user_id: str) -> str:
-    """Create a new session for user"""
+    """Create a new session for user - single device enforcement"""
+    # Invalidate all existing sessions for this user (single device policy)
+    await db.user_sessions.delete_many({"user_id": user_id})
+
     session_token = f"session_{uuid.uuid4().hex}"
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
 

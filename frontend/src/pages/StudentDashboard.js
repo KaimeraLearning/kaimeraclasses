@@ -114,6 +114,11 @@ const StudentDashboard = () => {
 
   // ─── LOCKED VIEW (not enrolled) ───
   if (!isEnrolled) {
+    // Demo classes the student can join
+    const demoLiveClasses = liveClasses.filter(c => c.is_demo);
+    const demoUpcoming = upcomingClasses.filter(c => c.is_demo);
+    const hasDemoClasses = demoLiveClasses.length > 0 || demoUpcoming.length > 0;
+
     return (
       <div className="min-h-screen bg-slate-50">
         <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-slate-200">
@@ -145,14 +150,52 @@ const StudentDashboard = () => {
                   ? "Your teacher enrollment is being processed. Hang tight!"
                   : "Your demo is complete! A counsellor will assign you to a teacher soon."}
             </p>
-            <div className="flex gap-3 justify-center">
+            <div className="flex flex-wrap gap-3 justify-center">
               {!demoCompleted && (
                 <Button onClick={() => navigate('/book-demo')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-8 py-6 font-bold text-lg" data-testid="book-demo-button">Book a Free Demo</Button>
               )}
               <Button onClick={() => setShowProfileDialog(true)} variant="outline" className="rounded-full px-6 py-6" data-testid="edit-profile-button"><User className="w-4 h-4 mr-2" /> My Profile</Button>
               <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full px-6 py-6" data-testid="wallet-button"><CreditCard className="w-4 h-4 mr-2" /> Wallet</Button>
+              <Button onClick={() => navigate('/chat')} variant="outline" className="rounded-full px-6 py-6" data-testid="chat-button"><MessageSquare className="w-4 h-4 mr-2" /> Chat</Button>
             </div>
           </div>
+
+          {/* DEMO LIVE CLASSES - Join button */}
+          {demoLiveClasses.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-lg font-bold text-emerald-700 mb-3 flex items-center gap-2"><Play className="w-5 h-5 text-emerald-500" /> Your Demo Class - Live Now</h3>
+              {demoLiveClasses.map(cls => (
+                <div key={cls.class_id} className="bg-white rounded-2xl border-2 border-emerald-400 p-5 ring-2 ring-emerald-200 mb-3" data-testid={`demo-live-${cls.class_id}`}>
+                  <div className="flex gap-2 mb-2">
+                    <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-xs font-semibold animate-pulse">LIVE</span>
+                    <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full text-xs">DEMO</span>
+                  </div>
+                  <h4 className="font-bold text-slate-900 mb-1">{cls.title}</h4>
+                  <p className="text-xs text-slate-600 mb-3">{cls.start_time} - {cls.end_time} | Teacher: {cls.teacher_name}</p>
+                  <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold animate-pulse" data-testid={`join-demo-live-${cls.class_id}`}>
+                    <Play className="w-4 h-4 mr-2" /> Join Demo Class
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* DEMO UPCOMING CLASSES */}
+          {demoUpcoming.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-lg font-bold text-sky-700 mb-3 flex items-center gap-2"><Calendar className="w-5 h-5 text-sky-500" /> Upcoming Demo</h3>
+              {demoUpcoming.map(cls => (
+                <div key={cls.class_id} className="bg-white rounded-2xl border border-sky-200 p-5 mb-3" data-testid={`demo-upcoming-${cls.class_id}`}>
+                  <div className="flex gap-2 mb-2">
+                    <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full text-xs font-semibold">SCHEDULED</span>
+                    <span className="bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full text-xs">DEMO</span>
+                  </div>
+                  <h4 className="font-bold text-slate-900 mb-1">{cls.title}</h4>
+                  <p className="text-xs text-slate-600">Date: {cls.date} | {cls.start_time} - {cls.end_time} | Teacher: {cls.teacher_name}</p>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Demo Feedbacks */}
           {demoFeedbacks.length > 0 && (

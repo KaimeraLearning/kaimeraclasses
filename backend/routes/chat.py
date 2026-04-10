@@ -26,15 +26,25 @@ async def send_chat_message(data: ChatMessage, request: Request, authorization: 
             {"teacher_id": user.user_id, "student_id": data.recipient_id, "status": {"$in": ["pending", "approved"]}},
             {"_id": 0}
         )
-        if not assigned and recipient.get("role") != "admin":
+        # Also allow messaging demo students
+        demo_link = await db.class_sessions.find_one(
+            {"teacher_id": user.user_id, "assigned_student_id": data.recipient_id, "is_demo": True},
+            {"_id": 0}
+        )
+        if not assigned and not demo_link and recipient.get("role") != "admin":
             raise HTTPException(status_code=403, detail="You can only message your assigned students")
     elif user.role == "student":
         assigned_teacher = await db.student_teacher_assignments.find_one(
             {"student_id": user.user_id, "teacher_id": data.recipient_id, "status": {"$in": ["pending", "approved"]}},
             {"_id": 0}
         )
+        # Also allow messaging demo teacher
+        demo_link = await db.class_sessions.find_one(
+            {"assigned_student_id": user.user_id, "teacher_id": data.recipient_id, "is_demo": True},
+            {"_id": 0}
+        )
         is_counsellor = recipient.get("role") == "counsellor"
-        if not assigned_teacher and not is_counsellor:
+        if not assigned_teacher and not demo_link and not is_counsellor:
             raise HTTPException(status_code=403, detail="You can only message your assigned teacher or a counsellor")
     # Admin and Counsellor: global access - no restriction
 
@@ -122,22 +132,42 @@ async def get_chat_contacts(request: Request, authorization: Optional[str] = Hea
         ).to_list(5000)
         contacts = users
     elif user.role == "teacher":
+        # Get students from formal assignments
         assignments = await db.student_teacher_assignments.find(
             {"teacher_id": user.user_id, "status": {"$in": ["pending", "approved"]}},
             {"_id": 0, "student_id": 1}
         ).to_list(100)
         student_ids = [a["student_id"] for a in assignments]
+        # Also include students from accepted demo classes
+        demo_classes = await db.class_sessions.find(
+            {"teacher_id": user.user_id, "is_demo": True, "status": {"$in": ["scheduled", "in_progress", "completed"]}},
+            {"_id": 0, "assigned_student_id": 1}
+        ).to_list(100)
+        for dc in demo_classes:
+            sid = dc.get("assigned_student_id")
+            if sid and sid not in student_ids:
+                student_ids.append(sid)
         if student_ids:
             contacts = await db.users.find(
                 {"user_id": {"$in": student_ids}},
                 {"_id": 0, "user_id": 1, "name": 1, "email": 1, "role": 1, "student_code": 1}
             ).to_list(100)
     elif user.role == "student":
+        # Get teachers from formal assignments
         assignments = await db.student_teacher_assignments.find(
             {"student_id": user.user_id, "status": {"$in": ["pending", "approved"]}},
             {"_id": 0, "teacher_id": 1}
         ).to_list(10)
         teacher_ids = [a["teacher_id"] for a in assignments]
+        # Also include teachers from accepted demo classes
+        demo_classes = await db.class_sessions.find(
+            {"assigned_student_id": user.user_id, "is_demo": True, "status": {"$in": ["scheduled", "in_progress", "completed"]}},
+            {"_id": 0, "teacher_id": 1}
+        ).to_list(10)
+        for dc in demo_classes:
+            tid = dc.get("teacher_id")
+            if tid and tid not in teacher_ids:
+                teacher_ids.append(tid)
         if teacher_ids:
             teachers = await db.users.find(
                 {"user_id": {"$in": teacher_ids}},
