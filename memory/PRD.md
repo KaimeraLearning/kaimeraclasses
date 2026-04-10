@@ -15,45 +15,30 @@ Flow: Counselor assigns Student -> Teacher approves -> Teacher creates class -> 
 
 ## Architecture
 
-### Backend Structure
-```
-/app/backend/
-  server.py              # Thin orchestrator
-  database.py            # MongoDB connection
-  models/schemas.py      # Pydantic models
-  services/auth.py       # Auth + single device session + blocked user check
-  services/helpers.py    # Code generators, email, OTP
-  services/rating.py     # Teacher rating system
-  tasks/background.py    # Cleanup + pre-class alerts
-  routes/               # 10 modules, 125+ endpoints
-```
+### Backend: 10 route modules, 125+ endpoints
+### Security: Single device sessions, blocked user enforcement, email/phone uniqueness, credit floor, atomic payments, bank lock, OTP rate limiting
 
-### Security
-- Single device session enforcement
-- Blocked user enforcement (403 + session purge)
-- Email/phone uniqueness (DB index + app-level across all roles)
-- Credit floor, atomic payments, class delete refunds
-- Proof integrity (one per class/day)
-- OTP brute force protection
-- Bank details locked after first entry (teacher/counselor)
+### Profile System
+- **Teacher**: KLAT Score (manual string input), bio, age, DOB, address, education, interests, teaching experience, profile picture, PDF resume, bank details (locked after first entry)
+- **Counselor**: KL-CAT Score (manual string input), same personal fields, Counselor ID (KLC-XXXXXX)
+- **Bank Details**: Visible to admin only, locked after first entry, admin-only override
+- **star_rating**: Separate automated 1-5 rating (from feedback/penalties) - NOT the same as KLAT/KL-CAT
 
-### Profile System (Teacher & Counselor)
-- Profile picture upload, Bio, Age, DOB, Address, Education, Interests, Experience
-- KLAT Score (Teacher) / KL-CAT Score (Counselor)
-- Bank Details (locked after first entry, admin-only override)
-- PDF Resume upload (viewable by admin/counselor/students)
-- Counselor ID (KLC-XXXXXX format)
-- Bank details visible to admin only
+### Class Lifecycle
+- Classes auto-move to conducted tab after end time passes
+- Submit Proof button appears on conducted classes (hidden if already submitted)
+- Cancel button disabled after click (prevents double-cancel/double-rating-deduction)
 
-### Chat System
-- Demo-aware contacts (teacher accepts demo -> mutual chat enabled)
-- Permission-scoped messaging
+### Profile Popups
+- Clicking teacher/counselor/student name anywhere shows full profile dialog
+- Admin sees bank details; other roles don't
+- Shows KLAT/KL-CAT, bio, education, experience, resume, badges, star rating
 
 ## Completed Work
-- [Apr 10, 2026] **Major Feature Batch**: Spelling fix (Counselor), teacher/counselor profile system (KLAT/KL-CAT, bank lock, resume, profile pic), proof screenshot upload, removed preferred time from admin create-student, global error handling fix (no more "JSON response error"). All verified 100% (23/23 backend + all frontend).
+- [Apr 10, 2026] **KLAT/KL-CAT manual scores**, cancel double-click prevention, class auto-conducted + proof visibility, profile popup with full details. All verified 100% (18/18 backend + all frontend).
+- [Apr 10, 2026] Spelling fix (Counselor), proof screenshot upload, teacher/counselor profile system, removed preferred time, global error handling
 - [Apr 10, 2026] Single device session, demo-based chat, student locked view with demo classes + Chat button
-- [Apr 10, 2026] Security hardening (12 fixes) + Backend modular refactor (5220→90 line server.py)
-- Full EdTech CRM: 4-role dashboards, Operations Center, wallet, demo booking, chat, complaints, teacher rating/suspension, learning kits.
+- [Apr 10, 2026] Security hardening (12 fixes) + Backend modular refactor (5220->90 line server.py)
 
 ## Remaining Backlog
 - P1: Verify Jitsi screenshot fix in live video class
