@@ -375,6 +375,17 @@ async def end_class(class_id: str, request: Request, authorization: Optional[str
         {"$set": {"status": new_status, "room_id": None, "last_ended_at": datetime.now(timezone.utc).isoformat()}}
     )
 
+    # If this is a demo class and it's completed, mark the demo_request as completed
+    if new_status == "completed" and cls.get("is_demo"):
+        student_id = cls.get("assigned_student_id")
+        teacher_id = cls.get("teacher_id")
+        if student_id and teacher_id:
+            await db.demo_requests.update_many(
+                {"$or": [{"student_user_id": student_id}, {"student_id": student_id}],
+                 "accepted_by_teacher_id": teacher_id, "status": "accepted"},
+                {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}}
+            )
+
     return {"message": f"Class ended. Status: {new_status}", "status": new_status}
 
 

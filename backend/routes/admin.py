@@ -158,10 +158,19 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
     if not student or not teacher:
         raise HTTPException(status_code=404, detail="Student or teacher not found")
 
-    # DEMO-FIRST CONSTRAINT
-    demo = await db.demo_requests.find_one({"student_id": assignment.student_id, "status": {"$in": ["completed", "feedback_submitted"]}}, {"_id": 0})
+    # DEMO-FIRST CONSTRAINT - check both student_id and student_user_id fields
+    demo = await db.demo_requests.find_one({
+        "$or": [{"student_id": assignment.student_id}, {"student_user_id": assignment.student_id}],
+        "status": {"$in": ["completed", "feedback_submitted"]}
+    }, {"_id": 0})
     if not demo:
-        raise HTTPException(status_code=400, detail="Cannot assign: Student has not completed a demo class yet. A successful demo is required before assignment.")
+        # Also check if a completed demo class exists for this student
+        demo_class = await db.class_sessions.find_one({
+            "assigned_student_id": assignment.student_id, "is_demo": True,
+            "status": "completed"
+        }, {"_id": 0})
+        if not demo_class:
+            raise HTTPException(status_code=400, detail="Cannot assign: Student has not completed a demo class yet. A successful demo is required before assignment.")
 
     if teacher.get("is_suspended"):
         raise HTTPException(status_code=400, detail=f"Teacher {teacher['name']} is currently suspended and cannot accept new students.")

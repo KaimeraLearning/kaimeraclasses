@@ -57,6 +57,16 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
             # Past end date - auto-complete
             await db.class_sessions.update_one({"class_id": cls['class_id']}, {"$set": {"status": "completed"}})
             cls['status'] = 'completed'
+            # Mark demo request as completed if this is a demo class
+            if cls.get('is_demo'):
+                sid = cls.get('assigned_student_id')
+                tid = cls.get('teacher_id')
+                if sid and tid:
+                    await db.demo_requests.update_many(
+                        {"$or": [{"student_user_id": sid}, {"student_id": sid}],
+                         "accepted_by_teacher_id": tid, "status": "accepted"},
+                        {"$set": {"status": "completed", "completed_at": now.isoformat()}}
+                    )
             conducted_classes.append(cls)
         elif cls_date == today_str or (cls_date <= today_str and cls_end_date >= today_str):
             # Check if today's session time has passed
@@ -69,6 +79,16 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
                     if cls_end_date == today_str:
                         await db.class_sessions.update_one({"class_id": cls['class_id']}, {"$set": {"status": "completed"}})
                         cls['status'] = 'completed'
+                        # Mark demo request as completed if demo class
+                        if cls.get('is_demo'):
+                            sid = cls.get('assigned_student_id')
+                            tid = cls.get('teacher_id')
+                            if sid and tid:
+                                await db.demo_requests.update_many(
+                                    {"$or": [{"student_user_id": sid}, {"student_id": sid}],
+                                     "accepted_by_teacher_id": tid, "status": "accepted"},
+                                    {"$set": {"status": "completed", "completed_at": now.isoformat()}}
+                                )
                     conducted_classes.append(cls)
                 else:
                     todays_sessions.append(cls)
@@ -87,13 +107,14 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
     ).to_list(1000)
 
     # Check proof submission status for conducted classes
-    class_ids = [c['class_id'] for c in conducted_classes]
+    all_check_classes = conducted_classes + [c for c in todays_sessions if c.get('status') == 'completed']
+    class_ids = [c['class_id'] for c in all_check_classes]
     if class_ids:
         proofs = await db.class_proofs.find(
             {"class_id": {"$in": class_ids}}, {"_id": 0, "class_id": 1}
         ).to_list(1000)
         proof_class_ids = set(p['class_id'] for p in proofs)
-        for cls in conducted_classes:
+        for cls in all_check_classes:
             cls['proof_submitted'] = cls['class_id'] in proof_class_ids
 
     return {
