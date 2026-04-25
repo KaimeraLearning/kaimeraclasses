@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 import { GraduationCap, LogOut, Calendar, CreditCard, BookOpen, Play, MessageSquare, Bell, AlertCircle, Lock, Star, Clock, User, XCircle, IndianRupee, Download, CheckCircle } from 'lucide-react';
 import { getApiError } from '../utils/api';
 import { ViewProfilePopup } from '../components/ViewProfilePopup';
-import { useRazorpay } from 'react-razorpay';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND}/api`;
@@ -37,7 +36,6 @@ const StudentDashboard = () => {
   const [viewProfileRole, setViewProfileRole] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [paymentLoading, setPaymentLoading] = useState(false);
-  const { Razorpay: RazorpayCheckout } = useRazorpay();
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [showAttendanceDialog, setShowAttendanceDialog] = useState(false);
 
@@ -92,6 +90,18 @@ const StudentDashboard = () => {
     } catch {}
   };
 
+  const loadRazorpayScript = () => {
+    return new Promise((resolve, reject) => {
+      if (window.Razorpay) { resolve(window.Razorpay); return; }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(window.Razorpay);
+      script.onerror = () => reject(new Error('Failed to load Razorpay'));
+      document.head.appendChild(script);
+    });
+  };
+
   const handlePayNow = async (assignmentId) => {
     setPaymentLoading(true);
     try {
@@ -101,6 +111,8 @@ const StudentDashboard = () => {
       });
       if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
+
+      const RazorpayClass = await loadRazorpayScript();
 
       const options = {
         key: data.key_id,
@@ -128,7 +140,7 @@ const StudentDashboard = () => {
         theme: { color: '#0ea5e9' }
       };
 
-      const rzp = new RazorpayCheckout(options);
+      const rzp = new RazorpayClass(options);
       rzp.open();
     } catch (err) { toast.error(err.message); }
     finally { setPaymentLoading(false); }
