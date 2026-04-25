@@ -78,6 +78,18 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
     }
 
 
+@router.get("/student/my-transactions")
+async def student_transactions(request: Request, authorization: Optional[str] = Header(None)):
+    """Get student's credit transaction history"""
+    user = await get_current_user(request, authorization)
+    if user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only")
+    transactions = await db.transactions.find(
+        {"user_id": user.user_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    return transactions
+
+
 @router.post("/student/rate-class")
 async def student_rate_class(data: StudentFeedbackRating, request: Request, authorization: Optional[str] = Header(None)):
     """Student rates a completed class - impacts teacher rating"""

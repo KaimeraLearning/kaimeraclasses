@@ -278,3 +278,212 @@ async def razorpay_webhook(request: Request):
                     logger.info(f"Webhook: Payment captured for order {order_id}")
 
     return {"received": True}
+
+
+RECHARGE_PACKAGES = {
+    "pack_2000": {"credits": 2000, "amount": 2000, "label": "2,000"},
+    "pack_5000": {"credits": 5000, "amount": 5000, "label": "5,000"},
+    "pack_10000": {"credits": 10000, "amount": 10000, "label": "10,000"},
+}
+
+
+@router.post("/payments/recharge")
+async def create_recharge_order(request: Request, authorization: Optional[str] = Header(None)):
+    """Create Razorpay order for credit recharge"""
+    user = await get_current_user(request, authorization)
+
+    body = await request.json()
+    package_id = body.get("package_id")
+
+    if package_id not in RECHARGE_PACKAGES:
+        raise HTTPException(status_code=400, detail="Invalid package")
+
+    pkg = RECHARGE_PACKAGES[package_id]
+    amount_paise = int(pkg["amount"] * 100)
+    receipt_id = f"rch_{uuid.uuid4().hex[:12]}"
+
+    try:
+        order = razorpay_client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": receipt_id[:40],
+            "payment_capture": 1,
+            "notes": {
+                "type": "recharge",
+                "student_id": user.user_id,
+                "student_name": user.name,
+                "credits": pkg["credits"]
+            }
+        })
+    except Exception as e:
+        logger.error(f"Razorpay recharge order failed: {e}")
+        raise HTTPException(status_code=500, detail="Payment gateway error")
+
+    await db.payment_transactions.insert_one({
+        "payment_id": f"pay_{uuid.uuid4().hex[:12]}",
+        "razorpay_order_id": order["id"],
+        "type": "recharge",
+        "student_id": user.user_id,
+        "student_name": user.name,
+        "student_email": user.email,
+        "amount": pkg["amount"],
+        "credits": pkg["credits"],
+        "amount_paise": amount_paise,
+        "currency": "INR",
+        "receipt_id": receipt_id,
+        "status": "created",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    return {
+        "order_id": order["id"],
+        "amount": amount_paise,
+        "currency": "INR",
+        "key_id": os.environ.get('RAZORPAY_KEY_ID', ''),
+        "student_name": user.name,
+        "student_email": user.email
+    }
+
+
+@router.post("/payments/verify-recharge")
+async def verify_recharge(request: Request, authorization: Optional[str] = Header(None)):
+    """Verify Razorpay recharge payment and add credits"""
+    user = await get_current_user(request, authorization)
+
+    body = await request.json()
+    razorpay_order_id = body.get("razorpay_order_id")
+    razorpay_payment_id = body.get("razorpay_payment_id")
+    razorpay_signature = body.get("razorpay_signature")
+
+    if not all([razorpay_order_id, razorpay_payment_id, razorpay_signature]):
+        raise HTTPException(status_code=400, detail="Missing payment data")
+
+    key_secret = os.environ.get('RAZORPAY_KEY_SECRET', '')
+    generated_signature = hmac.new(
+        key_secret.encode('utf-8'),
+        f"{razorpay_order_id}|{razorpay_payment_id}".encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    if generated_signature != razorpay_signature:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    payment = await db.payment_transactions.find_one(
+        {"razorpay_order_id": razorpay_order_id, "type": "recharge"}, {"_id": 0}
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    result = await db.payment_transactions.update_one(
+        {"razorpay_order_id": razorpay_order_id, "status": {"$ne": "paid"}},
+        {"$set": {
+            "status": "paid",
+            "razorpay_payment_id": razorpay_payment_id,
+            "razorpay_signature": razorpay_signature,
+            "paid_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+
+    if result.modified_count > 0:
+        credits_to_add = payment.get("credits", 0)
+        await db.users.update_one(
+            {"user_id": user.user_id},
+            {"$inc": {"credits": credits_to_add}}
+        )
+        # Record transaction
+        await db.transactions.insert_one({
+            "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+            "user_id": user.user_id,
+            "type": "recharge",
+            "amount": credits_to_add,
+            "description": f"Recharged {credits_to_add} credits via Razorpay",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    return {"message": f"Recharged {payment.get('credits', 0)} credits!", "credits_added": payment.get("credits", 0)}
+
+
+@router.get("/payments/receipt-pdf/{payment_id}")
+async def download_receipt_pdf(payment_id: str, request: Request, authorization: Optional[str] = Header(None), token: Optional[str] = None):
+    """Generate and return a PDF receipt"""
+    from fpdf import FPDF
+    from fastapi.responses import Response as FastAPIResponse
+
+    # Support token via query param for download-in-new-tab
+    if token and not authorization:
+        authorization = f"Bearer {token}"
+    user = await get_current_user(request, authorization)
+
+    query = {"payment_id": payment_id}
+    if user.role not in ["admin", "counsellor"]:
+        query["student_id"] = user.user_id
+
+    payment = await db.payment_transactions.find_one(query, {"_id": 0})
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # Header
+    pdf.set_fill_color(14, 165, 233)
+    pdf.rect(0, 0, 210, 45, 'F')
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.set_y(10)
+    pdf.cell(0, 12, "Kaimera Learning", ln=True, align="C")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 8, "Payment Receipt", ln=True, align="C")
+
+    # Body
+    pdf.set_text_color(30, 41, 59)
+    pdf.ln(15)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 10, f"Receipt: {payment.get('receipt_id', 'N/A')}", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.ln(3)
+
+    fields = [
+        ("Date", payment.get("paid_at", payment.get("created_at", "N/A"))[:10] if payment.get("paid_at") or payment.get("created_at") else "N/A"),
+        ("Student Name", payment.get("student_name", "N/A")),
+        ("Student Email", payment.get("student_email", "N/A")),
+        ("Payment Type", payment.get("type", "assignment").title()),
+    ]
+
+    if payment.get("teacher_name"):
+        fields.append(("Teacher", payment["teacher_name"]))
+    if payment.get("learning_plan_name"):
+        fields.append(("Learning Plan", payment["learning_plan_name"]))
+    if payment.get("credits"):
+        fields.append(("Credits", str(payment["credits"])))
+
+    fields.extend([
+        ("Amount", f"INR {payment.get('amount', 0):,.2f}"),
+        ("Status", payment.get("status", "N/A").upper()),
+        ("Razorpay Payment ID", payment.get("razorpay_payment_id", "N/A")),
+    ])
+
+    for label, value in fields:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(60, 8, label, border=0)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 8, str(value), ln=True)
+
+    pdf.ln(10)
+    pdf.set_draw_color(226, 232, 240)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(148, 163, 184)
+    pdf.cell(0, 6, "This is a computer-generated receipt. No signature required.", ln=True, align="C")
+    pdf.cell(0, 6, f"Generated on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", ln=True, align="C")
+
+    pdf_bytes = pdf.output()
+
+    return FastAPIResponse(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=receipt_{payment.get('receipt_id','')}.pdf"}
+    )

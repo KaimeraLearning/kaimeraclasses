@@ -332,6 +332,15 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
     if cls['status'] not in ['scheduled', 'in_progress']:
         raise HTTPException(status_code=400, detail=f"Cannot start class with status: {cls['status']}")
 
+    # Verify payment for assigned student (skip for demo classes)
+    if not cls.get("is_demo") and cls.get("assigned_student_id"):
+        assignment = await db.student_teacher_assignments.find_one(
+            {"teacher_id": user.user_id, "student_id": cls["assigned_student_id"], "status": "approved"},
+            {"_id": 0}
+        )
+        if assignment and assignment.get("payment_status") != "paid":
+            raise HTTPException(status_code=400, detail="Cannot start class: Student payment is still pending.")
+
     room_id = f"kaimera-{class_id}"
     await db.class_sessions.update_one(
         {"class_id": class_id},

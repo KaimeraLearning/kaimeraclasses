@@ -348,6 +348,7 @@ const StudentDashboard = () => {
           <Button onClick={() => navigate('/learning-kit')} variant="outline" className="rounded-full" data-testid="learning-kit-button"><BookOpen className="w-4 h-4 mr-2" /> Learning Kit</Button>
           <Button onClick={() => navigate('/complaints')} variant="outline" className="rounded-full" data-testid="complaints-button"><MessageSquare className="w-4 h-4 mr-2" /> Complaints</Button>
           <Button onClick={() => navigate('/chat')} variant="outline" className="rounded-full" data-testid="chat-button"><MessageSquare className="w-4 h-4 mr-2" /> Chat</Button>
+          <Button onClick={fetchAttendance} variant="outline" className="rounded-full" data-testid="attendance-button"><Calendar className="w-4 h-4 mr-2" /> Attendance</Button>
           <Button onClick={() => setShowFeedbackDialog(true)} variant="outline" className="rounded-full" data-testid="feedback-button"><Star className="w-4 h-4 mr-2" /> Demo Feedback</Button>
         </div>
 
