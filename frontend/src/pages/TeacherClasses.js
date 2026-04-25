@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { ArrowLeft, Calendar, Clock, Users, Trash2 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -19,16 +19,21 @@ const TeacherClasses = () => {
 
   const fetchClasses = async () => {
     try {
-      const response = await fetch(`${API}/teacher/dashboard`, { credentials: 'include' });
-      if (!response.ok) throw new Error('Failed to fetch');
-      
+      const response = await fetch(`${API}/teacher/dashboard`, {
+        credentials: 'include'
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch classes');
+
       const data = await response.json();
+
+      // ✅ FIX: fallback safety
       setClasses(data.classes || []);
-      setLoading(false);
     } catch (error) {
       console.error(error);
       toast.error('Failed to load classes');
-      setLoading(false);
+    } finally {
+      setLoading(false); // ✅ always stop loading
     }
   };
 
@@ -41,12 +46,25 @@ const TeacherClasses = () => {
         credentials: 'include'
       });
 
-      if (!response.ok) throw new Error('Failed to delete');
+      if (!response.ok) throw new Error('Failed to delete class');
 
       toast.success('Class deleted successfully');
-      fetchClasses();
+
+      // ✅ better UX: instant update without refetch
+      setClasses(prev => prev.filter(c => c.class_id !== classId));
+
     } catch (error) {
       toast.error(error.message);
+    }
+  };
+
+  // ✅ Safe date formatter
+  const formatDate = (date) => {
+    try {
+      const parsed = parseISO(date);
+      return isValid(parsed) ? format(parsed, 'MMM dd, yyyy') : 'Invalid date';
+    } catch {
+      return 'Invalid date';
     }
   };
 
@@ -63,7 +81,11 @@ const TeacherClasses = () => {
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center gap-4">
-            <Button onClick={() => navigate('/teacher-dashboard')} variant="outline" className="rounded-full">
+            <Button
+              onClick={() => navigate('/teacher-dashboard')}
+              variant="outline"
+              className="rounded-full"
+            >
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back
             </Button>
@@ -82,44 +104,61 @@ const TeacherClasses = () => {
             {classes.map((cls) => (
               <div
                 key={cls.class_id}
-                className="bg-white rounded-3xl border-2 border-slate-200 shadow-[4px_4px_0px_0px_rgba(226,232,240,1)] p-6"
+                className="bg-white rounded-3xl border-2 border-slate-200 shadow p-6"
               >
                 <div className="flex items-start justify-between mb-3">
                   <span className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-semibold">
-                    {cls.subject}
+                    {cls.subject || 'General'}
                   </span>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                    cls.status === 'scheduled' ? 'bg-emerald-100 text-emerald-800' : 
-                    cls.status === 'in_progress' ? 'bg-sky-100 text-sky-800' : 
-                    'bg-slate-100 text-slate-800'
-                  }`}>
+
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      cls.status === 'scheduled'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : cls.status === 'in_progress'
+                        ? 'bg-sky-100 text-sky-800'
+                        : 'bg-slate-100 text-slate-800'
+                    }`}
+                  >
                     {cls.status}
                   </span>
                 </div>
 
-                <h3 className="text-xl font-bold text-slate-900 mb-4">{cls.title}</h3>
+                <h3 className="text-xl font-bold text-slate-900 mb-4">
+                  {cls.title}
+                </h3>
 
                 <div className="space-y-2 mb-4">
                   <div className="flex items-center gap-2 text-slate-600">
                     <Calendar className="w-4 h-4" />
-                    <span className="text-sm">{format(parseISO(cls.date), 'MMM dd, yyyy')}</span>
+                    <span className="text-sm">{formatDate(cls.date)}</span>
                   </div>
+
                   {cls.end_date && (
                     <div className="flex items-center gap-2 text-slate-600">
                       <Calendar className="w-4 h-4" />
-                      <span className="text-sm">Ends: {format(parseISO(cls.end_date), 'MMM dd, yyyy')}</span>
+                      <span className="text-sm">
+                        Ends: {formatDate(cls.end_date)}
+                      </span>
                     </div>
                   )}
+
                   <div className="flex items-center gap-2 text-slate-600">
                     <Clock className="w-4 h-4" />
-                    <span className="text-sm">{cls.start_time} - {cls.end_time}</span>
+                    <span className="text-sm">
+                      {cls.start_time} - {cls.end_time}
+                    </span>
                   </div>
+
                   <div className="flex items-center gap-2 text-slate-600">
                     <Users className="w-4 h-4" />
-                    <span className="text-sm">{cls.enrolled_students.length} / {cls.max_students} students</span>
+                    <span className="text-sm">
+                      {(cls.enrolled_students || []).length} / {cls.max_students} students
+                    </span>
                   </div>
                 </div>
 
+                {/* ✅ FIX: Remove payment_status dependency (wrong field here) */}
                 {cls.status === 'scheduled' && (
                   <div className="space-y-2">
                     <Button
@@ -128,6 +167,7 @@ const TeacherClasses = () => {
                     >
                       Start Class
                     </Button>
+
                     <Button
                       onClick={() => handleDeleteClass(cls.class_id)}
                       variant="outline"

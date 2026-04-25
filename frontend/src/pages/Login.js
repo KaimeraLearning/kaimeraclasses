@@ -164,12 +164,14 @@ const Login = () => {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3 mb-3">
-            <div className="w-12 h-12 bg-sky-500 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-500/30">
-              <GraduationCap className="w-7 h-7 text-white" />
-            </div>
+            <img 
+    src="https://static.wixstatic.com/media/3427af_c1564f2d04d34070be92706f5c62fe6c~mv2.png/v1/fill/w_186,h_194,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Kaimera%20final%20logo.png" 
+    alt="Logo" 
+    className="w-12 h-12 object-contain" 
+  />
             <h1 className="text-3xl font-black text-white tracking-tight">Kaimera Learning</h1>
           </div>
-          <p className="text-sky-300 text-sm font-medium">Learning Management Platform</p>
+          <p className="text-sky-300 text-sm font-medium">Learning Platform</p>
         </div>
 
         <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/20 p-8 shadow-2xl">

@@ -99,12 +99,22 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         else:
             conducted_classes.append(cls)
 
-    pending_assignments = await db.student_teacher_assignments.find(
-        {"teacher_id": user.user_id, "status": "pending"}, {"_id": 0}
-    ).to_list(1000)
-    approved_students = await db.student_teacher_assignments.find(
-        {"teacher_id": user.user_id, "status": "approved", "payment_status": "paid"}, {"_id": 0}
-    ).to_list(1000)
+pending_assignments = await db.student_teacher_assignments.find(
+    {"teacher_id": user.user_id, "status": "pending"},
+    {"_id": 0}
+).to_list(1000)
+
+approved_students = await db.student_teacher_assignments.find(
+    {
+        "teacher_id": user.user_id,
+        "status": "approved",
+        "$or": [
+            {"payment_status": {"$in": ["pending", "paid"]}},
+            {"payment_status": {"$exists": False}}
+        ]
+    },
+    {"_id": 0}
+).to_list(1000)
 
     # Enrich assignments with counselor name
     counselor_ids = set()
@@ -145,47 +155,94 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
 
 
 @router.post("/teacher/approve-assignment")
-async def approve_student_assignment(approval: TeacherApprovalRequest, request: Request, authorization: Optional[str] = Header(None)):
+async def approve_student_assignment(
+    approval: TeacherApprovalRequest,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """Teacher approves or rejects student assignment"""
+
     user = await get_current_user(request, authorization)
+
+    # ✅ Only teacher allowed
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
 
-    assignment = await db.student_teacher_assignments.find_one({"assignment_id": approval.assignment_id}, {"_id": 0})
+    # ✅ Fetch assignment
+    assignment = await db.student_teacher_assignments.find_one(
+        {"assignment_id": approval.assignment_id},
+        {"_id": 0}
+    )
+
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
-    if assignment['teacher_id'] != user.user_id:
+
+    # ✅ Check ownership
+    if assignment["teacher_id"] != user.user_id:
         raise HTTPException(status_code=403, detail="Not your assignment")
-    if assignment['status'] != "pending":
+
+    # ✅ Already processed
+    if assignment["status"] != "pending":
         raise HTTPException(status_code=400, detail="Assignment already processed")
 
-    expires_at = datetime.fromisoformat(assignment['expires_at'])
+    # ✅ Expiry check
+    expires_at = datetime.fromisoformat(assignment["expires_at"])
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
+
     if datetime.now(timezone.utc) > expires_at:
         await db.student_teacher_assignments.update_one(
-            {"assignment_id": approval.assignment_id}, {"$set": {"status": "expired"}}
+            {"assignment_id": approval.assignment_id},
+            {"$set": {"status": "expired"}}
         )
         raise HTTPException(status_code=400, detail="Assignment expired")
 
-    new_status = "approved" if approval.approved else "rejected"
-    await db.student_teacher_assignments.update_one(
-        {"assignment_id": approval.assignment_id},
-        {"$set": {"status": new_status, "approved_at": datetime.now(timezone.utc).isoformat()}}
-    )
-
+    # =========================
+    # ✅ APPROVE FLOW
+    # =========================
     if approval.approved:
+        await db.student_teacher_assignments.update_one(
+            {"assignment_id": approval.assignment_id},
+            {
+                "$set": {
+                    "status": "approved",
+                    "payment_status": "pending",
+                    "approved_at": datetime.now(timezone.utc).isoformat()
+                }
+            }
+        )
+
+        # 🔔 Notify student
         await db.notifications.insert_one({
             "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
-            "user_id": assignment["student_id"], "type": "assignment_approved",
+            "user_id": assignment["student_id"],
+            "type": "assignment_approved",
             "title": "Teacher Accepted!",
             "message": f"Teacher {user.name} has accepted your enrollment. Classes will be charged when scheduled.",
-            "read": False, "created_at": datetime.now(timezone.utc).isoformat()
+            "read": False,
+            "created_at": datetime.now(timezone.utc).isoformat()
         })
 
-    action = "approved" if approval.approved else "rejected"
-    return {"message": f"Student assignment {action}"}
+        action = "approved"
 
+    # =========================
+    # ❌ REJECT FLOW
+    # =========================
+    else:
+        await db.student_teacher_assignments.update_one(
+            {"assignment_id": approval.assignment_id},
+            {
+                "$set": {
+                    "status": "rejected",
+                    "approved_at": datetime.now(timezone.utc).isoformat()
+                }
+            }
+        )
+
+        action = "rejected"
+
+    # ✅ Final response
+    return {"message": f"Student assignment {action}"}
 
 @router.post("/teacher/cancel-class/{class_id}")
 async def teacher_cancel_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):

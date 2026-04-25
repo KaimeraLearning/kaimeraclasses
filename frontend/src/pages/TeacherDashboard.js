@@ -175,17 +175,38 @@ const TeacherDashboard = () => {
   };
 
   const handleSubmitProof = async () => {
-    try {
-      const res = await fetch(`${API}/teacher/submit-proof`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ class_id: proofClass.class_id, ...proofForm })
-      });
-      if (!res.ok) throw new Error(await getApiError(res));
-      toast.success('Proof submitted!');
-      setShowProofDialog(false); setProofClass(null);
-      setProofForm({ feedback_text: '', student_performance: 'good', topics_covered: '', screenshot_base64: '' });
-    } catch (err) { toast.error(err.message); }
-  };
+  try {
+    const res = await fetch(`${API}/teacher/submit-proof`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        class_id: proofClass.class_id,
+        ...proofForm
+      })
+    });
+
+    if (!res.ok) throw new Error(await getApiError(res));
+
+    toast.success('Proof submitted!');
+
+    // ✅ CLOSE + RESET
+    setShowProofDialog(false);
+    setProofClass(null);
+    setProofForm({
+      feedback_text: '',
+      student_performance: 'good',
+      topics_covered: '',
+      screenshot_base64: ''
+    });
+
+    // ✅ THIS IS THE IMPORTANT LINE
+    await fetchDashboardData();
+
+  } catch (err) {
+    toast.error(err.message);
+  }
+};
 
   const handleSendFeedback = async () => {
     if (!feedbackForm.feedback_text) { toast.error('Please enter feedback'); return; }
@@ -473,19 +494,42 @@ const TeacherDashboard = () => {
                       <div>
                         <p className="font-semibold text-slate-900 text-sm">{s.student_name}</p>
                         <p className="text-xs text-slate-500">{s.student_email}</p>
+                        {s.payment_status !== 'paid' && (
+                          <p className="text-xs text-amber-600 font-semibold mt-1">
+                            Waiting for Payment
+                          </p>
+                        )}
+
+                        {s.payment_status === 'paid' && (
+                          <p className="text-xs text-emerald-600 font-semibold mt-1">
+                            Payment Completed
+                          </p>
+                        )}
                         {s.counselor_name && (
                           <p className="text-xs text-slate-400 mt-0.5">Assigned by: <button onClick={() => openProfile(s.counselor_id, 'counsellor')} className="text-violet-600 hover:underline font-semibold cursor-pointer" data-testid={`view-counselor-${s.counselor_id}`}>{s.counselor_name}</button></p>
                         )}
                       </div>
                     </div>
                     <div className="flex gap-1.5 flex-wrap">
-                      <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'present')} variant="outline" className="rounded-full text-xs h-7 px-2" data-testid={`mark-present-${s.student_id}`} title="Mark Present Today">
-                        <CheckCircle className="w-3 h-3 text-emerald-500 mr-1" /> Present
-                      </Button>
-                      <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'absent')} variant="outline" className="rounded-full text-xs h-7 px-2" data-testid={`mark-absent-${s.student_id}`} title="Mark Absent Today">
-                        <XCircle className="w-3 h-3 text-red-500 mr-1" /> Absent
-                      </Button>
-                      <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs h-7 px-2"><MessageSquare className="w-3 h-3 mr-1" /> Feedback</Button>
+                      {s.payment_status === 'paid' ? (
+                        <>
+                          <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'present')} variant="outline" className="rounded-full text-xs h-7 px-2">
+                            <CheckCircle className="w-3 h-3 text-emerald-500 mr-1" /> Present
+                          </Button>
+
+                          <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'absent')} variant="outline" className="rounded-full text-xs h-7 px-2">
+                            <XCircle className="w-3 h-3 text-red-500 mr-1" /> Absent
+                          </Button>
+
+                          <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs h-7 px-2">
+                            <MessageSquare className="w-3 h-3 mr-1" /> Feedback
+                          </Button>
+                        </>
+                      ) : (
+                        <Button disabled className="rounded-full text-xs h-7 px-3 bg-amber-100 text-amber-700">
+                          Waiting for Payment
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -515,10 +559,12 @@ const TeacherDashboard = () => {
                 const student = (dashboardData?.approved_students || []).find(s => s.student_id === sid);
                 const days = student?.assigned_days || classForm.duration_days;
                 setClassForm({...classForm, assigned_student_id: sid, duration_days: days});
-              }}
+                }}
                 className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" data-testid="class-student-select">
                 <option value="">Select student...</option>
-                {(dashboardData?.approved_students || []).map(s => <option key={s.student_id} value={s.student_id}>{s.student_name} {s.assigned_days ? `(${s.assigned_days} days assigned)` : ''}</option>)}
+                {(dashboardData?.approved_students || [])
+                  .filter(s => s.payment_status === 'paid')   // ✅ IMPORTANT
+                  .map(s => <option key={s.student_id} value={s.student_id}>{s.student_name} {s.assigned_days ? `(${s.assigned_days} days assigned)` : ''}</option>)}
               </select>
             </div>
             <div className="grid grid-cols-3 gap-3">
