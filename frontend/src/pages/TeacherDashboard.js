@@ -176,7 +176,7 @@ const TeacherDashboard = () => {
 
   const handleSubmitProof = async () => {
     try {
-      const res = await fetch(`${API}/proofs/submit`, {
+      const res = await fetch(`${API}/teacher/submit-proof`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ class_id: proofClass.class_id, ...proofForm })
       });

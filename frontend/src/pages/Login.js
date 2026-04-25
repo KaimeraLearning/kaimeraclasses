@@ -167,7 +167,7 @@ const Login = () => {
             <div className="w-12 h-12 bg-sky-500 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-500/30">
               <GraduationCap className="w-7 h-7 text-white" />
             </div>
-            <h1 className="text-3xl font-black text-white tracking-tight">Kaimera</h1>
+            <h1 className="text-3xl font-black text-white tracking-tight">Kaimera Learning</h1>
           </div>
           <p className="text-sky-300 text-sm font-medium">Learning Management Platform</p>
         </div>
