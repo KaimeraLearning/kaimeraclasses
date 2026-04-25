@@ -97,12 +97,19 @@ async def get_transactions(request: Request, authorization: Optional[str] = Head
             query["user_id"] = {"$in": user_ids_search}
 
     transactions = await db.transactions.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+
+    # Batch fetch all users referenced in transactions (fixes N+1 query)
+    unique_user_ids = list(set(txn.get("user_id") for txn in transactions if txn.get("user_id")))
     user_cache = {}
+    if unique_user_ids:
+        users_batch = await db.users.find(
+            {"user_id": {"$in": unique_user_ids}},
+            {"_id": 0, "user_id": 1, "name": 1, "role": 1, "student_code": 1, "teacher_code": 1, "email": 1}
+        ).to_list(len(unique_user_ids))
+        user_cache = {u["user_id"]: u for u in users_batch}
+
     for txn in transactions:
         uid = txn.get("user_id")
-        if uid and uid not in user_cache:
-            u = await db.users.find_one({"user_id": uid}, {"_id": 0, "name": 1, "role": 1, "student_code": 1, "teacher_code": 1, "email": 1})
-            user_cache[uid] = u or {}
         info = user_cache.get(uid, {})
         txn["user_name"] = info.get("name", "Unknown")
         txn["user_role"] = info.get("role", "")

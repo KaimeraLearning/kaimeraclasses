@@ -27,7 +27,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from './components/ui/sonner';
 import './App.css';
 
-const GOOGLE_CLIENT_ID = '1086041821628-cabtce6ljeocgloi858mbe7tuecqjl3b.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
 function AppRouter() {
   return (
