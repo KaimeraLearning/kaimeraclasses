@@ -132,10 +132,20 @@ class StudentTeacherAssignment(BaseModel):
 class AssignStudentToTeacher(BaseModel):
     student_id: str
     teacher_id: str
+    learning_plan_id: Optional[str] = None
     class_frequency: Optional[str] = None
     specific_days: Optional[str] = None
     demo_performance_notes: Optional[str] = None
-    assigned_days: Optional[int] = None  # Number of class days counsellor sets
+    assigned_days: Optional[int] = None
+
+
+class LearningPlan(BaseModel):
+    plan_id: Optional[str] = None
+    name: str
+    price: float
+    details: str  # Syllabus / description
+    is_active: bool = True
+    created_at: Optional[str] = None
 
 
 class TeacherApprovalRequest(BaseModel):

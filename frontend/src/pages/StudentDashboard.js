@@ -5,9 +5,10 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Calendar, CreditCard, BookOpen, Play, MessageSquare, Bell, AlertCircle, Lock, Star, Clock, User, XCircle } from 'lucide-react';
+import { GraduationCap, LogOut, Calendar, CreditCard, BookOpen, Play, MessageSquare, Bell, AlertCircle, Lock, Star, Clock, User, XCircle, IndianRupee, Download, CheckCircle } from 'lucide-react';
 import { getApiError } from '../utils/api';
 import { ViewProfilePopup } from '../components/ViewProfilePopup';
+import { useRazorpay } from 'react-razorpay';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND}/api`;
@@ -34,6 +35,11 @@ const StudentDashboard = () => {
   const [viewProfileOpen, setViewProfileOpen] = useState(false);
   const [viewProfileUserId, setViewProfileUserId] = useState(null);
   const [viewProfileRole, setViewProfileRole] = useState(null);
+  const [assignments, setAssignments] = useState([]);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const { Razorpay: RazorpayCheckout } = useRazorpay();
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [showAttendanceDialog, setShowAttendanceDialog] = useState(false);
 
   const openProfile = (userId, role) => { setViewProfileUserId(userId); setViewProfileRole(role); setViewProfileOpen(true); };
 
@@ -66,6 +72,7 @@ const StudentDashboard = () => {
         setUpcomingClasses(d.upcoming_classes || []);
         setCompletedClasses(d.completed_classes || []);
         setPendingRating(d.pending_rating || []);
+        setAssignments(d.assignments || []);
       }
       if (notifRes.ok) setNotifications(await notifRes.json());
       if (enrollRes.ok) setEnrollment(await enrollRes.json());
@@ -77,6 +84,55 @@ const StudentDashboard = () => {
   const handleLogout = async () => { await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' }); navigate('/login'); };
   const handleMarkAllRead = async () => { await fetch(`${API}/notifications/mark-all-read`, { method: 'POST', credentials: 'include' }); fetchData(); };
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  const fetchAttendance = async () => {
+    try {
+      const res = await fetch(`${API}/attendance/student`, { credentials: 'include' });
+      if (res.ok) { setAttendanceRecords(await res.json()); setShowAttendanceDialog(true); }
+    } catch {}
+  };
+
+  const handlePayNow = async (assignmentId) => {
+    setPaymentLoading(true);
+    try {
+      const res = await fetch(`${API}/payments/create-order`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignment_id: assignmentId })
+      });
+      if (!res.ok) throw new Error(await getApiError(res));
+      const data = await res.json();
+
+      const options = {
+        key: data.key_id,
+        amount: data.amount,
+        currency: data.currency,
+        order_id: data.order_id,
+        name: 'Kaimera Learning',
+        description: 'Learning Plan Payment',
+        prefill: { name: data.student_name, email: data.student_email },
+        handler: async (response) => {
+          try {
+            const verifyRes = await fetch(`${API}/payments/verify`, {
+              method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature
+              })
+            });
+            if (!verifyRes.ok) throw new Error(await getApiError(verifyRes));
+            toast.success('Payment successful! Your classes will begin soon.');
+            fetchData();
+          } catch (err) { toast.error('Payment verification failed: ' + err.message); }
+        },
+        theme: { color: '#0ea5e9' }
+      };
+
+      const rzp = new RazorpayCheckout(options);
+      rzp.open();
+    } catch (err) { toast.error(err.message); }
+    finally { setPaymentLoading(false); }
+  };
 
   const handleUpdateProfile = async () => {
     try {
@@ -171,6 +227,7 @@ const StudentDashboard = () => {
               <Button onClick={() => setShowProfileDialog(true)} variant="outline" className="rounded-full px-6 py-6" data-testid="edit-profile-button"><User className="w-4 h-4 mr-2" /> My Profile</Button>
               <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full px-6 py-6" data-testid="wallet-button"><CreditCard className="w-4 h-4 mr-2" /> Wallet</Button>
               <Button onClick={() => navigate('/chat')} variant="outline" className="rounded-full px-6 py-6" data-testid="chat-button"><MessageSquare className="w-4 h-4 mr-2" /> Chat</Button>
+              <Button onClick={fetchAttendance} variant="outline" className="rounded-full px-6 py-6" data-testid="attendance-history-btn"><Calendar className="w-4 h-4 mr-2" /> Attendance</Button>
             </div>
           </div>
 
@@ -281,6 +338,46 @@ const StudentDashboard = () => {
           <Button onClick={() => navigate('/chat')} variant="outline" className="rounded-full" data-testid="chat-button"><MessageSquare className="w-4 h-4 mr-2" /> Chat</Button>
           <Button onClick={() => setShowFeedbackDialog(true)} variant="outline" className="rounded-full" data-testid="feedback-button"><Star className="w-4 h-4 mr-2" /> Demo Feedback</Button>
         </div>
+
+        {/* ═══ UNPAID ASSIGNMENTS ═══ */}
+        {assignments.filter(a => a.payment_status !== 'paid').length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-bold text-orange-700 mb-4 flex items-center gap-2"><IndianRupee className="w-5 h-5 text-orange-500" /> Payment Required ({assignments.filter(a => a.payment_status !== 'paid').length})</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {assignments.filter(a => a.payment_status !== 'paid').map(a => (
+                <div key={a.assignment_id} className="bg-white rounded-2xl border-2 border-orange-300 p-5 shadow-sm" data-testid={`unpaid-assignment-${a.assignment_id}`}>
+                  <div className="flex gap-2 mb-2">
+                    <span className="bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full text-xs font-semibold">UNPAID</span>
+                    {a.learning_plan_name && <span className="bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full text-xs">{a.learning_plan_name}</span>}
+                  </div>
+                  <h3 className="font-bold text-slate-900 mb-1">Assignment with {a.teacher_name}</h3>
+                  <p className="text-xs text-slate-600 mb-1">Plan: {a.learning_plan_name || 'Standard'}</p>
+                  <p className="text-2xl font-black text-orange-600 mb-3">&#8377;{a.learning_plan_price || a.credit_price}</p>
+                  <Button onClick={() => handlePayNow(a.assignment_id)} disabled={paymentLoading}
+                    className="w-full bg-orange-500 hover:bg-orange-600 text-white rounded-full font-bold h-12" data-testid={`pay-now-${a.assignment_id}`}>
+                    <IndianRupee className="w-4 h-4 mr-2" /> Pay Now
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ═══ PAID ASSIGNMENTS ═══ */}
+        {assignments.filter(a => a.payment_status === 'paid').length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-lg font-bold text-emerald-700 mb-3 flex items-center gap-2"><CheckCircle className="w-5 h-5 text-emerald-500" /> Active Enrollments</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {assignments.filter(a => a.payment_status === 'paid').map(a => (
+                <div key={a.assignment_id} className="bg-emerald-50 rounded-2xl border border-emerald-200 p-4" data-testid={`paid-assignment-${a.assignment_id}`}>
+                  <p className="font-semibold text-slate-900 text-sm">{a.teacher_name}</p>
+                  <p className="text-xs text-emerald-700">{a.learning_plan_name || 'Standard Plan'}</p>
+                  <p className="text-xs text-slate-500 mt-1">Paid &#8377;{a.learning_plan_price || a.credit_price}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ═══ LIVE CLASSES ═══ */}
         {liveClasses.length > 0 && (
@@ -423,6 +520,38 @@ const StudentDashboard = () => {
       {renderProfileDialog()}
       {renderNotifDialog()}
       <ViewProfilePopup open={viewProfileOpen} onOpenChange={setViewProfileOpen} userId={viewProfileUserId} userRole={viewProfileRole} />
+
+      {/* Attendance Dialog */}
+      <Dialog open={showAttendanceDialog} onOpenChange={setShowAttendanceDialog}>
+        <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Calendar className="w-5 h-5 text-sky-500" /> My Attendance History</DialogTitle></DialogHeader>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="text-left p-2 text-xs text-slate-500">Date</th>
+                  <th className="text-left p-2 text-xs text-slate-500">Teacher</th>
+                  <th className="text-center p-2 text-xs text-slate-500">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attendanceRecords.map((r, i) => (
+                  <tr key={i} className="border-b border-slate-100">
+                    <td className="p-2 text-xs">{r.date}</td>
+                    <td className="p-2 text-xs font-semibold">{r.teacher_name}</td>
+                    <td className="p-2 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${r.status === 'present' ? 'bg-emerald-100 text-emerald-700' : r.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
+                    </td>
+                  </tr>
+                ))}
+                {attendanceRecords.length === 0 && (
+                  <tr><td colSpan="3" className="text-center p-8 text-slate-400">No attendance records yet</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 

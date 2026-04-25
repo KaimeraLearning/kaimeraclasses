@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle, XCircle, CheckCircle, Clock, Camera } from 'lucide-react';
+import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle, XCircle, CheckCircle, Clock, Camera, CalendarCheck } from 'lucide-react';
 import { getApiError } from '../utils/api';
 import { ViewProfilePopup } from '../components/ViewProfilePopup';
 
@@ -42,6 +42,8 @@ const TeacherDashboard = () => {
   const [viewProfileOpen, setViewProfileOpen] = useState(false);
   const [viewProfileUserId, setViewProfileUserId] = useState(null);
   const [viewProfileRole, setViewProfileRole] = useState(null);
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [showAttendanceDialog, setShowAttendanceDialog] = useState(false);
 
   const openProfile = (userId, role) => { setViewProfileUserId(userId); setViewProfileRole(role); setViewProfileOpen(true); };
 
@@ -98,6 +100,25 @@ const TeacherDashboard = () => {
       const res = await fetch(`${API}/teacher/my-rating`, { credentials: 'include' });
       if (res.ok) setRatingData(await res.json());
     } catch {}
+  };
+
+  const fetchAttendance = async () => {
+    try {
+      const res = await fetch(`${API}/attendance/teacher`, { credentials: 'include' });
+      if (res.ok) { setAttendanceRecords(await res.json()); setShowAttendanceDialog(true); }
+    } catch {}
+  };
+
+  const markAttendance = async (studentId, date, status) => {
+    try {
+      const res = await fetch(`${API}/attendance/mark`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ student_id: studentId, date, status })
+      });
+      if (!res.ok) throw new Error(await getApiError(res));
+      toast.success(`Attendance marked as ${status}`);
+      fetchAttendance();
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleCreateClass = async () => {
@@ -440,19 +461,32 @@ const TeacherDashboard = () => {
         {/* My Students */}
         {dashboardData?.approved_students?.length > 0 && (
           <div className="mb-8">
-            <h2 className="text-lg font-bold text-slate-900 mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-sky-500" /> My Students</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Users className="w-5 h-5 text-sky-500" /> My Students</h2>
+              <Button variant="outline" onClick={fetchAttendance} className="rounded-full text-xs" data-testid="view-attendance-btn"><CalendarCheck className="w-3.5 h-3.5 mr-1" /> Attendance History</Button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {dashboardData.approved_students.map(s => (
                 <div key={s.assignment_id} className="bg-white rounded-xl border border-slate-200 p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-slate-900 text-sm">{s.student_name}</p>
-                      <p className="text-xs text-slate-500">{s.student_email}</p>
-                      {s.counselor_name && (
-                        <p className="text-xs text-slate-400 mt-0.5">Assigned by: <button onClick={() => openProfile(s.counselor_id, 'counsellor')} className="text-violet-600 hover:underline font-semibold cursor-pointer" data-testid={`view-counselor-${s.counselor_id}`}>{s.counselor_name}</button></p>
-                      )}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className="font-semibold text-slate-900 text-sm">{s.student_name}</p>
+                        <p className="text-xs text-slate-500">{s.student_email}</p>
+                        {s.counselor_name && (
+                          <p className="text-xs text-slate-400 mt-0.5">Assigned by: <button onClick={() => openProfile(s.counselor_id, 'counsellor')} className="text-violet-600 hover:underline font-semibold cursor-pointer" data-testid={`view-counselor-${s.counselor_id}`}>{s.counselor_name}</button></p>
+                        )}
+                      </div>
                     </div>
-                    <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs"><MessageSquare className="w-3 h-3 mr-1" /> Feedback</Button>
+                    <div className="flex gap-1.5 flex-wrap">
+                      <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'present')} variant="outline" className="rounded-full text-xs h-7 px-2" data-testid={`mark-present-${s.student_id}`} title="Mark Present Today">
+                        <CheckCircle className="w-3 h-3 text-emerald-500 mr-1" /> Present
+                      </Button>
+                      <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'absent')} variant="outline" className="rounded-full text-xs h-7 px-2" data-testid={`mark-absent-${s.student_id}`} title="Mark Absent Today">
+                        <XCircle className="w-3 h-3 text-red-500 mr-1" /> Absent
+                      </Button>
+                      <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs h-7 px-2"><MessageSquare className="w-3 h-3 mr-1" /> Feedback</Button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -680,6 +714,38 @@ const TeacherDashboard = () => {
       </Dialog>
 
       <ViewProfilePopup open={viewProfileOpen} onOpenChange={setViewProfileOpen} userId={viewProfileUserId} userRole={viewProfileRole} />
+
+      {/* Attendance History Dialog */}
+      <Dialog open={showAttendanceDialog} onOpenChange={setShowAttendanceDialog}>
+        <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><CalendarCheck className="w-5 h-5 text-sky-500" /> Attendance History</DialogTitle></DialogHeader>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="text-left p-2 text-xs text-slate-500">Date</th>
+                  <th className="text-left p-2 text-xs text-slate-500">Student</th>
+                  <th className="text-center p-2 text-xs text-slate-500">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attendanceRecords.map((r, i) => (
+                  <tr key={i} className="border-b border-slate-100">
+                    <td className="p-2 text-xs">{r.date}</td>
+                    <td className="p-2 text-xs font-semibold">{r.student_name}</td>
+                    <td className="p-2 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${r.status === 'present' ? 'bg-emerald-100 text-emerald-700' : r.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
+                    </td>
+                  </tr>
+                ))}
+                {attendanceRecords.length === 0 && (
+                  <tr><td colSpan="3" className="text-center p-8 text-slate-400">No attendance records yet</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

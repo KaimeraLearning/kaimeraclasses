@@ -62,13 +62,19 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
         else:
             completed.append(cls)
 
+    # Get student assignments with payment status
+    assignments = await db.student_teacher_assignments.find(
+        {"student_id": user.user_id, "status": "approved"}, {"_id": 0}
+    ).to_list(100)
+
     return {
         "credits": user.credits,
         "live_classes": live_classes,
         "upcoming_classes": upcoming,
         "completed_classes": completed,
         "pending_rating": pending_rating,
-        "past_classes": completed + pending_rating  # backward compat
+        "past_classes": completed + pending_rating,
+        "assignments": assignments
     }
 
 

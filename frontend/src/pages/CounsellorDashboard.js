@@ -44,8 +44,10 @@ const CounsellorDashboard = () => {
   const [pageExpired, setPageExpired] = useState(1);
   const PER_PAGE = 10;
   const [minRatingFilter, setMinRatingFilter] = useState(0);
+  const [learningPlans, setLearningPlans] = useState([]);
+  const [selectedPlanId, setSelectedPlanId] = useState('');
 
-  useEffect(() => { fetchDashboardData(); }, []);
+  useEffect(() => { fetchDashboardData(); fetchLearningPlans(); }, []);
 
   // Auto-refresh on tab focus
   useEffect(() => {
@@ -93,9 +95,20 @@ const CounsellorDashboard = () => {
     }
   };
 
+  const fetchLearningPlans = async () => {
+    try {
+      const res = await fetch(`${API}/admin/learning-plans`, { credentials: 'include' });
+      if (res.ok) setLearningPlans(await res.json());
+    } catch {}
+  };
+
   const handleAssignStudent = async () => {
     if (!selectedTeacherForAssign) {
       toast.error('Please select a teacher');
+      return;
+    }
+    if (!selectedPlanId) {
+      toast.error('Please select a learning plan');
       return;
     }
     try {
@@ -106,6 +119,7 @@ const CounsellorDashboard = () => {
         body: JSON.stringify({
           student_id: selectedStudent.user_id,
           teacher_id: selectedTeacherForAssign,
+          learning_plan_id: selectedPlanId || null,
           class_frequency: assignFrequency || null,
           specific_days: assignDays || null,
           demo_performance_notes: assignDemoNotes || null,
@@ -117,6 +131,7 @@ const CounsellorDashboard = () => {
       setShowAssignDialog(false);
       setSelectedStudent(null);
       setSelectedTeacherForAssign('');
+      setSelectedPlanId('');
       setAssignFrequency('');
       setAssignDays('');
       setAssignDemoNotes('');
@@ -555,6 +570,21 @@ const CounsellorDashboard = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <Label className="flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5 text-amber-500" /> Learning Plan *</Label>
+                <select value={selectedPlanId} onChange={e => setSelectedPlanId(e.target.value)}
+                  className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="learning-plan-select">
+                  <option value="">Choose a learning plan...</option>
+                  {learningPlans.map(p => (
+                    <option key={p.plan_id} value={p.plan_id}>
+                      {p.name} - &#8377;{p.price}
+                    </option>
+                  ))}
+                </select>
+                {selectedPlanId && learningPlans.find(p => p.plan_id === selectedPlanId) && (
+                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">{learningPlans.find(p => p.plan_id === selectedPlanId)?.details}</p>
+                )}
               </div>
               <div>
                 <Label className="flex items-center gap-1.5"><Repeat className="w-3.5 h-3.5 text-sky-500" /> Class Frequency</Label>

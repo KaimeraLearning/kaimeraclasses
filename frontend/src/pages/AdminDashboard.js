@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import {
   GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap,
   History, Search, Shield, Award, Filter, BookOpen, KeyRound, Users, Trash2, Plus,
-  Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil
+  Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil, IndianRupee, Download
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { getApiError } from '../utils/api';
@@ -107,6 +107,18 @@ const AdminDashboard = () => {
   const [editingStudent, setEditingStudent] = useState(false);
   const [editForm, setEditForm] = useState({});
 
+  // Learning Plans
+  const [learningPlans, setLearningPlans] = useState([]);
+  const [planForm, setPlanForm] = useState({ name: '', price: '', details: '' });
+  const [editingPlan, setEditingPlan] = useState(null);
+
+  // Razorpay Payments
+  const [razorpayPayments, setRazorpayPayments] = useState([]);
+  const [razorpayTotal, setRazorpayTotal] = useState(0);
+  const [rpFilterName, setRpFilterName] = useState('');
+  const [rpFilterFrom, setRpFilterFrom] = useState('');
+  const [rpFilterTo, setRpFilterTo] = useState('');
+
   useEffect(() => { fetchAll(); }, []);
 
   const fetchAll = async () => {
@@ -137,6 +149,56 @@ const AdminDashboard = () => {
   };
 
   // ─── Handlers ───
+
+  const fetchLearningPlans = async () => {
+    try {
+      const res = await fetch(`${API}/admin/learning-plans`, { credentials: 'include' });
+      if (res.ok) setLearningPlans(await res.json());
+    } catch {}
+  };
+
+  const handleSavePlan = async (e) => {
+    e.preventDefault();
+    if (!planForm.name || !planForm.price || !planForm.details) { toast.error('All fields required'); return; }
+    try {
+      const url = editingPlan ? `${API}/admin/learning-plans/${editingPlan}` : `${API}/admin/learning-plans`;
+      const method = editingPlan ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method, credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: planForm.name, price: parseFloat(planForm.price), details: planForm.details })
+      });
+      if (!res.ok) throw new Error(await getApiError(res));
+      toast.success(editingPlan ? 'Plan updated' : 'Plan created');
+      setPlanForm({ name: '', price: '', details: '' });
+      setEditingPlan(null);
+      fetchLearningPlans();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const handleDeletePlan = async (planId) => {
+    if (!window.confirm('Deactivate this learning plan?')) return;
+    try {
+      const res = await fetch(`${API}/admin/learning-plans/${planId}`, { method: 'DELETE', credentials: 'include' });
+      if (!res.ok) throw new Error(await getApiError(res));
+      toast.success('Plan deactivated');
+      fetchLearningPlans();
+    } catch (err) { toast.error(err.message); }
+  };
+
+  const fetchRazorpayPayments = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (rpFilterName) params.set('student_name', rpFilterName);
+      if (rpFilterFrom) params.set('date_from', rpFilterFrom);
+      if (rpFilterTo) params.set('date_to', rpFilterTo);
+      const res = await fetch(`${API}/admin/payments?${params}`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setRazorpayPayments(data.payments || []);
+        setRazorpayTotal(data.total_revenue || 0);
+      }
+    } catch {}
+  };
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
@@ -465,6 +527,7 @@ const AdminDashboard = () => {
         <Tabs value={mainTab} onValueChange={setMainTab} className="w-full">
           <TabsList className="mb-6 bg-white border-2 border-slate-100 rounded-2xl p-1.5 shadow-sm">
             <TabsTrigger value="users" className="rounded-xl px-6 data-[state=active]:bg-sky-500 data-[state=active]:text-white" data-testid="users-tab"><Users className="w-4 h-4 mr-2" /> User Management</TabsTrigger>
+            <TabsTrigger value="plans" className="rounded-xl px-6 data-[state=active]:bg-amber-500 data-[state=active]:text-white" data-testid="plans-tab" onClick={() => { if (learningPlans.length === 0) fetchLearningPlans(); }}><BookOpen className="w-4 h-4 mr-2" /> Learning Plans</TabsTrigger>
             <TabsTrigger value="financials" className="rounded-xl px-6 data-[state=active]:bg-emerald-500 data-[state=active]:text-white" data-testid="financials-tab"><CreditCard className="w-4 h-4 mr-2" /> Financials</TabsTrigger>
             <TabsTrigger value="reports" className="rounded-xl px-6 data-[state=active]:bg-violet-500 data-[state=active]:text-white" data-testid="reports-tab"><BarChart3 className="w-4 h-4 mr-2" /> Reports</TabsTrigger>
           </TabsList>
@@ -711,11 +774,71 @@ const AdminDashboard = () => {
             </Tabs>
           </TabsContent>
 
+          {/* ════════════════════════ LEARNING PLANS ════════════════════════ */}
+          <TabsContent value="plans">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Create/Edit Form */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+                <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2"><BookOpen className="w-5 h-5 text-amber-500" /> {editingPlan ? 'Edit Plan' : 'Create New Plan'}</h3>
+                <form onSubmit={handleSavePlan} className="space-y-3">
+                  <div>
+                    <Label className="text-xs text-slate-600 mb-1 block">Plan Name</Label>
+                    <Input value={planForm.name} onChange={e => setPlanForm({ ...planForm, name: e.target.value })} placeholder="e.g. Learning Plan 1" className="rounded-xl" data-testid="plan-name-input" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-slate-600 mb-1 block">Price (INR)</Label>
+                    <Input type="number" step="0.01" value={planForm.price} onChange={e => setPlanForm({ ...planForm, price: e.target.value })} placeholder="e.g. 5000" className="rounded-xl" data-testid="plan-price-input" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-slate-600 mb-1 block">Details / Syllabus</Label>
+                    <textarea value={planForm.details} onChange={e => setPlanForm({ ...planForm, details: e.target.value })} placeholder="Describe the syllabus, topics covered, duration..." className="w-full border border-slate-200 rounded-xl p-3 text-sm min-h-[120px] focus:outline-none focus:ring-2 focus:ring-amber-400" data-testid="plan-details-input" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit" className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold" data-testid="save-plan-btn">
+                      <Save className="w-4 h-4 mr-2" /> {editingPlan ? 'Update' : 'Create'}
+                    </Button>
+                    {editingPlan && (
+                      <Button type="button" variant="outline" onClick={() => { setEditingPlan(null); setPlanForm({ name: '', price: '', details: '' }); }} className="rounded-xl">Cancel</Button>
+                    )}
+                  </div>
+                </form>
+              </div>
+              {/* Plans List */}
+              <div className="lg:col-span-2">
+                <h3 className="font-bold text-slate-900 mb-4">Active Learning Plans ({learningPlans.length})</h3>
+                {learningPlans.length === 0 ? (
+                  <div className="bg-slate-50 rounded-2xl p-8 text-center text-slate-400">No learning plans yet. Create one to get started.</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {learningPlans.map(p => (
+                      <div key={p.plan_id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow" data-testid={`plan-card-${p.plan_id}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-bold text-slate-900">{p.name}</h4>
+                          <span className="text-lg font-black text-amber-600">&#8377;{p.price}</span>
+                        </div>
+                        <p className="text-sm text-slate-600 mb-4 whitespace-pre-wrap line-clamp-4">{p.details}</p>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" className="rounded-xl text-xs flex-1" onClick={() => { setEditingPlan(p.plan_id); setPlanForm({ name: p.name, price: p.price, details: p.details }); }} data-testid={`edit-plan-${p.plan_id}`}>
+                            <Pencil className="w-3 h-3 mr-1" /> Edit
+                          </Button>
+                          <Button variant="outline" size="sm" className="rounded-xl text-xs text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleDeletePlan(p.plan_id)} data-testid={`delete-plan-${p.plan_id}`}>
+                            <Trash2 className="w-3 h-3 mr-1" /> Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </TabsContent>
+
           {/* ════════════════════════ FINANCIALS ════════════════════════ */}
           <TabsContent value="financials">
             <Tabs defaultValue="ledger">
               <TabsList className="mb-4">
                 <TabsTrigger value="ledger" data-testid="ledger-tab">Transaction Ledger</TabsTrigger>
+                <TabsTrigger value="razorpay-payments" data-testid="razorpay-payments-tab" onClick={() => fetchRazorpayPayments()}><IndianRupee className="w-3.5 h-3.5 mr-1" /> Razorpay Payments</TabsTrigger>
                 <TabsTrigger value="proofs" data-testid="proofs-tab">Proofs & Approvals ({pendingProofs.length})</TabsTrigger>
                 <TabsTrigger value="pricing" data-testid="pricing-tab" onClick={() => { if (!pricingLoaded) fetchPricing(); }}><Settings className="w-3.5 h-3.5 mr-1.5" /> System Pricing</TabsTrigger>
               </TabsList>
@@ -804,6 +927,64 @@ const AdminDashboard = () => {
                       </table>
                     </div>
                   )}
+                </div>
+              </TabsContent>
+
+              {/* ── Razorpay Payments ── */}
+              <TabsContent value="razorpay-payments">
+                <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
+                  <div className="flex flex-wrap gap-3 items-end mb-4">
+                    <div className="flex-1 min-w-[200px]">
+                      <Label className="text-xs text-slate-500">Student Name</Label>
+                      <Input value={rpFilterName} onChange={e => setRpFilterName(e.target.value)} placeholder="Search by student name..." className="rounded-xl" data-testid="rp-filter-name" />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-slate-500">From</Label>
+                      <Input type="date" value={rpFilterFrom} onChange={e => setRpFilterFrom(e.target.value)} className="rounded-xl w-40" data-testid="rp-filter-from" />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-slate-500">To</Label>
+                      <Input type="date" value={rpFilterTo} onChange={e => setRpFilterTo(e.target.value)} className="rounded-xl w-40" data-testid="rp-filter-to" />
+                    </div>
+                    <Button onClick={fetchRazorpayPayments} className="bg-sky-500 text-white rounded-xl" data-testid="rp-apply-filter"><Filter className="w-4 h-4 mr-1" /> Apply</Button>
+                  </div>
+                  <div className="bg-emerald-50 rounded-2xl p-4 mb-4 flex items-center justify-between">
+                    <span className="text-sm text-emerald-800 font-semibold">Total Revenue (Paid)</span>
+                    <span className="text-2xl font-black text-emerald-700" data-testid="rp-total-revenue">&#8377;{razorpayTotal.toLocaleString()}</span>
+                  </div>
+                  <div className="overflow-x-auto max-h-[50vh] overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 sticky top-0">
+                        <tr>
+                          <th className="text-left p-2 text-xs text-slate-500">Date</th>
+                          <th className="text-left p-2 text-xs text-slate-500">Student</th>
+                          <th className="text-left p-2 text-xs text-slate-500">Teacher</th>
+                          <th className="text-left p-2 text-xs text-slate-500">Plan</th>
+                          <th className="text-right p-2 text-xs text-slate-500">Amount</th>
+                          <th className="text-center p-2 text-xs text-slate-500">Status</th>
+                          <th className="text-left p-2 text-xs text-slate-500">Receipt</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {razorpayPayments.map(p => (
+                          <tr key={p.payment_id} className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="p-2 text-xs">{p.created_at ? new Date(p.created_at).toLocaleDateString() : '-'}</td>
+                            <td className="p-2"><p className="font-semibold text-xs">{p.student_name}</p><p className="text-[10px] text-slate-400">{p.student_email}</p></td>
+                            <td className="p-2 text-xs">{p.teacher_name}</td>
+                            <td className="p-2 text-xs">{p.learning_plan_name || '-'}</td>
+                            <td className="p-2 text-right font-bold text-xs">&#8377;{p.amount}</td>
+                            <td className="p-2 text-center">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${p.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{p.status}</span>
+                            </td>
+                            <td className="p-2 text-xs font-mono">{p.receipt_id || '-'}</td>
+                          </tr>
+                        ))}
+                        {razorpayPayments.length === 0 && (
+                          <tr><td colSpan="7" className="text-center p-8 text-slate-400">No payments found</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </TabsContent>
 

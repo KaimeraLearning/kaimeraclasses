@@ -12,7 +12,8 @@ from database import db
 from models.schemas import (
     TeacherApproval, CreditAdjustment, AssignStudentToTeacher,
     SystemPricing, CreateTeacherAccount, CreateStudentAccount,
-    AdminProofApproval, BadgeAssign, DemoExtraGrant, ComplaintResolve
+    AdminProofApproval, BadgeAssign, DemoExtraGrant, ComplaintResolve,
+    LearningPlan
 )
 from services.auth import get_current_user, hash_password
 from services.helpers import generate_teacher_code, generate_student_code, send_email, generate_otp
@@ -185,8 +186,26 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
     if existing_active:
         raise HTTPException(status_code=400, detail=f"Student already assigned to {existing_active['teacher_name']}. Only one teacher per student allowed.")
 
+    # PROOF GUARDRAIL: Check if previous class has pending proof
+    prev_classes = await db.class_sessions.find(
+        {"assigned_student_id": assignment.student_id, "status": "completed", "verification_status": "pending"},
+        {"_id": 0, "class_id": 1, "title": 1, "teacher_id": 1}
+    ).to_list(100)
+    if prev_classes:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot assign: Proof of completion for the previous session is still pending from the Teacher."
+        )
+
+    # Lookup learning plan if provided
+    learning_plan = None
+    if assignment.learning_plan_id:
+        learning_plan = await db.learning_plans.find_one({"plan_id": assignment.learning_plan_id, "is_active": True}, {"_id": 0})
+        if not learning_plan:
+            raise HTTPException(status_code=400, detail="Selected learning plan not found or inactive")
+
     pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
-    credit_price = pricing.get("class_price_student", 0) if pricing else 0
+    credit_price = learning_plan['price'] if learning_plan else (pricing.get("class_price_student", 0) if pricing else 0)
 
     assignment_id = f"assign_{uuid.uuid4().hex[:12]}"
     assigned_at = datetime.now(timezone.utc)
@@ -197,9 +216,13 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         "student_name": student['name'], "student_email": student['email'],
         "teacher_id": assignment.teacher_id, "teacher_name": teacher['name'],
         "teacher_email": teacher['email'], "status": "pending",
+        "payment_status": "unpaid",
         "credit_price": credit_price, "assigned_at": assigned_at.isoformat(),
         "approved_at": None, "expires_at": expires_at.isoformat(),
         "assigned_by": user.user_id,
+        "learning_plan_id": assignment.learning_plan_id,
+        "learning_plan_name": learning_plan['name'] if learning_plan else None,
+        "learning_plan_price": learning_plan['price'] if learning_plan else None,
         "class_frequency": assignment.class_frequency if hasattr(assignment, 'class_frequency') else None,
         "specific_days": assignment.specific_days if hasattr(assignment, 'specific_days') else None,
         "demo_performance_notes": assignment.demo_performance_notes if hasattr(assignment, 'demo_performance_notes') else None,
@@ -418,6 +441,57 @@ async def get_system_pricing(request: Request, authorization: Optional[str] = He
     if isinstance(pricing.get('updated_at'), str):
         pricing['updated_at'] = datetime.fromisoformat(pricing['updated_at'])
     return pricing
+
+
+# ─── Learning Plans CRUD ───
+
+@router.post("/admin/learning-plans")
+async def create_learning_plan(plan: LearningPlan, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    plan_id = f"plan_{uuid.uuid4().hex[:12]}"
+    plan_doc = {
+        "plan_id": plan_id, "name": plan.name, "price": plan.price,
+        "details": plan.details, "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user.user_id
+    }
+    await db.learning_plans.insert_one(plan_doc)
+    return {"message": "Learning plan created", "plan_id": plan_id}
+
+
+@router.get("/admin/learning-plans")
+async def list_learning_plans(request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    plans = await db.learning_plans.find({"is_active": True}, {"_id": 0}).to_list(100)
+    return plans
+
+
+@router.put("/admin/learning-plans/{plan_id}")
+async def update_learning_plan(plan_id: str, plan: LearningPlan, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    existing = await db.learning_plans.find_one({"plan_id": plan_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    await db.learning_plans.update_one(
+        {"plan_id": plan_id},
+        {"$set": {"name": plan.name, "price": plan.price, "details": plan.details}}
+    )
+    return {"message": "Learning plan updated"}
+
+
+@router.delete("/admin/learning-plans/{plan_id}")
+async def delete_learning_plan(plan_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    await db.learning_plans.update_one({"plan_id": plan_id}, {"$set": {"is_active": False}})
+    return {"message": "Learning plan deactivated"}
 
 
 @router.get("/admin/teacher-ratings")

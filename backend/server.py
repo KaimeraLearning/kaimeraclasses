@@ -22,6 +22,7 @@ from routes.counsellor import router as counsellor_router
 from routes.demo import router as demo_router
 from routes.payments import router as payments_router
 from routes.general import router as general_router
+from routes.attendance import router as attendance_router
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -53,6 +54,7 @@ app.include_router(counsellor_router, prefix="/api")
 app.include_router(demo_router, prefix="/api")
 app.include_router(payments_router, prefix="/api")
 app.include_router(general_router, prefix="/api")
+app.include_router(attendance_router, prefix="/api")
 
 
 @app.on_event("startup")
