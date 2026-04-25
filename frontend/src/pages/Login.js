@@ -6,7 +6,6 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
 import { GraduationCap, Mail, Lock, User, Phone, MapPin, BookOpen, ArrowLeft, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
-import { getApiError } from '../utils/api';
 
 const BACKEND = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND}/api`;
@@ -39,7 +38,7 @@ const Login = () => {
       if (data.needs_verification) {
         setVerifyEmail(data.email);
         setMode('verify-account');
-        toast.info('Account not verified. Please enter the OTP sent to your email.');
+        toast.info('Account not verified. Enter OTP.');
         return;
       }
 
@@ -47,13 +46,17 @@ const Login = () => {
       localStorage.setItem('user', JSON.stringify(data.user));
       toast.success(`Welcome back, ${data.user.name}!`);
       redirectByRole(data.user.role);
-    } catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
+    } catch (err) {
+      toast.error(err.message || 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleGoogleLogin = async (credentialResponse) => {
     setLoading(true);
     try {
+      if (!credentialResponse?.credential) throw new Error('Google credential not received');
       const res = await fetch(`${API}/auth/google`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -66,8 +69,11 @@ const Login = () => {
       localStorage.setItem('user', JSON.stringify(data.user));
       toast.success(`Welcome, ${data.user.name}!`);
       redirectByRole(data.user.role);
-    } catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
+    } catch (err) {
+      toast.error(err.message || 'Google login failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSendOtp = async () => {

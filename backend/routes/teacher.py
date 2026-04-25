@@ -99,22 +99,12 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         else:
             conducted_classes.append(cls)
 
-pending_assignments = await db.student_teacher_assignments.find(
-    {"teacher_id": user.user_id, "status": "pending"},
-    {"_id": 0}
-).to_list(1000)
-
-approved_students = await db.student_teacher_assignments.find(
-    {
-        "teacher_id": user.user_id,
-        "status": "approved",
-        "$or": [
-            {"payment_status": {"$in": ["pending", "paid"]}},
-            {"payment_status": {"$exists": False}}
-        ]
-    },
-    {"_id": 0}
-).to_list(1000)
+    pending_assignments = await db.student_teacher_assignments.find(
+        {"teacher_id": user.user_id, "status": "pending"}, {"_id": 0}
+    ).to_list(1000)
+    approved_students = await db.student_teacher_assignments.find(
+        {"teacher_id": user.user_id, "status": "approved", "payment_status": "paid"}, {"_id": 0}
+    ).to_list(1000)
 
     # Enrich assignments with counselor name
     counselor_ids = set()
