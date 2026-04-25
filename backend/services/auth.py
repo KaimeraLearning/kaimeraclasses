@@ -106,6 +106,7 @@ async def seed_admin():
             "picture": None,
             "password_hash": password_hash_val,
             "is_approved": True,
+            "is_verified": True,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
 

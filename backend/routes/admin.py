@@ -15,9 +15,15 @@ from models.schemas import (
     AdminProofApproval, BadgeAssign, DemoExtraGrant, ComplaintResolve
 )
 from services.auth import get_current_user, hash_password
-from services.helpers import generate_teacher_code, generate_student_code
+from services.helpers import generate_teacher_code, generate_student_code, send_email, generate_otp
 
 router = APIRouter()
+
+
+def validate_gmail(email: str):
+    """Enforce @gmail.com only for manual user creation"""
+    if not email.lower().endswith('@gmail.com'):
+        raise HTTPException(status_code=400, detail="Only @gmail.com email addresses are allowed")
 
 UPLOADS_DIR = Path("/app/backend/uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
@@ -253,8 +259,9 @@ async def get_all_students(request: Request, authorization: Optional[str] = Head
 @router.post("/admin/create-teacher")
 async def create_teacher_account(teacher_data: CreateTeacherAccount, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access only")
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counselor access only")
+    validate_gmail(teacher_data.email)
     existing = await db.users.find_one({"email": teacher_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -266,13 +273,26 @@ async def create_teacher_account(teacher_data: CreateTeacherAccount, request: Re
     teacher_doc = {
         "user_id": user_id, "email": teacher_data.email, "name": teacher_data.name,
         "role": "teacher", "credits": 0.0, "picture": None,
-        "password_hash": password_hash_val, "is_approved": True,
+        "password_hash": password_hash_val, "is_approved": True, "is_verified": False,
         "phone": None, "bio": None, "teacher_code": teacher_code,
         "bank_details": None, "badges": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.users.insert_one(teacher_doc)
-    return {"message": "Teacher account created successfully", "user_id": user_id, "email": teacher_data.email, "teacher_code": teacher_code}
+
+    # Send verification OTP
+    otp = await generate_otp(teacher_data.email)
+    html = f"""<div style="font-family: Arial; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 16px;">
+        <h2 style="color: #0ea5e9;">Welcome to Kaimera Learning!</h2>
+        <p>Your teacher account has been created. Please verify your email to activate your account.</p>
+        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
+            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0f172a;">{otp}</span>
+        </div>
+        <p style="color: #94a3b8; font-size: 14px;">This code expires in 10 minutes.</p>
+    </div>"""
+    await send_email(teacher_data.email, "Kaimera Learning - Verify Your Account", html)
+
+    return {"message": "Teacher account created. Verification OTP sent to their email.", "user_id": user_id, "email": teacher_data.email, "teacher_code": teacher_code}
 
 
 @router.post("/admin/create-counsellor")
@@ -280,6 +300,7 @@ async def create_counsellor_account(counsellor_data: CreateTeacherAccount, reque
     user = await get_current_user(request, authorization)
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access only")
+    validate_gmail(counsellor_data.email)
     existing = await db.users.find_one({"email": counsellor_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -290,19 +311,32 @@ async def create_counsellor_account(counsellor_data: CreateTeacherAccount, reque
     counsellor_doc = {
         "user_id": user_id, "email": counsellor_data.email, "name": counsellor_data.name,
         "role": "counsellor", "credits": 0.0, "picture": None,
-        "password_hash": password_hash_val, "is_approved": True,
+        "password_hash": password_hash_val, "is_approved": True, "is_verified": False,
         "phone": None, "bio": None, "counselor_id": counselor_id,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.users.insert_one(counsellor_doc)
-    return {"message": "Counselor account created successfully", "user_id": user_id, "email": counsellor_data.email, "counselor_id": counselor_id}
+
+    # Send verification OTP
+    otp = await generate_otp(counsellor_data.email)
+    html = f"""<div style="font-family: Arial; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 16px;">
+        <h2 style="color: #0ea5e9;">Welcome to Kaimera Learning!</h2>
+        <p>Your counselor account has been created. Please verify your email to activate your account.</p>
+        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
+            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0f172a;">{otp}</span>
+        </div>
+        <p style="color: #94a3b8; font-size: 14px;">This code expires in 10 minutes.</p>
+    </div>"""
+    await send_email(counsellor_data.email, "Kaimera Learning - Verify Your Account", html)
+
+    return {"message": "Counselor account created. Verification OTP sent to their email.", "user_id": user_id, "email": counsellor_data.email, "counselor_id": counselor_id}
 
 
 @router.post("/admin/create-user")
 async def admin_create_user(request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access only")
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counselor access only")
 
     body = await request.json()
     role = body.get("role", "student")
@@ -315,11 +349,12 @@ async def admin_create_user(request: Request, authorization: Optional[str] = Hea
     if role not in ["student", "teacher", "counsellor"]:
         raise HTTPException(status_code=400, detail="Invalid role")
 
+    validate_gmail(email)
+
     existing = await db.users.find_one({"email": email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Phone uniqueness check
     phone = body.get("phone")
     if phone and str(phone).strip():
         phone_exists = await db.users.find_one({"phone": str(phone).strip()}, {"_id": 0, "email": 1})
@@ -333,7 +368,8 @@ async def admin_create_user(request: Request, authorization: Optional[str] = Hea
     base_doc = {
         "user_id": user_id, "email": email, "name": name, "role": role,
         "credits": 0.0, "picture": None, "password_hash": password_hash_val,
-        "is_approved": True, "phone": phone, "bio": None, "badges": [],
+        "is_approved": True, "is_verified": False,
+        "phone": phone, "bio": None, "badges": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
 
@@ -345,7 +381,20 @@ async def admin_create_user(request: Request, authorization: Optional[str] = Hea
         base_doc.update({"teacher_code": user_code, "bank_details": None})
 
     await db.users.insert_one(base_doc)
-    return {"message": f"{role.capitalize()} account created successfully", "user_id": user_id, "email": email, "user_code": user_code, "credentials": {"email": email, "password": password, "code": user_code}}
+
+    # Send verification OTP
+    otp = await generate_otp(email)
+    html = f"""<div style="font-family: Arial; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 16px;">
+        <h2 style="color: #0ea5e9;">Welcome to Kaimera Learning!</h2>
+        <p>Your {role} account has been created. Verify your email to get started.</p>
+        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
+            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0f172a;">{otp}</span>
+        </div>
+        <p style="color: #94a3b8; font-size: 14px;">This code expires in 10 minutes.</p>
+    </div>"""
+    await send_email(email, "Kaimera Learning - Verify Your Account", html)
+
+    return {"message": f"{role.capitalize()} account created. Verification OTP sent.", "user_id": user_id, "email": email, "user_code": user_code, "credentials": {"email": email, "password": password, "code": user_code}}
 
 
 @router.post("/admin/set-pricing")
@@ -386,26 +435,27 @@ async def admin_teacher_ratings(request: Request, authorization: Optional[str] =
 @router.post("/admin/create-student")
 async def admin_create_student(student_data: CreateStudentAccount, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)
-    if user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access only")
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counselor access only")
+    validate_gmail(student_data.email)
     existing = await db.users.find_one({"email": student_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Phone uniqueness check
     if student_data.phone and student_data.phone.strip():
         phone_exists = await db.users.find_one({"phone": student_data.phone.strip()}, {"_id": 0, "email": 1})
         if phone_exists:
             raise HTTPException(status_code=400, detail=f"Phone number already registered with {phone_exists['email']}")
 
     user_id = f"user_{uuid.uuid4().hex[:12]}"
-    password_hash_val = bcrypt.hashpw(student_data.password.encode('utf-8'), bcrypt.gensalt(int(os.environ.get('BCRYPT_ROUNDS', 12)))).decode('utf-8')
+    password_hash_val = hash_password(student_data.password)
     student_code = await generate_student_code()
 
     student_doc = {
         "user_id": user_id, "email": student_data.email, "name": student_data.name,
         "role": "student", "credits": 0.0, "picture": None, "password_hash": password_hash_val,
-        "is_approved": True, "phone": student_data.phone, "bio": None,
+        "is_approved": True, "is_verified": False,
+        "phone": student_data.phone, "bio": None,
         "institute": student_data.institute, "goal": student_data.goal,
         "preferred_time_slot": student_data.preferred_time_slot,
         "state": student_data.state, "city": student_data.city, "country": student_data.country,
@@ -413,7 +463,20 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.users.insert_one(student_doc)
-    return {"message": "Student account created successfully", "user_id": user_id, "email": student_data.email, "name": student_data.name, "student_code": student_code, "credentials": {"email": student_data.email, "password": student_data.password}}
+
+    # Send verification OTP
+    otp = await generate_otp(student_data.email)
+    html = f"""<div style="font-family: Arial; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 16px;">
+        <h2 style="color: #0ea5e9;">Welcome to Kaimera Learning!</h2>
+        <p>Your student account has been created. Verify your email to get started.</p>
+        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
+            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0f172a;">{otp}</span>
+        </div>
+        <p style="color: #94a3b8; font-size: 14px;">This code expires in 10 minutes.</p>
+    </div>"""
+    await send_email(student_data.email, "Kaimera Learning - Verify Your Account", html)
+
+    return {"message": "Student account created. Verification OTP sent.", "user_id": user_id, "email": student_data.email, "name": student_data.name, "student_code": student_code, "credentials": {"email": student_data.email, "password": student_data.password}}
 
 
 @router.post("/admin/reset-password")

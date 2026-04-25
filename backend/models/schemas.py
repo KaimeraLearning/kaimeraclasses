@@ -12,6 +12,7 @@ class User(BaseModel):
     picture: Optional[str] = None
     password_hash: Optional[str] = None
     is_approved: bool = True  # For teacher approval
+    is_verified: bool = True  # OTP verification for manually created users
     phone: Optional[str] = None
     bio: Optional[str] = None  # Teacher profile bio
     institute: Optional[str] = None  # Student's institute

@@ -1,267 +1,341 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { GoogleLogin } from '@react-oauth/google';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { GraduationCap, Mail, Lock, User, ShieldCheck, ArrowLeft, Check } from 'lucide-react';
+import { GraduationCap, Mail, Lock, User, Phone, MapPin, BookOpen, ArrowLeft, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
+import { getApiError } from '../utils/api';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+const BACKEND = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND}/api`;
 
 const Login = () => {
   const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(false);
-  
-  // Login
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  
-  // Register - OTP Flow
-  const [regStep, setRegStep] = useState('email'); // email -> otp -> details
-  const [regEmail, setRegEmail] = useState('');
-  const [regOtp, setRegOtp] = useState('');
-  const [regName, setRegName] = useState('');
-  const [regPassword, setRegPassword] = useState('');
+  const [mode, setMode] = useState('login'); // login, register, otp, verify-account
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({ email: '', password: '', name: '', phone: '', institute: '', goal: '', preferred_time_slot: '', state: '', city: '', country: '', grade: '' });
+  const [otp, setOtp] = useState('');
+  const [verifyEmail, setVerifyEmail] = useState('');
 
-  const handleGoogleLogin = () => {
-    const redirectUrl = window.location.origin;
-    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+  const redirectByRole = (role) => {
+    const routes = { admin: '/admin-dashboard', teacher: '/teacher-dashboard', student: '/student-dashboard', counsellor: '/counsellor-dashboard' };
+    navigate(routes[role] || '/login');
   };
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setIsLoading(true);
+    setLoading(true);
     try {
-      const response = await fetch(`${API}/auth/login`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      const res = await fetch(`${API}/auth/login`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email, password: form.password })
       });
-      if (!response.ok) { const err = await response.json(); throw new Error(err.detail || 'Login failed'); }
-      const data = await response.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Login failed');
+
+      if (data.needs_verification) {
+        setVerifyEmail(data.email);
+        setMode('verify-account');
+        toast.info('Account not verified. Please enter the OTP sent to your email.');
+        return;
+      }
+
+      localStorage.setItem('token', data.session_token);
+      localStorage.setItem('user', JSON.stringify(data.user));
       toast.success(`Welcome back, ${data.user.name}!`);
-      const routes = { student: '/student-dashboard', teacher: '/teacher-dashboard', counsellor: '/counsellor-dashboard', admin: '/admin-dashboard' };
-      navigate(routes[data.user.role] || '/login', { state: { user: data.user } });
-    } catch (error) { toast.error(error.message); }
-    finally { setIsLoading(false); }
+      redirectByRole(data.user.role);
+    } catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
   };
 
-  const handleSendOtp = async (e) => {
-    e.preventDefault();
-    if (!regEmail) { toast.error('Enter your email'); return; }
-    setIsLoading(true);
+  const handleGoogleLogin = async (credentialResponse) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/auth/google`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: credentialResponse.credential })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Google login failed');
+
+      localStorage.setItem('token', data.session_token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      toast.success(`Welcome, ${data.user.name}!`);
+      redirectByRole(data.user.role);
+    } catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
+  };
+
+  const handleSendOtp = async () => {
+    if (!form.email) { toast.error('Enter your email first'); return; }
+    if (!form.email.toLowerCase().endsWith('@gmail.com')) { toast.error('Only @gmail.com addresses are allowed'); return; }
+    setLoading(true);
     try {
       const res = await fetch(`${API}/auth/send-otp`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: regEmail })
+        body: JSON.stringify({ email: form.email })
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Failed'); }
-      toast.success('OTP sent! Check your email inbox.');
-      setRegStep('otp');
-    } catch (error) { toast.error(error.message); }
-    finally { setIsLoading(false); }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed to send OTP');
+      toast.success(data.message);
+      setMode('otp');
+    } catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
   };
 
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    if (!regOtp) { toast.error('Enter the OTP'); return; }
-    setIsLoading(true);
+  const handleVerifyOtp = async () => {
+    setLoading(true);
     try {
       const res = await fetch(`${API}/auth/verify-otp`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: regEmail, otp: regOtp })
+        body: JSON.stringify({ email: form.email, otp })
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Invalid OTP'); }
-      toast.success('Email verified!');
-      setRegStep('details');
-    } catch (error) { toast.error(error.message); }
-    finally { setIsLoading(false); }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'OTP verification failed');
+      toast.success('Email verified! Complete your registration.');
+      setMode('register-details');
+    } catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
   };
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    if (!regName || !regPassword) { toast.error('Name and password required'); return; }
-    setIsLoading(true);
+    if (!form.name || !form.password) { toast.error('Name and password are required'); return; }
+    if (form.password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
+    setLoading(true);
     try {
       const res = await fetch(`${API}/auth/register`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: regName, email: regEmail, password: regPassword, role: 'student' })
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, role: 'student' })
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Registration failed'); }
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Registration failed');
+
+      localStorage.setItem('token', data.session_token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      toast.success(data.message || 'Account created!');
+      redirectByRole(data.user.role);
+    } catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
+  };
+
+  const handleVerifyAccount = async () => {
+    if (!otp) { toast.error('Enter OTP'); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/auth/verify-account`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: verifyEmail, otp })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Verification failed');
+
+      localStorage.setItem('token', data.session_token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      toast.success(data.message || 'Account verified!');
+      redirectByRole(data.user.role);
+    } catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
+  };
+
+  const handleResendVerification = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/auth/resend-verification-otp`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: verifyEmail })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed');
       toast.success(data.message);
-      navigate('/student-dashboard', { state: { user: data.user } });
-    } catch (error) { toast.error(error.message); }
-    finally { setIsLoading(false); }
+    } catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
   };
 
   return (
-    <div className="min-h-screen flex">
-      {/* Left side */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-sky-400 to-violet-500 p-12 items-center justify-center relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMzLjMxNCAwIDYgMi42ODYgNiA2cy0yLjY4NiA2LTYgNi02LTIuNjg2LTYtNiAyLjY4Ni02IDYtNiIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIiIG9wYWNpdHk9Ii4xIi8+PC9nPjwvc3ZnPg==')] opacity-20" />
-        <div className="relative z-10 text-center max-w-md">
-          <GraduationCap className="w-24 h-24 text-white mx-auto mb-6" strokeWidth={1.5} />
-          <h1 className="text-5xl font-bold text-white mb-4">Kaimera Learning</h1>
-          <p className="text-xl text-white/90 leading-relaxed">Connect with expert teachers, book engaging classes, and unlock your learning potential</p>
-          <div className="mt-12 flex gap-8 justify-center text-white/80">
-            <div className="text-center"><div className="text-3xl font-bold text-white">500+</div><div className="text-sm">Classes</div></div>
-            <div className="text-center"><div className="text-3xl font-bold text-white">100+</div><div className="text-sm">Teachers</div></div>
-            <div className="text-center"><div className="text-3xl font-bold text-white">2K+</div><div className="text-sm">Students</div></div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-sky-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-3 mb-3">
+            <div className="w-12 h-12 bg-sky-500 rounded-2xl flex items-center justify-center shadow-lg shadow-sky-500/30">
+              <GraduationCap className="w-7 h-7 text-white" />
+            </div>
+            <h1 className="text-3xl font-black text-white tracking-tight">Kaimera</h1>
           </div>
+          <p className="text-sky-300 text-sm font-medium">Learning Management Platform</p>
         </div>
-      </div>
 
-      {/* Right side */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-slate-50">
-        <div className="w-full max-w-md">
-          <div className="mb-8 text-center lg:hidden">
-            <GraduationCap className="w-16 h-16 text-sky-500 mx-auto mb-4" />
-            <h2 className="text-3xl font-bold text-slate-900">Kaimera Learning</h2>
-          </div>
+        <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/20 p-8 shadow-2xl">
 
-          <Tabs defaultValue="login" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-8">
-              <TabsTrigger value="login" data-testid="login-tab">Login</TabsTrigger>
-              <TabsTrigger value="register" data-testid="register-tab">Register</TabsTrigger>
-            </TabsList>
-
-            {/* Login Tab */}
-            <TabsContent value="login">
-              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 shadow-lg">
-                <h3 className="text-2xl font-bold text-slate-900 mb-2">Welcome Back!</h3>
-                <p className="text-slate-600 mb-6">Sign in to continue your learning journey</p>
-
-                <Button onClick={handleGoogleLogin} className="w-full bg-white text-slate-900 border-2 border-slate-200 hover:bg-slate-50 rounded-full py-6 font-semibold mb-6" data-testid="google-login-button">
-                  <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                  </svg>
-                  Continue with Google
+          {/* ── Login Mode ── */}
+          {mode === 'login' && (
+            <>
+              <h2 className="text-xl font-bold text-white mb-6 text-center" data-testid="login-heading">Sign In</h2>
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <Label className="text-white/80 text-xs mb-1.5 block">Email</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} type="email" placeholder="your@gmail.com" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="login-email" />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-white/80 text-xs mb-1.5 block">Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} type="password" placeholder="Enter password" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="login-password" />
+                  </div>
+                </div>
+                <Button type="submit" disabled={loading} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-xl font-bold h-11" data-testid="login-submit">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sign In'}
                 </Button>
+              </form>
 
-                <div className="relative mb-6">
-                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200" /></div>
-                  <div className="relative flex justify-center text-sm"><span className="px-4 bg-white text-slate-500">Or continue with email</span></div>
+              {/* Google Login */}
+              <div className="my-5 flex items-center gap-3">
+                <div className="flex-1 h-px bg-white/20" />
+                <span className="text-white/50 text-xs">or</span>
+                <div className="flex-1 h-px bg-white/20" />
+              </div>
+              <div className="flex justify-center" data-testid="google-login-btn">
+                <GoogleLogin
+                  onSuccess={handleGoogleLogin}
+                  onError={() => toast.error('Google login failed')}
+                  theme="filled_black"
+                  shape="pill"
+                  size="large"
+                  text="continue_with"
+                  width="350"
+                />
+              </div>
+
+              <p className="text-center text-white/60 text-xs mt-6">
+                New student?{' '}
+                <button onClick={() => setMode('register')} className="text-sky-400 hover:text-sky-300 font-semibold" data-testid="register-link">Create Account</button>
+              </p>
+            </>
+          )}
+
+          {/* ── Register Step 1: Email + OTP ── */}
+          {mode === 'register' && (
+            <>
+              <button onClick={() => setMode('login')} className="text-white/60 hover:text-white text-xs flex items-center gap-1 mb-4"><ArrowLeft className="w-3 h-3" /> Back to Login</button>
+              <h2 className="text-xl font-bold text-white mb-2 text-center">Create Student Account</h2>
+              <p className="text-white/50 text-xs text-center mb-6">Step 1: Verify your email</p>
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-white/80 text-xs mb-1.5 block">Email (@gmail.com only)</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} type="email" placeholder="your@gmail.com" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="register-email" />
+                  </div>
                 </div>
+                <Button onClick={handleSendOtp} disabled={loading} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-xl font-bold h-11" data-testid="send-otp-btn">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4 mr-2" /> Send Verification OTP</>}
+                </Button>
+              </div>
+            </>
+          )}
 
-                <form onSubmit={handleLogin} className="space-y-4">
+          {/* ── Register Step 2: Enter OTP ── */}
+          {mode === 'otp' && (
+            <>
+              <button onClick={() => setMode('register')} className="text-white/60 hover:text-white text-xs flex items-center gap-1 mb-4"><ArrowLeft className="w-3 h-3" /> Back</button>
+              <h2 className="text-xl font-bold text-white mb-2 text-center">Verify Email</h2>
+              <p className="text-white/50 text-xs text-center mb-6">OTP sent to {form.email}</p>
+              <div className="space-y-4">
+                <Input value={otp} onChange={e => setOtp(e.target.value)} placeholder="Enter 6-digit OTP" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl text-center text-2xl tracking-[0.5em] font-bold" maxLength={6} data-testid="otp-input" />
+                <Button onClick={handleVerifyOtp} disabled={loading} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold h-11" data-testid="verify-otp-btn">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ArrowRight className="w-4 h-4 mr-2" /> Verify & Continue</>}
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* ── Register Step 3: Profile Details ── */}
+          {mode === 'register-details' && (
+            <>
+              <button onClick={() => setMode('register')} className="text-white/60 hover:text-white text-xs flex items-center gap-1 mb-4"><ArrowLeft className="w-3 h-3" /> Back</button>
+              <h2 className="text-xl font-bold text-white mb-2 text-center">Complete Your Profile</h2>
+              <p className="text-white/50 text-xs text-center mb-6">{form.email} (verified)</p>
+              <form onSubmit={handleRegister} className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+                <div>
+                  <Label className="text-white/80 text-xs mb-1 block">Full Name *</Label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Full name" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="register-name" />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-white/80 text-xs mb-1 block">Password *</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} type="password" placeholder="Min 6 characters" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="register-password" />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-white/80 text-xs mb-1 block">Phone</Label>
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="Phone number" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="register-phone" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <Label className="text-slate-700 font-medium mb-2 block">Email</Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                      <Input type="email" placeholder="you@example.com" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} className="pl-10 bg-slate-50 border-2 border-slate-200 rounded-xl h-12" required data-testid="login-email-input" />
-                    </div>
+                    <Label className="text-white/80 text-xs mb-1 block">City</Label>
+                    <Input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} placeholder="City" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl text-sm" />
                   </div>
                   <div>
-                    <Label className="text-slate-700 font-medium mb-2 block">Password</Label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                      <Input type="password" placeholder="••••••••" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="pl-10 bg-slate-50 border-2 border-slate-200 rounded-xl h-12" required data-testid="login-password-input" />
-                    </div>
+                    <Label className="text-white/80 text-xs mb-1 block">State</Label>
+                    <Input value={form.state} onChange={e => setForm({ ...form, state: e.target.value })} placeholder="State" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl text-sm" />
                   </div>
-                  <Button type="submit" className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold text-lg shadow-[0_4px_14px_0_rgba(14,165,233,0.39)] hover:-translate-y-0.5 active:translate-y-0 transition-all" disabled={isLoading} data-testid="login-submit-button">
-                    {isLoading ? 'Signing in...' : 'Sign In'}
-                  </Button>
-                </form>
-              </div>
-            </TabsContent>
-
-            {/* Register Tab — OTP Flow */}
-            <TabsContent value="register">
-              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 shadow-lg">
-                <h3 className="text-2xl font-bold text-slate-900 mb-2">Create Account</h3>
-                <p className="text-slate-600 mb-6">
-                  {regStep === 'email' && 'Verify your email to get started'}
-                  {regStep === 'otp' && `Enter the 6-digit code sent to ${regEmail}`}
-                  {regStep === 'details' && 'Almost there! Set your name and password'}
-                </p>
-
-                {/* Step indicator */}
-                <div className="flex items-center gap-2 mb-6">
-                  {['email', 'otp', 'details'].map((step, i) => (
-                    <div key={step} className="flex items-center gap-2 flex-1">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${regStep === step ? 'bg-sky-500 text-white' : i < ['email', 'otp', 'details'].indexOf(regStep) ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'}`}>{i < ['email', 'otp', 'details'].indexOf(regStep) ? <Check className="w-4 h-4" /> : i + 1}</div>
-                      {i < 2 && <div className={`flex-1 h-0.5 ${i < ['email', 'otp', 'details'].indexOf(regStep) ? 'bg-emerald-500' : 'bg-slate-200'}`} />}
-                    </div>
-                  ))}
                 </div>
+                <div>
+                  <Label className="text-white/80 text-xs mb-1 block">Institute</Label>
+                  <div className="relative">
+                    <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <Input value={form.institute} onChange={e => setForm({ ...form, institute: e.target.value })} placeholder="School/College" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-white/80 text-xs mb-1 block">Grade/Year</Label>
+                  <Input value={form.grade} onChange={e => setForm({ ...form, grade: e.target.value })} placeholder="e.g. Grade 10, Year 2" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" />
+                </div>
+                <Button type="submit" disabled={loading} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-xl font-bold h-11 mt-2" data-testid="register-submit">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Account'}
+                </Button>
+              </form>
+            </>
+          )}
 
-                {/* Step 1: Email */}
-                {regStep === 'email' && (
-                  <form onSubmit={handleSendOtp} className="space-y-4">
-                    <div>
-                      <Label className="text-slate-700 font-medium mb-2 block">Email Address</Label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <Input type="email" placeholder="you@example.com" value={regEmail} onChange={e => setRegEmail(e.target.value)} className="pl-10 bg-slate-50 border-2 border-slate-200 rounded-xl h-12" required data-testid="register-email-input" />
-                      </div>
-                    </div>
-                    <Button type="submit" className="w-full bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full py-6 font-bold text-lg" disabled={isLoading} data-testid="send-otp-button">
-                      {isLoading ? 'Sending...' : 'Send Verification Code'}
-                    </Button>
-                    <p className="text-xs text-slate-500 text-center">Only students can self-register. Staff accounts are created by admin.</p>
-                  </form>
-                )}
-
-                {/* Step 2: OTP */}
-                {regStep === 'otp' && (
-                  <form onSubmit={handleVerifyOtp} className="space-y-4">
-                    <div>
-                      <Label className="text-slate-700 font-medium mb-2 block">Verification Code</Label>
-                      <div className="relative">
-                        <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <Input type="text" placeholder="123456" value={regOtp} onChange={e => setRegOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} className="pl-10 bg-slate-50 border-2 border-slate-200 rounded-xl h-12 text-center text-2xl tracking-widest font-bold" maxLength={6} required data-testid="otp-input" />
-                      </div>
-                    </div>
-                    <Button type="submit" className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold text-lg" disabled={isLoading} data-testid="verify-otp-button">
-                      {isLoading ? 'Verifying...' : 'Verify Email'}
-                    </Button>
-                    <div className="flex items-center justify-between">
-                      <button type="button" onClick={() => setRegStep('email')} className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1"><ArrowLeft className="w-3 h-3" /> Change email</button>
-                      <button type="button" onClick={handleSendOtp} className="text-sm text-sky-500 hover:text-sky-700 font-medium">Resend code</button>
-                    </div>
-                  </form>
-                )}
-
-                {/* Step 3: Details */}
-                {regStep === 'details' && (
-                  <form onSubmit={handleRegister} className="space-y-4">
-                    <div className="bg-emerald-50 rounded-xl p-3 flex items-center gap-2 border border-emerald-200">
-                      <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                      <span className="text-sm text-emerald-800 font-medium">{regEmail} verified</span>
-                    </div>
-                    <div>
-                      <Label className="text-slate-700 font-medium mb-2 block">Full Name</Label>
-                      <div className="relative">
-                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <Input type="text" placeholder="Your full name" value={regName} onChange={e => setRegName(e.target.value)} className="pl-10 bg-slate-50 border-2 border-slate-200 rounded-xl h-12" required data-testid="register-name-input" />
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-slate-700 font-medium mb-2 block">Password</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                        <Input type="password" placeholder="••••••••" value={regPassword} onChange={e => setRegPassword(e.target.value)} className="pl-10 bg-slate-50 border-2 border-slate-200 rounded-xl h-12" required data-testid="register-password-input" />
-                      </div>
-                    </div>
-                    <Button type="submit" className="w-full bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full py-6 font-bold text-lg" disabled={isLoading} data-testid="register-submit-button">
-                      {isLoading ? 'Creating...' : 'Create Student Account'}
-                    </Button>
-                  </form>
-                )}
+          {/* ── Account Verification (for manually created users) ── */}
+          {mode === 'verify-account' && (
+            <>
+              <button onClick={() => { setMode('login'); setOtp(''); }} className="text-white/60 hover:text-white text-xs flex items-center gap-1 mb-4"><ArrowLeft className="w-3 h-3" /> Back to Login</button>
+              <h2 className="text-xl font-bold text-white mb-2 text-center">Verify Your Account</h2>
+              <p className="text-white/50 text-xs text-center mb-6">Enter the OTP sent to <span className="text-sky-400">{verifyEmail}</span></p>
+              <div className="space-y-4">
+                <Input value={otp} onChange={e => setOtp(e.target.value)} placeholder="Enter 6-digit OTP" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl text-center text-2xl tracking-[0.5em] font-bold" maxLength={6} data-testid="verify-account-otp" />
+                <Button onClick={handleVerifyAccount} disabled={loading} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold h-11" data-testid="verify-account-btn">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4 mr-2" /> Verify & Sign In</>}
+                </Button>
+                <Button onClick={handleResendVerification} variant="ghost" disabled={loading} className="w-full text-white/60 hover:text-white text-xs" data-testid="resend-otp-btn">
+                  Resend OTP
+                </Button>
               </div>
-            </TabsContent>
-          </Tabs>
+            </>
+          )}
 
-          <div className="mt-6 text-center">
-            <p className="text-sm text-slate-500 mb-2">Want to try before you sign up?</p>
-            <Button onClick={() => navigate('/book-demo')} variant="outline" className="rounded-full border-2 border-sky-200 text-sky-600 hover:bg-sky-50 font-semibold px-6" data-testid="book-demo-cta">Book a Free Demo Class</Button>
-          </div>
         </div>
+
+        <p className="text-center text-white/30 text-xs mt-6">Kaimera Learning &copy; {new Date().getFullYear()}</p>
       </div>
     </div>
   );
