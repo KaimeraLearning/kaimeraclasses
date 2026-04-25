@@ -1,5 +1,4 @@
-import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
-import { GoogleOAuthProvider } from '@react-oauth/google';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import StudentDashboard from './pages/StudentDashboard';
 import TeacherDashboard from './pages/TeacherDashboard';
@@ -26,8 +25,6 @@ import ChatPage from './pages/ChatPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from './components/ui/sonner';
 import './App.css';
-
-const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
 function AppRouter() {
   return (
@@ -161,13 +158,11 @@ function AppRouter() {
 
 function App() {
   return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <div className="App">
-        <BrowserRouter>
-          <AppRouter />
-        </BrowserRouter>
-      </div>
-    </GoogleOAuthProvider>
+    <div className="App">
+      <BrowserRouter>
+        <AppRouter />
+      </BrowserRouter>
+    </div>
   );
 }
 
