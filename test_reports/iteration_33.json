@@ -1,0 +1,59 @@
+{
+  "summary": "Iteration 33 testing: Per-class per-day attendance overhaul. Backend: 11/11 tests PASSED. All new endpoints (mark with auto-detect, 409 conflict, needs_class_selection, /attendance/unmarked, /attendance/class-today/{student_id}, /attendance/teacher with class_title) work correctly. Role-guards (403 for non-teachers) verified. Frontend: TeacherDashboard.js compiles cleanly (eslint warnings only, no errors); admin login OK; protected /teacher-dashboard route correctly redirects unauth users to login. No live UI test of teacher attendance UI was run because no teacher account exists with a known password (database is fresh per /app/memory/test_credentials.md) — main agent should self-verify the teacher UI flow after creating a teacher via Identity Creator.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/attendance/mark",
+        "issue": "Dead-code branch: lines 63-66 inside the auto-detect/no-matching-class block check `if reason not in [...]` and `if not class_id`, but at that point class_id is guaranteed None (the early return on line 58 already handled the no-reason case). The reason/class_id selection flow only works if the caller passes BOTH class_id AND reason — in which case the auto-detect block is skipped entirely (line 41 if `not class_id`). This dead branch is harmless but misleading; recommend removing or clarifying."
+      },
+      {
+        "endpoint": "/api/attendance/unmarked",
+        "issue": "Performance: nested loop does one Mongo find_one per (class, day) pair. For a teacher with 10 classes spanning 30 days each, that's 300 queries per call. Consider single aggregation pulling all attendance docs once, then set-difference in Python. Acceptable for current scale."
+      },
+      {
+        "endpoint": "/api/attendance/unmarked",
+        "issue": "Date range can produce thousands of entries for a long-running class (e.g., 6-month class). Should likely filter by scheduled_days_of_week (if defined on class) so we only flag actual class days, not every calendar day. Currently returns one unmarked record per calendar day of the class range."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration33_attendance.py",
+    "/app/test_reports/pytest/iteration_33.xml"
+  ],
+  "action_items": [
+    "(OPTIONAL) Clean up dead branch in attendance.py mark_attendance lines 63-66 — unreachable because early-return on line 58 already returns when reason is missing.",
+    "(OPTIONAL, performance) Replace per-day find_one in /attendance/unmarked with a single batch fetch + set-difference. Materially faster for teachers with many long-running classes.",
+    "(FUNCTIONAL CONSIDERATION) /attendance/unmarked treats EVERY calendar day in [start..yesterday] as a class day (minus cancellations). If classes have specific weekdays (Mon/Wed/Fri), every Tue/Thu/Sat/Sun will appear as 'unmarked'. Confirm with product whether class_sessions has a scheduled_days field that should be honoured; if so, filter accordingly.",
+    "(MAIN AGENT SELF-TEST) After creating a teacher via Identity Creator and assigning a paid student + class, log in as teacher and verify: (a) unmarked-days banner shows for past dates, (b) per-class Present/Absent buttons are visible, (c) clicking a button disables both for that class+date, (d) attendance history table shows class_title column. Backend already verified end-to-end."
+  ],
+  "critical_code_review_comments": [
+    "attendance.py line 81: 409 detail message is informative — includes class title and date. Good UX.",
+    "attendance.py line 41-66: auto-detect logic is correct but the inner `if not class_id` (line 65) is unreachable. Lines 63-66 only execute if `available_classes` query returned something AND reason was provided AND somehow class_id is still None — but caller would pass class_id alongside reason in that flow. Tighten this control flow.",
+    "attendance.py line 195-197: appends `marked_status` directly onto the in-memory dict — ok but mutates the doc returned from Mongo. Cosmetic; consider building a fresh dict.",
+    "TeacherDashboard.js line 46-47: `unmarkedAttendance` and `todayClassesForAttendance` state additions are clean. fetchTodayClasses is on-demand which is good for perf.",
+    "TeacherDashboard.js line 644-665: per-class Present/Absent buttons correctly read `cls.already_marked` to disable. Good.",
+    "TeacherDashboard.js line 966: `r.class_title || '-'` correctly handles legacy records lacking class_title. Good.",
+    "attendance.py: no Mongo _id leak — all queries use `{_id: 0}` projection. Good.",
+    "attendance.py: All operations are async/await. Good.",
+    "Error handling: 400 for missing fields, 403 for non-teacher, 404 for unknown class/student, 409 for duplicate. Status codes are correct."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration33_attendance.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 passed)",
+    "frontend": "compile-only verified (no live teacher account available in this fresh DB). Admin login + protected-route redirect verified."
+  },
+  "test_credentials": "Admin: info@kaimeralearning.com / solidarity&peace2023 — works. No teacher/student accounts exist; tests seeded TEST_ users via direct Mongo inserts and used a session_token in user_sessions to authenticate teacher API calls.",
+  "seed_data_creation": "Test creates TEST_-prefixed teacher, student, paid assignment, two class_sessions (one covering today, one ended 10 days ago), and one user_sessions doc. All cleaned up in module-scope teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file at /app/backend/tests/test_iteration33_attendance.py covers all per-class-per-day attendance flows. Uses pymongo for direct seeding and a session_token in user_sessions to bypass OTP for the test teacher. To re-run: `pytest /app/backend/tests/test_iteration33_attendance.py -v`. Frontend live UI tests for the teacher attendance widgets were NOT run because there is no real teacher account in this fresh DB; main agent should self-verify in a live session after creating a teacher via Operations Center > Identity Creator. The new attendance.py mark_attendance has a dead branch on lines 63-66 (unreachable) — see action_items."
+}

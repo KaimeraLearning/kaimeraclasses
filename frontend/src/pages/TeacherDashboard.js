@@ -42,7 +42,9 @@ const TeacherDashboard = () => {
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [showAttendanceDialog, setShowAttendanceDialog] = useState(false);
   const [showAttendanceReasonDialog, setShowAttendanceReasonDialog] = useState(false);
-  const [attendanceReasonData, setAttendanceReasonData] = useState(null); // {studentId, date, status, availableClasses}
+  const [attendanceReasonData, setAttendanceReasonData] = useState(null);
+  const [unmarkedAttendance, setUnmarkedAttendance] = useState([]);
+  const [todayClassesForAttendance, setTodayClassesForAttendance] = useState({}); // {studentId, date, status, availableClasses}
 
   const openProfile = (userId, role) => { setViewProfileUserId(userId); setViewProfileRole(role); setViewProfileOpen(true); };
 
@@ -51,7 +53,7 @@ const TeacherDashboard = () => {
     title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '', max_students: 1, assigned_student_id: '', duration_days: 1, is_demo: false
   });
 
-  useEffect(() => { fetchUser(); fetchDashboardData(); fetchNotifications(); }, []);
+  useEffect(() => { fetchUser(); fetchDashboardData(); fetchNotifications(); fetchUnmarkedAttendance(); }, []);
 
   // Auto-refresh on tab focus
   useEffect(() => {
@@ -108,6 +110,23 @@ const TeacherDashboard = () => {
     } catch {}
   };
 
+  const fetchUnmarkedAttendance = async () => {
+    try {
+      const res = await fetch(`${API}/attendance/unmarked`, { credentials: 'include' });
+      if (res.ok) setUnmarkedAttendance(await res.json());
+    } catch {}
+  };
+
+  const fetchTodayClasses = async (studentId) => {
+    try {
+      const res = await fetch(`${API}/attendance/class-today/${studentId}`, { credentials: 'include' });
+      if (res.ok) {
+        const classes = await res.json();
+        setTodayClassesForAttendance(prev => ({ ...prev, [studentId]: classes }));
+      }
+    } catch {}
+  };
+
   const markAttendance = async (studentId, date, status, reason, classId) => {
     try {
       const payload = { student_id: studentId, date, status };
@@ -119,16 +138,17 @@ const TeacherDashboard = () => {
       });
       if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
-      if (data.needs_reason) {
-        // No class scheduled — ask teacher why
-        setAttendanceReasonData({ studentId, date, status, availableClasses: data.available_classes || [] });
+      if (data.needs_class_selection) {
+        setAttendanceReasonData({ studentId, date, status, availableClasses: data.available_classes || [], step: 'select_class' });
         setShowAttendanceReasonDialog(true);
         return;
       }
-      toast.success(`Attendance marked as ${status}`);
+      toast.success(data.message || `Attendance marked as ${status}`);
       setShowAttendanceReasonDialog(false);
       setAttendanceReasonData(null);
-      fetchAttendance();
+      // Refresh today's classes for this student to show already marked
+      fetchTodayClasses(studentId);
+      fetchUnmarkedAttendance();
     } catch (err) { toast.error(err.message); }
   };
 
@@ -596,16 +616,57 @@ const TeacherDashboard = () => {
                         )}
                       </div>
                     </div>
-                    <div className="flex gap-1.5 flex-wrap">
+                    <div className="space-y-2">
                       {s.payment_status === 'paid' ? (
                         <>
-                          <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'present')} variant="outline" className="rounded-full text-xs h-7 px-2">
-                            <CheckCircle className="w-3 h-3 text-emerald-500 mr-1" /> Present
-                          </Button>
+                          {/* Unmarked past attendance warning */}
+                          {unmarkedAttendance.filter(u => u.student_id === s.student_id).length > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-800">
+                              <AlertCircle className="w-3 h-3 inline mr-1" />
+                              <strong>{unmarkedAttendance.filter(u => u.student_id === s.student_id).length} unmarked day(s)</strong> — mark before continuing
+                              <div className="mt-1 space-y-1">
+                                {unmarkedAttendance.filter(u => u.student_id === s.student_id).slice(0, 3).map(u => (
+                                  <div key={`${u.class_id}-${u.date}`} className="flex items-center gap-1.5">
+                                    <span className="text-[10px] text-slate-600">{u.date} — {u.class_title}</span>
+                                    <Button onClick={() => markAttendance(u.student_id, u.date, 'present', 'forgot_to_mark', u.class_id)} size="sm" variant="outline" className="rounded-full h-5 px-2 text-[10px]" data-testid={`mark-past-present-${u.class_id}-${u.date}`}>
+                                      <CheckCircle className="w-2.5 h-2.5 text-emerald-500 mr-0.5" /> P
+                                    </Button>
+                                    <Button onClick={() => markAttendance(u.student_id, u.date, 'absent', 'forgot_to_mark', u.class_id)} size="sm" variant="outline" className="rounded-full h-5 px-2 text-[10px]" data-testid={`mark-past-absent-${u.class_id}-${u.date}`}>
+                                      <XCircle className="w-2.5 h-2.5 text-red-500 mr-0.5" /> A
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
 
-                          <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'absent')} variant="outline" className="rounded-full text-xs h-7 px-2">
-                            <XCircle className="w-3 h-3 text-red-500 mr-1" /> Absent
-                          </Button>
+                          {/* Today's class attendance */}
+                          {(todayClassesForAttendance[s.student_id] || []).map(cls => (
+                            <div key={cls.class_id} className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-slate-600 truncate max-w-[100px]">{cls.title}</span>
+                              {cls.already_marked ? (
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${cls.marked_status === 'present' ? 'bg-emerald-100 text-emerald-700' : cls.marked_status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`} data-testid={`marked-${cls.class_id}`}>
+                                  {cls.marked_status}
+                                </span>
+                              ) : (
+                                <>
+                                  <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'present', null, cls.class_id)} variant="outline" className="rounded-full text-[10px] h-6 px-2" data-testid={`present-${cls.class_id}`}>
+                                    <CheckCircle className="w-3 h-3 text-emerald-500 mr-0.5" /> Present
+                                  </Button>
+                                  <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'absent', null, cls.class_id)} variant="outline" className="rounded-full text-[10px] h-6 px-2" data-testid={`absent-${cls.class_id}`}>
+                                    <XCircle className="w-3 h-3 text-red-500 mr-0.5" /> Absent
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          ))}
+
+                          {/* If no today classes loaded yet, show load button */}
+                          {!todayClassesForAttendance[s.student_id] && (
+                            <Button onClick={() => fetchTodayClasses(s.student_id)} variant="outline" className="rounded-full text-xs h-7 px-2" data-testid={`load-attendance-${s.student_id}`}>
+                              <CalendarCheck className="w-3 h-3 mr-1" /> Mark Attendance
+                            </Button>
+                          )}
 
                           <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs h-7 px-2">
                             <MessageSquare className="w-3 h-3 mr-1" /> Feedback
@@ -847,43 +908,34 @@ const TeacherDashboard = () => {
 
       <ViewProfilePopup open={viewProfileOpen} onOpenChange={setViewProfileOpen} userId={viewProfileUserId} userRole={viewProfileRole} />
 
-      {/* Attendance Reason Dialog - when marking on non-class day */}
+      {/* Attendance Class Selection Dialog - when no class on this date */}
       <Dialog open={showAttendanceReasonDialog} onOpenChange={setShowAttendanceReasonDialog}>
         <DialogContent className="sm:max-w-md rounded-3xl">
-          <DialogHeader><DialogTitle className="text-xl font-bold flex items-center gap-2"><AlertCircle className="w-5 h-5 text-amber-500" /> No Class Scheduled Today</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="text-xl font-bold flex items-center gap-2"><AlertCircle className="w-5 h-5 text-amber-500" /> Select Class for Attendance</DialogTitle></DialogHeader>
           {attendanceReasonData && (
             <div className="space-y-4 mt-4">
-              <p className="text-sm text-slate-600">There is no class scheduled for this student on {attendanceReasonData.date}. Why are you marking attendance?</p>
+              <p className="text-sm text-slate-600">No class scheduled on {attendanceReasonData.date}. Select which class this attendance is for:</p>
               <div className="space-y-2">
-                <Button onClick={() => {
-                  if (attendanceReasonData.availableClasses.length === 0) {
-                    toast.error('No active classes available to link this attendance to');
-                    return;
-                  }
-                  setAttendanceReasonData({ ...attendanceReasonData, reason: 'forgot_to_mark', step: 'select_class' });
-                }} variant="outline" className="w-full rounded-xl py-4 text-left justify-start" data-testid="reason-forgot">
-                  <Clock className="w-4 h-4 mr-2 text-amber-500" /> I forgot to mark attendance earlier
+                <Button onClick={() => setAttendanceReasonData({ ...attendanceReasonData, reason: 'forgot_to_mark' })} variant={attendanceReasonData.reason === 'forgot_to_mark' ? 'default' : 'outline'} className="w-full rounded-xl py-3 text-left justify-start" data-testid="reason-forgot">
+                  <Clock className="w-4 h-4 mr-2 text-amber-500" /> Forgot to mark earlier
                 </Button>
-                <Button onClick={() => {
-                  if (attendanceReasonData.availableClasses.length === 0) {
-                    toast.error('No active classes available to link this attendance to');
-                    return;
-                  }
-                  setAttendanceReasonData({ ...attendanceReasonData, reason: 'rescheduled_class', step: 'select_class' });
-                }} variant="outline" className="w-full rounded-xl py-4 text-left justify-start" data-testid="reason-rescheduled">
-                  <CalendarDays className="w-4 h-4 mr-2 text-sky-500" /> This is for a rescheduled class
+                <Button onClick={() => setAttendanceReasonData({ ...attendanceReasonData, reason: 'rescheduled_class' })} variant={attendanceReasonData.reason === 'rescheduled_class' ? 'default' : 'outline'} className="w-full rounded-xl py-3 text-left justify-start" data-testid="reason-rescheduled">
+                  <CalendarDays className="w-4 h-4 mr-2 text-sky-500" /> Rescheduled class
                 </Button>
               </div>
-              {attendanceReasonData.step === 'select_class' && (
+              {attendanceReasonData.reason && (
                 <div className="space-y-2 mt-3">
                   <p className="text-sm font-semibold text-slate-700">Select the class:</p>
-                  {attendanceReasonData.availableClasses.map(cls => (
+                  {(attendanceReasonData.availableClasses || []).map(cls => (
                     <Button key={cls.class_id} onClick={() => {
                       markAttendance(attendanceReasonData.studentId, attendanceReasonData.date, attendanceReasonData.status, attendanceReasonData.reason, cls.class_id);
                     }} variant="outline" className="w-full rounded-xl py-3 text-left justify-start" data-testid={`select-class-${cls.class_id}`}>
                       {cls.title} ({cls.date} - {cls.end_date})
                     </Button>
                   ))}
+                  {(attendanceReasonData.availableClasses || []).length === 0 && (
+                    <p className="text-sm text-red-500">No active classes found for this student.</p>
+                  )}
                 </div>
               )}
             </div>
@@ -901,6 +953,7 @@ const TeacherDashboard = () => {
                 <tr>
                   <th className="text-left p-2 text-xs text-slate-500">Date</th>
                   <th className="text-left p-2 text-xs text-slate-500">Student</th>
+                  <th className="text-left p-2 text-xs text-slate-500">Class</th>
                   <th className="text-center p-2 text-xs text-slate-500">Status</th>
                   <th className="text-left p-2 text-xs text-slate-500">Notes</th>
                 </tr>
@@ -910,6 +963,7 @@ const TeacherDashboard = () => {
                   <tr key={i} className={`border-b border-slate-100 ${r.off_day_marking ? 'bg-amber-50' : ''}`}>
                     <td className="p-2 text-xs">{r.date}</td>
                     <td className="p-2 text-xs font-semibold">{r.student_name}</td>
+                    <td className="p-2 text-xs text-sky-700">{r.class_title || '-'}</td>
                     <td className="p-2 text-center">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${r.status === 'present' ? 'bg-emerald-100 text-emerald-700' : r.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
                     </td>
@@ -921,7 +975,7 @@ const TeacherDashboard = () => {
                   </tr>
                 ))}
                 {attendanceRecords.length === 0 && (
-                  <tr><td colSpan="4" className="text-center p-8 text-slate-400">No attendance records yet</td></tr>
+                  <tr><td colSpan="5" className="text-center p-8 text-slate-400">No attendance records yet</td></tr>
                 )}
               </tbody>
             </table>
