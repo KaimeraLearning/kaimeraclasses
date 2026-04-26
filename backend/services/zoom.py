@@ -1,0 +1,106 @@
+"""Zoom API integration - Server-to-Server OAuth for meeting creation + SDK signature generation"""
+import os
+import time
+import base64
+import logging
+import requests
+import jwt
+
+logger = logging.getLogger(__name__)
+
+ZOOM_ACCOUNT_ID = os.environ.get("ZOOM_ACCOUNT_ID", "")
+ZOOM_CLIENT_ID = os.environ.get("ZOOM_CLIENT_ID", "")
+ZOOM_CLIENT_SECRET = os.environ.get("ZOOM_CLIENT_SECRET", "")
+
+_token_cache = {"token": None, "expires_at": 0}
+
+
+def get_zoom_access_token():
+    """Get Server-to-Server OAuth access token (cached for 50 min)"""
+    now = time.time()
+    if _token_cache["token"] and _token_cache["expires_at"] > now:
+        return _token_cache["token"]
+
+    if not ZOOM_CLIENT_ID or not ZOOM_CLIENT_SECRET or not ZOOM_ACCOUNT_ID:
+        raise Exception("Zoom credentials not configured")
+
+    credentials = base64.b64encode(f"{ZOOM_CLIENT_ID}:{ZOOM_CLIENT_SECRET}".encode()).decode()
+    resp = requests.post(
+        "https://zoom.us/oauth/token",
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        data={
+            "grant_type": "account_credentials",
+            "account_id": ZOOM_ACCOUNT_ID
+        },
+        timeout=10
+    )
+    if resp.status_code != 200:
+        logger.error(f"Zoom token error: {resp.status_code} {resp.text}")
+        raise Exception(f"Failed to get Zoom access token: {resp.text}")
+
+    data = resp.json()
+    _token_cache["token"] = data["access_token"]
+    _token_cache["expires_at"] = now + data.get("expires_in", 3600) - 300
+    return data["access_token"]
+
+
+def create_zoom_meeting(topic: str, duration: int = 60, start_time: str = None):
+    """Create a Zoom meeting and return meeting details"""
+    token = get_zoom_access_token()
+
+    meeting_data = {
+        "topic": topic,
+        "type": 2,
+        "duration": duration,
+        "timezone": "Asia/Kolkata",
+        "settings": {
+            "host_video": True,
+            "participant_video": True,
+            "join_before_host": True,
+            "mute_upon_entry": False,
+            "waiting_room": False,
+            "auto_recording": "none"
+        }
+    }
+    if start_time:
+        meeting_data["start_time"] = start_time
+
+    resp = requests.post(
+        "https://api.zoom.us/v2/users/me/meetings",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        },
+        json=meeting_data,
+        timeout=10
+    )
+    if resp.status_code not in (200, 201):
+        logger.error(f"Zoom create meeting error: {resp.status_code} {resp.text}")
+        raise Exception(f"Failed to create Zoom meeting: {resp.text}")
+
+    return resp.json()
+
+
+def generate_zoom_sdk_signature(meeting_number: int, role: int):
+    """Generate JWT signature for Zoom Meeting SDK (role: 0=participant, 1=host)"""
+    if not ZOOM_CLIENT_ID or not ZOOM_CLIENT_SECRET:
+        raise Exception("Zoom SDK credentials not configured")
+
+    iat = int(time.time())
+    exp = iat + 60 * 60 * 2
+
+    payload = {
+        "sdkKey": ZOOM_CLIENT_ID,
+        "appKey": ZOOM_CLIENT_ID,
+        "mn": meeting_number,
+        "role": role,
+        "iat": iat,
+        "exp": exp,
+        "tokenExp": exp
+    }
+
+    signature = jwt.encode(payload, ZOOM_CLIENT_SECRET, algorithm="HS256")
+    return signature

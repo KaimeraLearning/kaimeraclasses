@@ -131,7 +131,7 @@ const AdminDashboard = () => {
         fetch(`${API}/admin/badge-templates`, { credentials: 'include' }),
         fetch(`${API}/admin/counsellor-tracking`, { credentials: 'include' })
       ]);
-      if (!userRes.ok) throw new Error();
+      if (!userRes.ok) throw new Error('Authentication failed. Please log in again.');
       setUser(await userRes.json());
       if (usersRes.ok) setAllUsers(await usersRes.json());
       if (classesRes.ok) setClasses(await classesRes.json());
@@ -297,7 +297,7 @@ const AdminDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: creditUser, amount: parseFloat(creditAmount), action: creditAction })
       });
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Credits adjusted');
       setCreditsDialog(false);
       fetchAll();

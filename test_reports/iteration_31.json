@@ -1,0 +1,56 @@
+{
+  "summary": "Iteration 31 testing: Zoom integration, error notifications, screenshot button. 7/8 backend tests passed (1 skipped due to Zoom OAuth scope misconfiguration). Critical frontend bug found: wrong-login displays raw JS error instead of 'Invalid credentials'. Zoom OAuth app missing required scopes — backend code is correct but cannot create real Zoom meetings until scopes are added in Zoom Marketplace.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/classes/start/{id}",
+        "issue": "Zoom token fetched OK but meeting creation returns 400 'Invalid access token, does not contain scopes:[meeting:write:meeting, meeting:write:meeting:admin]'. Backend correctly raises HTTPException 500 with descriptive 'Failed to create video meeting' message. CODE IS CORRECT — Zoom Server-to-Server OAuth app needs scopes 'meeting:write:meeting' (and admin variant) added in Zoom Marketplace by user.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Login.js (handleLogin)",
+        "issue": "Wrong-credentials login shows toast 'Failed to execute json on Response: body stream already read' instead of 'Invalid credentials'. The body of the 401 response is being read TWICE somewhere (Login.js itself reads only once via `await res.json()`). Suspected cause: a fetch/Response interceptor or Sonner side-effect — could not pinpoint via grep. This breaks the user-facing 'proper error notifications' feature claimed in this iteration.",
+        "selector": "[data-testid=login-submit]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration31_zoom_errors.py",
+    "/app/test_reports/pytest/iteration_31.xml"
+  ],
+  "action_items": [
+    "FRONTEND BUG: Investigate why /api/auth/login Response body is read twice on failure. Login.js handleLogin() (line 34) calls `await res.json()` exactly once, yet the toast displays 'body stream already read'. Inspect for any global fetch wrapper, Response.prototype patches, or duplicate invocation. Suggest using getApiError(res) from utils/api.js (which is the pattern used elsewhere) and ensure the error message reaching the toast is 'Invalid credentials'.",
+    "ZOOM CONFIG (USER ACTION): In Zoom Marketplace, edit the Server-to-Server OAuth app and add scopes: meeting:write:meeting AND meeting:write:meeting:admin. Without these, every teacher 'Start Class' click will return 500. Backend code in services/zoom.py and routes/classes.py is correct.",
+    "(Optional) services/zoom.py reads ZOOM_* env vars at MODULE IMPORT time (lines 11-13). If the .env is updated, backend must be restarted (currently OK). Consider reading via os.environ.get inside functions for resilience."
+  ],
+  "critical_code_review_comments": [
+    "VideoClass.js: screenshot button gating is correct — line 218-222 wraps button in `{isTeacher && (...)}`. Verified by source review.",
+    "VideoClass.js handleTakeScreenshot uses navigator.mediaDevices.getDisplayMedia + ImageCapture.grabFrame() — works on Chrome/Edge but ImageCapture is NOT supported on Firefox/Safari. Consider html2canvas fallback for cross-browser proof.",
+    "routes/classes.py start_class (line 364-365) wraps Zoom create in try/except and surfaces error message — good. But generate_zoom_sdk_signature on line 369-370 is OUTSIDE the try block; if signature gen fails it bubbles up to global handler returning generic 500. Wrap in try/except for clarity.",
+    "server.py @app.exception_handler(Exception) at line 48 will INTERCEPT FastAPI's HTTPException too unless StarletteHTTPException is registered separately. Verify HTTPException(401, 'Invalid credentials') still returns 401 with detail (test_wrong_login_returns_invalid_credentials confirmed it does — FastAPI handles HTTPException before generic Exception handler).",
+    "services/zoom.py line 11-13 captures env at import; if .env reload happens without restart these stay stale. Test had to monkey-patch the module to re-read after load_dotenv.",
+    "frontend/src/utils/api.js getApiError is a good helper but Login.js handleLogin does NOT use it — uses ad-hoc `data.detail || 'Login failed'`. Inconsistent error handling pattern across the app."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration31_zoom_errors.py (created)"
+  ],
+  "success_rate": {
+    "backend": "87.5% (7 passed / 1 skipped due to Zoom scope config; 0 failed)",
+    "frontend": "50% (admin login OK, screenshot button gating correct in source; wrong-login error message BROKEN)"
+  },
+  "test_credentials": "Admin: info@kaimeralearning.com / solidarity&peace2023 — works.",
+  "seed_data_creation": "Test creates+teardown TEST_-prefixed teacher user, user_session, class_session for /api/classes/start test. Cleaned up on fixture teardown. system_pricing.cancel_rating_deduction left at 0.25 after test (admin can reset).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file at /app/backend/tests/test_iteration31_zoom_errors.py uses dotenv to load /app/backend/.env. Auth uses session_token in user_sessions. To retest the Zoom start_class success path, user must add 'meeting:write:meeting' scope in Zoom Marketplace, then `test_classes_start_returns_zoom_fields` should PASS instead of skip. The frontend wrong-login bug needs Login.js inspection — likely a duplicate body-read; getApiError() helper exists in utils/api.js but Login.js handleLogin doesn't use it.",
+  "rca of the issue": "Frontend wrong-login bug RCA: Login.js line 34 `const data = await res.json()` is the sole on-disk reader of the 401 response body, yet Chrome reports 'body stream already read'. Hypothesis: webpack HMR or a runtime fetch interceptor (not present in source grep) is consuming the body. Reproduction: Open https://skill-exchange-149.preview.emergentagent.com, enter wrong@example.com / wrongpass, click Sign In → toast shows JS internal error. Mitigation: change handleLogin to `if (!res.ok) { const msg = await getApiError(res); throw new Error(msg); } const data = await res.json();` so the body is only consumed once and the path is conditional. Backend Zoom RCA: OAuth client_credentials token is granted but lacks meeting management scopes; Zoom Marketplace > Manage > Server-to-Server OAuth app > Scopes tab → add Meeting > View and manage all user meetings (meeting:write:meeting / meeting:write:meeting:admin)."
+}

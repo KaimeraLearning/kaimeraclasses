@@ -3,9 +3,11 @@ import logging
 import asyncio
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 
 from database import db, client
 from services.auth import seed_admin
@@ -34,6 +36,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+
+@app.exception_handler(ConnectionFailure)
+@app.exception_handler(ServerSelectionTimeoutError)
+async def db_error_handler(request: Request, exc: Exception):
+    logger.error(f"Database connection error: {exc}")
+    return JSONResponse(status_code=503, content={"detail": "Database connection error. Please try again later."})
+
+
+@app.exception_handler(Exception)
+async def general_error_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error on {request.url.path}: {type(exc).__name__}: {exc}")
+    return JSONResponse(status_code=500, content={"detail": f"Server error: {type(exc).__name__}. Please try again."})
 
 app.add_middleware(
     CORSMiddleware,

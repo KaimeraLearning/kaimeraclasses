@@ -58,7 +58,7 @@ const StudentDashboard = () => {
         fetch(`${API}/student/enrollment-status`, { credentials: 'include' }),
         fetch(`${API}/student/demo-feedback-received`, { credentials: 'include' })
       ]);
-      if (!userRes.ok) throw new Error();
+      if (!userRes.ok) throw new Error('Authentication failed. Please log in again.');
       const userData = await userRes.json();
       setUser(userData);
       setProfileForm({ state: userData.state || '', city: userData.city || '', country: userData.country || '', grade: userData.grade || '', phone: userData.phone || '', institute: userData.institute || '', goal: userData.goal || '', preferred_time_slot: userData.preferred_time_slot || '' });

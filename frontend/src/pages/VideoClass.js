@@ -8,12 +8,12 @@ import { getApiError, API } from '../utils/api';
 const VideoClass = () => {
   const { classId } = useParams();
   const navigate = useNavigate();
-  const jitsiContainerRef = useRef(null);
-  const jitsiApiRef = useRef(null);
+  const zoomContainerRef = useRef(null);
+  const zoomClientRef = useRef(null);
   const [user, setUser] = useState(null);
   const [classInfo, setClassInfo] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [jitsiLoaded, setJitsiLoaded] = useState(false);
+  const [zoomReady, setZoomReady] = useState(false);
   const [isTeacher, setIsTeacher] = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -22,7 +22,8 @@ const VideoClass = () => {
         fetch(`${API}/auth/me`, { credentials: 'include' }),
         fetch(`${API}/classes/status/${classId}`, { credentials: 'include' })
       ]);
-      if (!userRes.ok || !statusRes.ok) throw new Error('Failed to load');
+      if (!userRes.ok) throw new Error('Authentication failed. Please log in again.');
+      if (!statusRes.ok) throw new Error('Class not found or you do not have access.');
       const userData = await userRes.json();
       const classData = await statusRes.json();
       setUser(userData);
@@ -30,77 +31,63 @@ const VideoClass = () => {
       setIsTeacher(userData.role === 'teacher' && classData.teacher_id === userData.user_id);
       setLoading(false);
     } catch (error) {
-      toast.error('Failed to load class data');
+      toast.error(error.message || 'Failed to load class data');
       setLoading(false);
     }
   }, [classId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Load Jitsi Meet script
+  // Join Zoom meeting when class is in progress
   useEffect(() => {
-    if (!classInfo || loading) return;
-    const script = document.createElement('script');
-    script.src = 'https://meet.jit.si/external_api.js';
-    script.async = true;
-    script.onload = () => setJitsiLoaded(true);
-    script.onerror = () => toast.error('Failed to load video system');
-    document.body.appendChild(script);
-    return () => { document.body.removeChild(script); };
-  }, [classInfo, loading]);
+    if (!classInfo || loading || !classInfo.zoom_meeting_id || classInfo.status !== 'in_progress') return;
+    if (zoomClientRef.current) return;
 
-  // Initialize Jitsi when loaded
-  useEffect(() => {
-    if (!jitsiLoaded || !user || !classInfo || !jitsiContainerRef.current) return;
-    if (jitsiApiRef.current) return; // Already initialized
+    const joinZoom = async () => {
+      try {
+        const ZoomMtgEmbedded = (await import('@zoom/meetingsdk/embedded')).default;
+        const client = ZoomMtgEmbedded.createClient();
 
-    const roomName = `kaimera-${classId}`;
-    try {
-      const api = new window.JitsiMeetExternalAPI('meet.jit.si', {
-        roomName: roomName,
-        parentNode: jitsiContainerRef.current,
-        width: '100%',
-        height: '100%',
-        configOverwrite: {
-          startWithAudioMuted: false,
-          startWithVideoMuted: false,
-          prejoinPageEnabled: false,
-          disableDeepLinking: true,
-          toolbarButtons: [
-            'camera', 'chat', 'desktop', 'fullscreen',
-            'hangup', 'microphone', 'participants-pane',
-            'raisehand', 'tileview', 'toggle-camera'
-          ]
-        },
-        interfaceConfigOverwrite: {
-          SHOW_JITSI_WATERMARK: false,
-          SHOW_WATERMARK_FOR_GUESTS: false,
-          DEFAULT_BACKGROUND: '#0f172a',
-          TOOLBAR_ALWAYS_VISIBLE: true
-        },
-        userInfo: {
-          displayName: user.name,
-          email: user.email
+        await client.init({
+          zoomAppRoot: zoomContainerRef.current,
+          language: 'en-US',
+          patchJsMedia: true,
+          leaveOnPageUnload: true
+        });
+
+        await client.join({
+          signature: classInfo.zoom_signature,
+          sdkKey: classInfo.zoom_sdk_key,
+          meetingNumber: classInfo.zoom_meeting_id,
+          password: classInfo.zoom_password || '',
+          userName: user?.name || 'Participant',
+          userEmail: user?.email || ''
+        });
+
+        zoomClientRef.current = client;
+        setZoomReady(true);
+        toast.success('Connected to video class!');
+      } catch (err) {
+        console.error('Zoom join error:', err);
+        // Fallback: open Zoom join URL in new tab
+        if (classInfo.zoom_join_url) {
+          toast.error('Embedded video failed. Opening Zoom in new tab...');
+          window.open(classInfo.zoom_join_url, '_blank');
+        } else {
+          toast.error('Failed to connect to video class. Please try refreshing.');
         }
-      });
-
-      api.addListener('readyToClose', () => {
-        handleLeave();
-      });
-
-      jitsiApiRef.current = api;
-    } catch (error) {
-      console.error('Jitsi init error:', error);
-      toast.error('Failed to start video');
-    }
-
-    return () => {
-      if (jitsiApiRef.current) {
-        jitsiApiRef.current.dispose();
-        jitsiApiRef.current = null;
       }
     };
-  }, [jitsiLoaded, user, classInfo, classId]);
+
+    joinZoom();
+
+    return () => {
+      if (zoomClientRef.current) {
+        try { zoomClientRef.current.leaveMeeting(); } catch {}
+        zoomClientRef.current = null;
+      }
+    };
+  }, [classInfo, loading, user]);
 
   const handleStartClass = async () => {
     try {
@@ -112,38 +99,31 @@ const VideoClass = () => {
   };
 
   const handleEndClass = async () => {
-    if (!window.confirm('End the class session? Students will be disconnected.')) return;
+    if (!window.confirm('End the class session?')) return;
     try {
       const res = await fetch(`${API}/classes/end/${classId}`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
-      if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+      if (zoomClientRef.current) {
+        try { zoomClientRef.current.leaveMeeting(); } catch {}
+        zoomClientRef.current = null;
+      }
       toast.success(data.message);
       navigate('/teacher-dashboard');
     } catch (error) { toast.error(error.message); }
   };
 
   const handleTakeScreenshot = async () => {
-    // Primary: Use Jitsi's native API (avoids CORS on iframe)
-    if (jitsiApiRef.current) {
-      try {
-        const data = await jitsiApiRef.current.captureLargeVideoScreenshot();
-        if (data && data.dataURL) {
-          const a = document.createElement('a');
-          a.href = data.dataURL;
-          a.download = `class-screenshot-${classId}-${Date.now()}.png`;
-          a.click();
-          toast.success('Screenshot captured and saved!');
-          return;
-        }
-      } catch (err) {
-        console.warn('Jitsi screenshot failed, trying fallback:', err);
-      }
-    }
-
-    // Fallback: Screen Capture API (user picks screen/tab)
+    // Capture the entire Zoom container showing both teacher and student
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser' } });
+      const container = zoomContainerRef.current;
+      if (!container) { toast.error('Video container not ready'); return; }
+
+      // Use html2canvas-like approach: capture via Screen Capture API
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: 'browser' },
+        preferCurrentTab: true
+      });
       const track = stream.getVideoTracks()[0];
       const imageCapture = new ImageCapture(track);
       const bitmap = await imageCapture.grabFrame();
@@ -158,18 +138,21 @@ const VideoClass = () => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `class-screenshot-${classId}-${Date.now()}.png`;
+        a.download = `class-proof-${classId}-${Date.now()}.png`;
         a.click();
         URL.revokeObjectURL(url);
-        toast.success('Screenshot saved!');
+        toast.success('Screenshot captured! Both teacher and student visible.');
       }, 'image/png');
-    } catch (fallbackError) {
-      toast.error('Screenshot failed. Ensure video is unmuted or use your device\'s screenshot feature.');
+    } catch (err) {
+      toast.error('Screenshot failed. Please allow screen capture when prompted.');
     }
   };
 
   const handleLeave = () => {
-    if (jitsiApiRef.current) { jitsiApiRef.current.dispose(); jitsiApiRef.current = null; }
+    if (zoomClientRef.current) {
+      try { zoomClientRef.current.leaveMeeting(); } catch {}
+      zoomClientRef.current = null;
+    }
     navigate(isTeacher ? '/teacher-dashboard' : '/student-dashboard');
   };
 
@@ -182,7 +165,7 @@ const VideoClass = () => {
     </div>
   );
 
-  // If student and class not in progress, show waiting screen
+  // Student: class not in progress - waiting screen
   if (!isTeacher && classInfo?.status !== 'in_progress') {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
@@ -201,14 +184,14 @@ const VideoClass = () => {
     );
   }
 
-  // Teacher hasn't started yet - show start button
+  // Teacher: class not started - show start button
   if (isTeacher && classInfo?.status !== 'in_progress') {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <div className="text-center text-white max-w-md">
           <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-12 border border-white/20">
             <h2 className="text-2xl font-bold mb-3">{classInfo?.title}</h2>
-            <p className="text-white/70 mb-6">Click below to start the class and open the video room</p>
+            <p className="text-white/70 mb-6">Click below to start the Zoom class</p>
             <Button onClick={handleStartClass} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full py-6 font-bold text-lg mb-4" data-testid="start-class-button">
               Start Class Now
             </Button>
@@ -221,7 +204,7 @@ const VideoClass = () => {
     );
   }
 
-  // Class is in progress - show Jitsi
+  // Class is in progress - show Zoom
   return (
     <div className="h-screen bg-slate-900 flex flex-col">
       {/* Top bar */}
@@ -229,12 +212,14 @@ const VideoClass = () => {
         <div className="flex items-center gap-3">
           <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
           <span className="text-white font-semibold text-sm">{classInfo?.title}</span>
-          <span className="text-slate-400 text-xs">LIVE</span>
+          <span className="text-slate-400 text-xs">LIVE via Zoom</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={handleTakeScreenshot} className="bg-sky-600 hover:bg-sky-700 text-white rounded-full px-4 py-2 text-sm" data-testid="screenshot-button">
-            <Camera className="w-4 h-4 mr-2" /> Screenshot
-          </Button>
+          {isTeacher && (
+            <Button onClick={handleTakeScreenshot} className="bg-sky-600 hover:bg-sky-700 text-white rounded-full px-4 py-2 text-sm" data-testid="screenshot-button">
+              <Camera className="w-4 h-4 mr-2" /> Screenshot (Proof)
+            </Button>
+          )}
           {isTeacher && (
             <Button onClick={handleEndClass} className="bg-red-600 hover:bg-red-700 text-white rounded-full px-4 py-2 text-sm" data-testid="end-class-button">
               <PhoneOff className="w-4 h-4 mr-2" /> End Class
@@ -248,13 +233,21 @@ const VideoClass = () => {
         </div>
       </div>
 
-      {/* Jitsi container */}
-      <div ref={jitsiContainerRef} className="flex-1" id="jitsi-container" data-testid="jitsi-container">
-        {!jitsiLoaded && (
+      {/* Zoom container */}
+      <div ref={zoomContainerRef} className="flex-1 relative" id="zoom-container" data-testid="zoom-container">
+        {!zoomReady && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center text-white">
               <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-sky-400" />
-              <p>Connecting to video room...</p>
+              <p>Connecting to Zoom meeting...</p>
+              {classInfo?.zoom_join_url && (
+                <p className="text-xs text-slate-400 mt-3">
+                  If video doesn't load,{' '}
+                  <a href={classInfo.zoom_join_url} target="_blank" rel="noopener noreferrer" className="text-sky-400 underline">
+                    open in Zoom app
+                  </a>
+                </p>
+              )}
             </div>
           </div>
         )}
