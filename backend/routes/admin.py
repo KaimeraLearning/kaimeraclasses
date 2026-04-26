@@ -213,7 +213,7 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
 
     # Enforce learning plan max_days constraint
     plan_max_days = learning_plan.get("max_days") if learning_plan else None
-    final_assigned_days = assignment.assigned_days if hasattr(assignment, 'assigned_days') else None
+    final_assigned_days = assignment.assigned_days
     if plan_max_days and plan_max_days > 0:
         if final_assigned_days and final_assigned_days > plan_max_days:
             raise HTTPException(

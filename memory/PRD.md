@@ -40,6 +40,11 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Added `awaiting_payment` array to teacher dashboard API and new "Awaiting Student Payment" UI section
 - Fixed legacy data: patched assignments missing the payment_status field
 
+### Start Class Button Fix & Learning Plan Max Days (Feb 2026)
+- Fixed teacher not seeing "Start Class" button — was restricted to "Today" tab only, now shows for all scheduled classes
+- Added `max_days` field to Learning Plans — admin sets max days, counselor assignment auto-locks to that limit
+- Backend enforces: rejects assignment if assigned_days > plan's max_days, auto-fills from plan if not provided
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)
