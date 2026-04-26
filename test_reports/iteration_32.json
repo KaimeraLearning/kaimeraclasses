@@ -1,0 +1,52 @@
+{
+  "summary": "Iteration 32 testing: re-verified Zoom integration + error notifications. The iteration-31 frontend bug ('body stream already read' on wrong login) is FIXED — wrong login now displays 'Invalid email or password' toast. Backend: 7/8 tests passed, 1 skipped (real Zoom create-meeting requires meeting:write scopes — same external config block from iter-31). Admin login + dashboard fully functional.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/classes/start/{id}",
+        "issue": "Real Zoom meeting creation still skipped pending Zoom Marketplace scope addition (meeting:write:meeting + admin variant). Backend code is correct; raises HTTPException 500 'Failed to create video meeting' with the Zoom error message — verified."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Operations Center > Identity Creator",
+        "issues": ["Grade/Class field uses browser-native <select> instead of shadcn Select component — inconsistent with rest of app. Minor visual inconsistency."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration31_zoom_errors.py",
+    "/app/test_reports/pytest/iteration_32.xml"
+  ],
+  "action_items": [
+    "(USER ACTION) Add Zoom OAuth scopes 'meeting:write:meeting' and 'meeting:write:meeting:admin' in Zoom Marketplace > Server-to-Server OAuth app to enable real meeting creation. Backend code is correct; this is a config-only blocker.",
+    "(OPTIONAL) Replace native <select> on Identity Creator > Grade/Class with shadcn Select for design consistency.",
+    "(OPTIONAL) routes/classes.py start_class: wrap generate_zoom_sdk_signature() in try/except for clarity (currently outside the try block — would surface generic 500 if signature fails).",
+    "(OPTIONAL) Login.js handleLogin still uses ad-hoc data.detail check; could be unified with getApiError(res) helper from utils/api.js for consistency. Functionally correct now."
+  ],
+  "critical_code_review_comments": [
+    "Login.js (lines 34-45) correctly handles 401 with try/catch on res.json() — falls back to status-based messages when proxy strips body. Verified working in browser.",
+    "utils/api.js getApiError uses res.clone() before reading — safe from double-consumption. Status fallback messages cover 400/401/403/404/409/422/429/500/502/503.",
+    "VideoClass.js: no Jitsi references remain. Zoom SDK Component View dynamically imports @zoom/meetingsdk/embedded (line 48) — good code-splitting. Screenshot button properly gated on isTeacher (line 218).",
+    "VideoClass.js handleTakeScreenshot uses navigator.mediaDevices.getDisplayMedia + ImageCapture.grabFrame() — works on Chrome/Edge but ImageCapture is unsupported on Firefox/Safari. Consider html2canvas fallback.",
+    "services/zoom.py captures ZOOM_* env vars at module-import time (lines 11-13). Module reload after .env change requires backend restart — currently OK but brittle.",
+    "server.py global Exception handler returns JSON 500 with proper content-type. FastAPI HTTPException is intercepted earlier (verified by 401 'Invalid credentials' response on wrong login)."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "87.5% (7 passed / 1 skipped — Zoom external config; 0 failed)",
+    "frontend": "100% (login error toast fixed, admin dashboard loads, no console errors)"
+  },
+  "test_credentials": "Admin: info@kaimeralearning.com / solidarity&peace2023 — works.",
+  "seed_data_creation": "Test creates+teardown TEST_-prefixed teacher user, user_session, class_session for Zoom start test. Cleaned up on fixture teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All iteration-32 features verified. The Zoom real-meeting test (test_classes_start_returns_zoom_fields) will continue to skip until user adds 'meeting:write:meeting' scope in Zoom Marketplace. After scope is added, that test will assert the 200 response shape with zoom_meeting_id/zoom_join_url/zoom_password/zoom_signature/zoom_sdk_key. Frontend wrong-login bug from iter-31 is RESOLVED — verified via Playwright (toast text == 'Invalid email or password').",
+  "rca of the issue": "The previous iteration's wrong-login bug ('body stream already read') was fixed in Login.js by wrapping res.json() in try/catch and falling back to status-based messages when JSON parse fails (proxy was stripping 401 body). Verified live: wrong creds now show 'Invalid email or password' as expected. The Zoom skip is purely external config — no code defect."
+}

@@ -4,7 +4,9 @@ import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
@@ -45,8 +47,18 @@ async def db_error_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=503, content={"detail": "Database connection error. Please try again later."})
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    msg = "; ".join([f"{e.get('loc', [''])[- 1]}: {e.get('msg', '')}" for e in errors])
+    return JSONResponse(status_code=422, content={"detail": f"Invalid input: {msg}"})
+
+
 @app.exception_handler(Exception)
 async def general_error_handler(request: Request, exc: Exception):
+    # Don't catch HTTP exceptions — let FastAPI handle them normally with proper detail messages
+    if isinstance(exc, StarletteHTTPException):
+        raise exc
     logger.error(f"Unhandled error on {request.url.path}: {type(exc).__name__}: {exc}")
     return JSONResponse(status_code=500, content={"detail": f"Server error: {type(exc).__name__}. Please try again."})
 

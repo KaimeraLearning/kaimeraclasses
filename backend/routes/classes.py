@@ -366,8 +366,11 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
 
     # Generate SDK signatures for host (teacher) and participant (student)
     meeting_number = zoom_data["id"]
-    host_signature = generate_zoom_sdk_signature(meeting_number, role=1)
-    participant_signature = generate_zoom_sdk_signature(meeting_number, role=0)
+    try:
+        host_signature = generate_zoom_sdk_signature(meeting_number, role=1)
+        participant_signature = generate_zoom_sdk_signature(meeting_number, role=0)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate video credentials: {str(e)}")
 
     await db.class_sessions.update_one(
         {"class_id": class_id},

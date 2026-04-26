@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
 import { GraduationCap, Mail, Lock, User, Phone, MapPin, BookOpen, ArrowLeft, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
 
-import { API } from '../utils/api';
+import { API, getApiError } from '../utils/api';
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
 const Login = () => {
@@ -31,8 +31,18 @@ const Login = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.email, password: form.password })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Login failed');
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        if (res.status === 401) throw new Error('Invalid email or password');
+        if (res.status === 403) throw new Error('Account suspended or not verified');
+        if (res.status === 429) throw new Error('Too many login attempts. Please wait and try again.');
+        throw new Error(`Login failed. Please try again.`);
+      }
+      if (!res.ok) {
+        throw new Error(data.detail || 'Invalid email or password');
+      }
 
       if (data.needs_verification) {
         setVerifyEmail(data.email);
@@ -46,7 +56,7 @@ const Login = () => {
       toast.success(`Welcome back, ${data.user.name}!`);
       redirectByRole(data.user.role);
     } catch (err) {
-      toast.error(err.message || 'Something went wrong');
+      toast.error(err.message || 'Login failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }

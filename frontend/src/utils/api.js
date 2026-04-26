@@ -7,14 +7,31 @@ export const API = "/api";
  */
 export async function getApiError(res) {
   try {
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      const data = await res.json();
-      return data.detail || data.message || data.error || `Request failed (${res.status})`;
+    const clone = res.clone();
+    const text = await clone.text();
+    try {
+      const data = JSON.parse(text);
+      return data.detail || data.message || data.error || statusMessage(res.status);
+    } catch {
+      return text || statusMessage(res.status);
     }
-    const text = await res.text();
-    return text || `Request failed (${res.status})`;
   } catch {
-    return `Server error (${res.status}). Please try again.`;
+    return statusMessage(res.status);
   }
+}
+
+function statusMessage(status) {
+  const messages = {
+    400: 'Invalid request. Please check your input.',
+    401: 'Authentication failed. Please log in again.',
+    403: 'You do not have permission to perform this action.',
+    404: 'The requested resource was not found.',
+    409: 'Conflict: this action has already been performed.',
+    422: 'Invalid input. Please check the form fields.',
+    429: 'Too many requests. Please wait and try again.',
+    500: 'Server error. Please try again later.',
+    502: 'Server temporarily unavailable. Please try again.',
+    503: 'Database connection issue. Please try again later.'
+  };
+  return messages[status] || `Request failed (${status}). Please try again.`;
 }
