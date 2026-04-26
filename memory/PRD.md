@@ -29,6 +29,11 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 
 ## Completed Features
 
+### Deployment & API Routing (Feb 2026)
+- Refactored ALL 26 frontend files to use relative `/api` paths via centralized `utils/api.js`
+- Eliminated hardcoded `REACT_APP_BACKEND_URL` from all source files — deployed app now routes API calls to its own domain
+- Fixed password_hash leak in `/api/auth/login` and `/api/auth/me` responses
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)

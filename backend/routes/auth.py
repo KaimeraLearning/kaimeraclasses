@@ -188,7 +188,7 @@ async def login(credentials: UserLogin, response: Response):
     user_doc['created_at'] = datetime.fromisoformat(user_doc['created_at'])
     user = User(**user_doc)
 
-    return {"user": user.model_dump(), "session_token": session_token}
+    return {"user": user.model_dump(exclude={"password_hash"}), "session_token": session_token}
 
 
 @router.post("/auth/verify-account")
@@ -352,14 +352,14 @@ async def google_auth(request: Request, response: Response):
     user_doc['created_at'] = datetime.fromisoformat(user_doc['created_at'])
     user = User(**user_doc)
 
-    return {"user": user.model_dump(), "session_token": session_token}
+    return {"user": user.model_dump(exclude={"password_hash"}), "session_token": session_token}
 
 
 @router.get("/auth/me")
 async def get_me(request: Request, authorization: Optional[str] = Header(None)):
     """Get current user"""
     user = await get_current_user(request, authorization)
-    return user.model_dump()
+    return user.model_dump(exclude={"password_hash"})
 
 
 @router.post("/auth/logout")
