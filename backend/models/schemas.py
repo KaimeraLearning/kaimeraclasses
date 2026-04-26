@@ -144,6 +144,7 @@ class LearningPlan(BaseModel):
     name: str
     price: float
     details: str  # Syllabus / description
+    max_days: Optional[int] = None  # Max class days allowed for this plan
     is_active: bool = True
     created_at: Optional[str] = None
 

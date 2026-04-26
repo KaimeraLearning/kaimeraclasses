@@ -211,6 +211,18 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         if not learning_plan:
             raise HTTPException(status_code=400, detail="Selected learning plan not found or inactive")
 
+    # Enforce learning plan max_days constraint
+    plan_max_days = learning_plan.get("max_days") if learning_plan else None
+    final_assigned_days = assignment.assigned_days if hasattr(assignment, 'assigned_days') else None
+    if plan_max_days and plan_max_days > 0:
+        if final_assigned_days and final_assigned_days > plan_max_days:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot assign more than {plan_max_days} days. The learning plan '{learning_plan['name']}' allows a maximum of {plan_max_days} days."
+            )
+        if not final_assigned_days:
+            final_assigned_days = plan_max_days
+
     pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
     credit_price = learning_plan['price'] if learning_plan else (pricing.get("class_price_student", 0) if pricing else 0)
 
@@ -233,7 +245,7 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         "class_frequency": assignment.class_frequency if hasattr(assignment, 'class_frequency') else None,
         "specific_days": assignment.specific_days if hasattr(assignment, 'specific_days') else None,
         "demo_performance_notes": assignment.demo_performance_notes if hasattr(assignment, 'demo_performance_notes') else None,
-        "assigned_days": assignment.assigned_days if hasattr(assignment, 'assigned_days') else None
+        "assigned_days": final_assigned_days
     }
     await db.student_teacher_assignments.insert_one(assignment_doc)
     return {"message": "Student assigned to teacher. Teacher has 24 hours to approve.", "assignment_id": assignment_id}
@@ -460,7 +472,7 @@ async def create_learning_plan(plan: LearningPlan, request: Request, authorizati
     plan_id = f"plan_{uuid.uuid4().hex[:12]}"
     plan_doc = {
         "plan_id": plan_id, "name": plan.name, "price": plan.price,
-        "details": plan.details, "is_active": True,
+        "details": plan.details, "max_days": plan.max_days, "is_active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": user.user_id
     }
@@ -487,7 +499,7 @@ async def update_learning_plan(plan_id: str, plan: LearningPlan, request: Reques
         raise HTTPException(status_code=404, detail="Plan not found")
     await db.learning_plans.update_one(
         {"plan_id": plan_id},
-        {"$set": {"name": plan.name, "price": plan.price, "details": plan.details}}
+        {"$set": {"name": plan.name, "price": plan.price, "details": plan.details, "max_days": plan.max_days}}
     )
     return {"message": "Learning plan updated"}
 

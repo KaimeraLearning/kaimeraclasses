@@ -324,7 +324,7 @@ const TeacherDashboard = () => {
         )}
 
         <div className="space-y-1.5">
-          {section === 'today' && cls.status === 'scheduled' && !cls.cancelled_today && (
+          {cls.status === 'scheduled' && !cls.cancelled_today && (
             <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8" data-testid={`start-class-${cls.class_id}`}>
               <Play className="w-3 h-3 mr-1" /> Start Class
             </Button>

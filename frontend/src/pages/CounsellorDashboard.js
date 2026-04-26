@@ -570,12 +570,19 @@ const CounsellorDashboard = () => {
               </div>
               <div>
                 <Label className="flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5 text-amber-500" /> Learning Plan *</Label>
-                <select value={selectedPlanId} onChange={e => setSelectedPlanId(e.target.value)}
+                <select value={selectedPlanId} onChange={e => {
+                    const planId = e.target.value;
+                    setSelectedPlanId(planId);
+                    const plan = learningPlans.find(p => p.plan_id === planId);
+                    if (plan?.max_days) {
+                      setAssignedDays(String(plan.max_days));
+                    }
+                  }}
                   className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" data-testid="learning-plan-select">
                   <option value="">Choose a learning plan...</option>
                   {learningPlans.map(p => (
                     <option key={p.plan_id} value={p.plan_id}>
-                      {p.name} - &#8377;{p.price}
+                      {p.name} - &#8377;{p.price} {p.max_days ? `(${p.max_days} days)` : ''}
                     </option>
                   ))}
                 </select>
@@ -608,10 +615,32 @@ const CounsellorDashboard = () => {
                   className="w-full rounded-xl border-2 border-slate-200 px-3 py-2 text-sm" rows={3} data-testid="assign-demo-notes" />
               </div>
               <div>
-                <Label className="flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5 text-sky-600" /> Number of Class Days (Required)</Label>
-                <Input type="number" min="1" value={assignedDays} onChange={e => setAssignedDays(e.target.value)}
-                  placeholder="e.g. 10, 20, 30" className="rounded-xl" data-testid="assign-days-count" />
-                <p className="text-[10px] text-slate-500 mt-0.5">Teacher will only be able to create this many days of classes</p>
+                <Label className="flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5 text-sky-600" /> Number of Class Days</Label>
+                {(() => {
+                  const plan = learningPlans.find(p => p.plan_id === selectedPlanId);
+                  const maxDays = plan?.max_days;
+                  const isLocked = maxDays && maxDays > 0;
+                  return (
+                    <>
+                      <Input type="number" min="1" max={isLocked ? maxDays : undefined}
+                        value={assignedDays}
+                        onChange={e => {
+                          const val = parseInt(e.target.value) || '';
+                          if (isLocked && val > maxDays) {
+                            setAssignedDays(String(maxDays));
+                          } else {
+                            setAssignedDays(e.target.value);
+                          }
+                        }}
+                        readOnly={isLocked}
+                        placeholder={isLocked ? `${maxDays} (set by plan)` : "e.g. 10, 20, 30"}
+                        className={`rounded-xl ${isLocked ? 'bg-slate-100 cursor-not-allowed' : ''}`} data-testid="assign-days-count" />
+                      {isLocked
+                        ? <p className="text-[10px] text-amber-600 mt-0.5 font-semibold">Locked to {maxDays} days as per learning plan</p>
+                        : <p className="text-[10px] text-slate-500 mt-0.5">Teacher will only be able to create this many days of classes</p>}
+                    </>
+                  );
+                })()}
               </div>
               <p className="text-xs text-slate-500 bg-slate-50 rounded-lg p-2">Price per class is set globally by Admin. System pricing will apply.</p>
               <Button onClick={handleAssignStudent} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="confirm-assign-button">

@@ -106,7 +106,7 @@ const AdminDashboard = () => {
 
   // Learning Plans
   const [learningPlans, setLearningPlans] = useState([]);
-  const [planForm, setPlanForm] = useState({ name: '', price: '', details: '' });
+  const [planForm, setPlanForm] = useState({ name: '', price: '', details: '', max_days: '' });
   const [editingPlan, setEditingPlan] = useState(null);
 
   // Razorpay Payments
@@ -162,11 +162,11 @@ const AdminDashboard = () => {
       const method = editingPlan ? 'PUT' : 'POST';
       const res = await fetch(url, {
         method, credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: planForm.name, price: parseFloat(planForm.price), details: planForm.details })
+        body: JSON.stringify({ name: planForm.name, price: parseFloat(planForm.price), details: planForm.details, max_days: planForm.max_days ? parseInt(planForm.max_days) : null })
       });
       if (!res.ok) throw new Error(await getApiError(res));
       toast.success(editingPlan ? 'Plan updated' : 'Plan created');
-      setPlanForm({ name: '', price: '', details: '' });
+      setPlanForm({ name: '', price: '', details: '', max_days: '' });
       setEditingPlan(null);
       fetchLearningPlans();
     } catch (err) { toast.error(err.message); }
@@ -790,6 +790,11 @@ const AdminDashboard = () => {
                     <Label className="text-xs text-slate-600 mb-1 block">Details / Syllabus</Label>
                     <textarea value={planForm.details} onChange={e => setPlanForm({ ...planForm, details: e.target.value })} placeholder="Describe the syllabus, topics covered, duration..." className="w-full border border-slate-200 rounded-xl p-3 text-sm min-h-[120px] focus:outline-none focus:ring-2 focus:ring-amber-400" data-testid="plan-details-input" />
                   </div>
+                  <div>
+                    <Label className="text-xs text-slate-600 mb-1 block">Max Class Days</Label>
+                    <Input type="number" min="1" value={planForm.max_days} onChange={e => setPlanForm({ ...planForm, max_days: e.target.value })} placeholder="e.g. 3, 5, 10" className="rounded-xl" data-testid="plan-max-days-input" />
+                    <p className="text-[10px] text-slate-500 mt-0.5">Counselor cannot assign more than this many days with this plan</p>
+                  </div>
                   <div className="flex gap-2">
                     <Button type="submit" className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold" data-testid="save-plan-btn">
                       <Save className="w-4 h-4 mr-2" /> {editingPlan ? 'Update' : 'Create'}
@@ -814,8 +819,9 @@ const AdminDashboard = () => {
                           <span className="text-lg font-black text-amber-600">&#8377;{p.price}</span>
                         </div>
                         <p className="text-sm text-slate-600 mb-4 whitespace-pre-wrap line-clamp-4">{p.details}</p>
+                        {p.max_days && <p className="text-xs text-sky-700 font-semibold mb-3">Max Days: {p.max_days}</p>}
                         <div className="flex gap-2">
-                          <Button variant="outline" size="sm" className="rounded-xl text-xs flex-1" onClick={() => { setEditingPlan(p.plan_id); setPlanForm({ name: p.name, price: p.price, details: p.details }); }} data-testid={`edit-plan-${p.plan_id}`}>
+                          <Button variant="outline" size="sm" className="rounded-xl text-xs flex-1" onClick={() => { setEditingPlan(p.plan_id); setPlanForm({ name: p.name, price: p.price, details: p.details, max_days: p.max_days || '' }); }} data-testid={`edit-plan-${p.plan_id}`}>
                             <Pencil className="w-3 h-3 mr-1" /> Edit
                           </Button>
                           <Button variant="outline" size="sm" className="rounded-xl text-xs text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleDeletePlan(p.plan_id)} data-testid={`delete-plan-${p.plan_id}`}>
