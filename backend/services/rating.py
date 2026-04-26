@@ -24,17 +24,21 @@ async def recalc_teacher_rating(teacher_id: str):
     ).to_list(5000)
     avg_feedback = sum(f["rating"] for f in feedbacks) / len(feedbacks) if feedbacks else 5.0
 
-    # Count monthly cancellations by teacher
+    # Count monthly cancellations and transfers by teacher
     monthly_cancellations = await db.teacher_rating_events.count_documents({
         "teacher_id": teacher_id, "event": "cancellation",
+        "created_at": {"$gte": month_start}
+    })
+    monthly_transfers = await db.teacher_rating_events.count_documents({
+        "teacher_id": teacher_id, "event": "transfer_penalty",
         "created_at": {"$gte": month_start}
     })
 
     # Count bad feedbacks (rating <= 2)
     bad_feedbacks = sum(1 for f in feedbacks if f["rating"] <= 2)
 
-    # Rating: start at avg_feedback, subtract configurable amount per cancellation, 0.3 per bad feedback
-    penalty = (monthly_cancellations * cancel_deduction) + (bad_feedbacks * 0.3)
+    # Rating: subtract configurable amount per cancellation, same per transfer, 0.3 per bad feedback
+    penalty = (monthly_cancellations * cancel_deduction) + (monthly_transfers * cancel_deduction) + (bad_feedbacks * 0.3)
     star_rating = round(max(0, min(5, avg_feedback - penalty)), 1)
 
     # Auto-suspension: 5+ cancellations this month

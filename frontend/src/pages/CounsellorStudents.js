@@ -17,6 +17,11 @@ const CounsellorStudents = () => {
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [studentAttendance, setStudentAttendance] = useState([]);
+  const [attendanceClasses, setAttendanceClasses] = useState([]);
+  const [selectedAttClass, setSelectedAttClass] = useState('');
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
+  const [transferTeacherId, setTransferTeacherId] = useState('');
+  const [teachers, setTeachers] = useState([]);
 
   useEffect(() => { fetchStudents(); }, []);
 
@@ -41,9 +46,55 @@ const CounsellorStudents = () => {
       const res = await fetch(`${API}/counsellor/student-profile/${student.user_id}`, { credentials: 'include' });
       if (res.ok) setStudentProfile(await res.json());
       const attRes = await fetch(`${API}/counsellor/student-attendance/${student.user_id}`, { credentials: 'include' });
-      if (attRes.ok) setStudentAttendance(await attRes.json());
+      if (attRes.ok) {
+        const attData = await attRes.json();
+        setStudentAttendance(attData.records || []);
+        setAttendanceClasses(attData.classes || []);
+        setSelectedAttClass('');
+      }
+      const teacherRes = await fetch(`${API}/counsellor/dashboard`, { credentials: 'include' });
+      if (teacherRes.ok) {
+        const dashData = await teacherRes.json();
+        setTeachers(dashData.teachers || []);
+      }
     } catch (error) { console.error(error); }
   };
+
+  const fetchFilteredAttendance = async (classId) => {
+    if (!selectedStudent) return;
+    const url = classId ? `${API}/counsellor/student-attendance/${selectedStudent.user_id}?class_id=${classId}` : `${API}/counsellor/student-attendance/${selectedStudent.user_id}`;
+    try {
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setStudentAttendance(data.records || []);
+      }
+    } catch {}
+  };
+
+  const handleTransfer = async () => {
+    if (!selectedStudent || !transferTeacherId) return;
+    const currentAssignment = studentProfile?.current_assignment;
+    if (!currentAssignment) { toast.error('No active assignment found'); return; }
+    if (!window.confirm(`Transfer ${selectedStudent.name} to a new teacher? The old teacher's rating will be deducted.`)) return;
+    try {
+      const res = await fetch(`${API}/counsellor/transfer-student`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          student_id: selectedStudent.user_id,
+          old_teacher_id: currentAssignment.teacher_id,
+          new_teacher_id: transferTeacherId
+        })
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'Transfer failed'); }
+      const data = await res.json();
+      toast.success(data.message);
+      setShowTransferDialog(false);
+      setTransferTeacherId('');
+      fetchStudentDetails(selectedStudent);
+    } catch (err) { toast.error(err.message); }
+  };
+
 
   const filteredStudents = students.filter(s =>
     !searchQuery ||
@@ -226,28 +277,76 @@ const CounsellorStudents = () => {
                 </div>
               )}
 
-              {/* Attendance History */}
-              {studentAttendance.length > 0 && (
-                <div>
-                  <p className="text-sm font-semibold text-slate-700 mb-2">Attendance History ({studentAttendance.length})</p>
+              {/* Attendance History with Class Filter */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-semibold text-slate-700">Attendance History ({studentAttendance.length})</p>
+                  {attendanceClasses.length > 0 && (
+                    <select value={selectedAttClass} onChange={e => { setSelectedAttClass(e.target.value); fetchFilteredAttendance(e.target.value); }}
+                      className="text-xs border border-slate-200 rounded-lg px-2 py-1" data-testid="attendance-class-filter">
+                      <option value="">All Classes</option>
+                      {attendanceClasses.map(c => (
+                        <option key={c.class_id} value={c.class_id}>{c.class_title}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                {studentAttendance.length > 0 ? (
                   <div className="space-y-1 max-h-48 overflow-y-auto">
                     {studentAttendance.map((r, i) => (
-                      <div key={i} className={`rounded-lg p-2 flex justify-between items-center text-xs ${r.off_day_marking ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
-                        <div>
-                          <span className="font-semibold text-slate-700">{r.date}</span>
-                          <span className="text-slate-500 ml-2">by {r.teacher_name}</span>
-                          {r.off_day_marking && <span className="text-amber-600 font-semibold ml-2">(Off-day)</span>}
-                          {r.reason === 'forgot_to_mark' && <span className="text-amber-600 ml-1">- Forgot</span>}
-                          {r.reason === 'rescheduled_class' && <span className="text-sky-600 ml-1">- Rescheduled</span>}
+                      <div key={i} className={`rounded-lg p-2 text-xs ${r.off_day_marking ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <span className="font-semibold text-slate-700">{r.date}</span>
+                            {r.class_title && <span className="text-sky-700 ml-2 font-medium">{r.class_title}</span>}
+                            <span className="text-slate-400 ml-2">by {r.teacher_name}</span>
+                            {r.off_day_marking && <span className="text-amber-600 font-semibold ml-1">(Off-day)</span>}
+                            {r.reason === 'forgot_to_mark' && <span className="text-amber-600 ml-1">- Forgot</span>}
+                            {r.reason === 'rescheduled_class' && <span className="text-sky-600 ml-1">- Rescheduled</span>}
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full font-semibold ${r.status === 'present' ? 'bg-emerald-100 text-emerald-700' : r.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded-full font-semibold ${r.status === 'present' ? 'bg-emerald-100 text-emerald-700' : r.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
                       </div>
                     ))}
                   </div>
+                ) : (
+                  <p className="text-xs text-slate-400">No attendance records yet</p>
+                )}
+              </div>
+
+              {/* Transfer Student Button */}
+              {studentProfile?.current_assignment && studentProfile.current_assignment.status === 'approved' && (
+                <div className="pt-2 border-t border-slate-200">
+                  <Button onClick={() => setShowTransferDialog(true)} className="w-full bg-orange-500 hover:bg-orange-600 text-white rounded-full font-bold" data-testid="transfer-student-btn">
+                    Transfer Student to Another Teacher
+                  </Button>
                 </div>
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Dialog */}
+      <Dialog open={showTransferDialog} onOpenChange={setShowTransferDialog}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader><DialogTitle className="text-xl font-bold">Transfer Student</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-4">
+            <p className="text-sm text-slate-600">Transfer <strong>{selectedStudent?.name}</strong> to a new teacher. Remaining class days will be forwarded. The current teacher's rating will be deducted.</p>
+            <div>
+              <label className="text-xs text-slate-600 block mb-1">Select New Teacher</label>
+              <select value={transferTeacherId} onChange={e => setTransferTeacherId(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" data-testid="transfer-teacher-select">
+                <option value="">Choose a teacher...</option>
+                {teachers.filter(t => t.user_id !== studentProfile?.current_assignment?.teacher_id).map(t => (
+                  <option key={t.user_id} value={t.user_id}>{t.name} ({t.email})</option>
+                ))}
+              </select>
+            </div>
+            <Button onClick={handleTransfer} disabled={!transferTeacherId} className="w-full bg-orange-500 hover:bg-orange-600 text-white rounded-full py-5 font-bold disabled:opacity-50" data-testid="confirm-transfer-btn">
+              Confirm Transfer
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

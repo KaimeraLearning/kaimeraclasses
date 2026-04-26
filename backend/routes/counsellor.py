@@ -79,13 +79,30 @@ async def get_student_profile(student_id: str, request: Request, authorization: 
 
 @router.get("/counsellor/student-attendance/{student_id}")
 async def counsellor_student_attendance(student_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Counsellor views a student's full attendance history including off-day markings"""
+    """Counsellor/Admin views a student's attendance history, optionally filtered by class_id"""
     user = await get_current_user(request, authorization)
     if user.role not in ["counsellor", "admin"]:
         raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
 
-    records = await db.attendance.find({"student_id": student_id}, {"_id": 0}).sort("date", -1).to_list(500)
-    return records
+    params = dict(request.query_params)
+    query = {"student_id": student_id}
+    if params.get("class_id"):
+        query["class_id"] = params["class_id"]
+
+    records = await db.attendance.find(query, {"_id": 0}).sort("date", -1).to_list(500)
+
+    # Also return unique classes for dropdown filter
+    all_records = await db.attendance.find({"student_id": student_id}, {"_id": 0, "class_id": 1, "class_title": 1}).to_list(1000)
+    classes_map = {}
+    for r in all_records:
+        cid = r.get("class_id")
+        if cid and cid not in classes_map:
+            classes_map[cid] = r.get("class_title", cid)
+
+    return {
+        "records": records,
+        "classes": [{"class_id": k, "class_title": v} for k, v in classes_map.items()]
+    }
 
 
 @router.get("/counsellor/pending-proofs")
@@ -191,6 +208,139 @@ async def reassign_student(data: Dict[str, Any], request: Request, authorization
         return {"message": "Student kept with current teacher for rebooking"}
 
     raise HTTPException(status_code=400, detail="Invalid action")
+
+
+@router.post("/counsellor/transfer-student")
+async def transfer_student(data: Dict[str, Any], request: Request, authorization: Optional[str] = Header(None)):
+    """Transfer a student from one teacher to another mid-class. Remaining days go to new teacher."""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+
+    student_id = data.get("student_id")
+    old_teacher_id = data.get("old_teacher_id")
+    new_teacher_id = data.get("new_teacher_id")
+
+    if not student_id or not old_teacher_id or not new_teacher_id:
+        raise HTTPException(status_code=400, detail="student_id, old_teacher_id, and new_teacher_id required")
+    if old_teacher_id == new_teacher_id:
+        raise HTTPException(status_code=400, detail="New teacher must be different from current teacher")
+
+    # Verify new teacher exists
+    new_teacher = await db.users.find_one({"user_id": new_teacher_id, "role": "teacher"}, {"_id": 0})
+    if not new_teacher:
+        raise HTTPException(status_code=404, detail="New teacher not found")
+
+    # Find active assignment
+    assignment = await db.student_teacher_assignments.find_one(
+        {"student_id": student_id, "teacher_id": old_teacher_id, "status": "approved"},
+        {"_id": 0}
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="No active assignment found for this student-teacher pair")
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Find active/scheduled classes for this student with old teacher
+    active_classes = await db.class_sessions.find(
+        {"teacher_id": old_teacher_id, "assigned_student_id": student_id,
+         "status": {"$in": ["scheduled", "in_progress"]},
+         "end_date": {"$gte": today}},
+        {"_id": 0}
+    ).to_list(50)
+
+    # Calculate remaining days across all classes
+    total_remaining_days = 0
+    for cls in active_classes:
+        try:
+            end_dt = datetime.strptime(cls.get("end_date", today), "%Y-%m-%d")
+            today_dt = datetime.strptime(today, "%Y-%m-%d")
+            remaining = max(0, (end_dt - today_dt).days + 1)
+            total_remaining_days += remaining
+        except ValueError:
+            pass
+
+    # Cancel old teacher's active classes (mark as transferred)
+    for cls in active_classes:
+        await db.class_sessions.update_one(
+            {"class_id": cls["class_id"]},
+            {"$set": {
+                "status": "transferred",
+                "transferred_to": new_teacher_id,
+                "transferred_at": datetime.now(timezone.utc).isoformat(),
+                "transferred_by": user.user_id
+            }}
+        )
+
+    # Update old assignment as transferred
+    await db.student_teacher_assignments.update_one(
+        {"assignment_id": assignment["assignment_id"]},
+        {"$set": {
+            "status": "transferred",
+            "transferred_to_teacher_id": new_teacher_id,
+            "transferred_to_teacher_name": new_teacher["name"],
+            "transferred_at": datetime.now(timezone.utc).isoformat(),
+            "transferred_by": user.user_id
+        }}
+    )
+
+    # Create new assignment for new teacher (auto-approved, already paid)
+    new_assignment_id = f"assign_{uuid.uuid4().hex[:12]}"
+    student = await db.users.find_one({"user_id": student_id}, {"_id": 0})
+    new_assignment_doc = {
+        "assignment_id": new_assignment_id,
+        "student_id": student_id,
+        "student_name": student["name"] if student else assignment.get("student_name"),
+        "student_email": student["email"] if student else assignment.get("student_email"),
+        "teacher_id": new_teacher_id,
+        "teacher_name": new_teacher["name"],
+        "teacher_email": new_teacher["email"],
+        "status": "approved",
+        "payment_status": "paid",
+        "payment_method": "transferred",
+        "credit_price": assignment.get("credit_price", 0),
+        "assigned_at": datetime.now(timezone.utc).isoformat(),
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "assigned_by": user.user_id,
+        "learning_plan_id": assignment.get("learning_plan_id"),
+        "learning_plan_name": assignment.get("learning_plan_name"),
+        "learning_plan_price": assignment.get("learning_plan_price"),
+        "assigned_days": total_remaining_days,
+        "transferred_from_teacher_id": old_teacher_id,
+        "transferred_from_assignment_id": assignment["assignment_id"]
+    }
+    await db.student_teacher_assignments.insert_one(new_assignment_doc)
+
+    # Deduct rating from old teacher (admin-configured penalty)
+    from services.rating import record_rating_event
+    rating, suspended = await record_rating_event(
+        old_teacher_id, "transfer_penalty",
+        f"Student {assignment.get('student_name')} transferred to {new_teacher['name']} by counsellor"
+    )
+
+    # Notify both teachers and student
+    for notif in [
+        {"user_id": old_teacher_id, "type": "student_transferred_out",
+         "title": "Student Transferred",
+         "message": f"Student {assignment.get('student_name')} has been transferred to another teacher by counsellor."},
+        {"user_id": new_teacher_id, "type": "student_transferred_in",
+         "title": "New Student Assigned (Transfer)",
+         "message": f"Student {assignment.get('student_name')} has been transferred to you. {total_remaining_days} days remaining."},
+        {"user_id": student_id, "type": "teacher_changed",
+         "title": "Your Teacher Has Changed",
+         "message": f"You have been reassigned to {new_teacher['name']}. Your classes will continue shortly."}
+    ]:
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            **notif, "read": False, "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    return {
+        "message": f"Student transferred to {new_teacher['name']}. {total_remaining_days} remaining days assigned.",
+        "new_assignment_id": new_assignment_id,
+        "old_teacher_rating": rating,
+        "old_teacher_suspended": suspended
+    }
 
 
 @router.get("/counsellor/search-students")
