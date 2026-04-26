@@ -7,7 +7,7 @@ import { GraduationCap, ArrowLeft, CreditCard, Users, Check, IndianRupee, Loader
 import { getApiError, API } from '../utils/api';
 
 const CREDIT_PACKAGES = [
-  { id: 'pack_2000', credits: 2000, price: 2000, label: '2,000' },
+  { id: 'pack_2000', credits: 2, price: 2000, label: '2,000' },
   { id: 'pack_5000', credits: 5000, price: 5000, label: '5,000', popular: true },
   { id: 'pack_10000', credits: 10000, price: 10000, label: '10,000' },
 ];

@@ -105,10 +105,13 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
     approved_students = await db.student_teacher_assignments.find(
         {"teacher_id": user.user_id, "status": "approved", "payment_status": "paid"}, {"_id": 0}
     ).to_list(1000)
+    awaiting_payment = await db.student_teacher_assignments.find(
+        {"teacher_id": user.user_id, "status": "approved", "payment_status": {"$ne": "paid"}}, {"_id": 0}
+    ).to_list(1000)
 
     # Enrich assignments with counselor name
     counselor_ids = set()
-    for a in pending_assignments + approved_students:
+    for a in pending_assignments + approved_students + awaiting_payment:
         if a.get("assigned_by"):
             counselor_ids.add(a["assigned_by"])
     if counselor_ids:
@@ -117,7 +120,7 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
             {"_id": 0, "user_id": 1, "name": 1}
         ).to_list(100)
         counselor_map = {c["user_id"]: c["name"] for c in counselors}
-        for a in pending_assignments + approved_students:
+        for a in pending_assignments + approved_students + awaiting_payment:
             if a.get("assigned_by"):
                 a["counselor_name"] = counselor_map.get(a["assigned_by"], "")
                 a["counselor_id"] = a["assigned_by"]
@@ -140,7 +143,8 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         "classes": todays_sessions, "other_classes": upcoming_classes + conducted_classes,
         "todays_sessions": todays_sessions, "upcoming_classes": upcoming_classes,
         "conducted_classes": conducted_classes,
-        "pending_assignments": pending_assignments, "approved_students": approved_students
+        "pending_assignments": pending_assignments, "approved_students": approved_students,
+        "awaiting_payment": awaiting_payment
     }
 
 

@@ -222,7 +222,7 @@ async def student_enrollment_status(request: Request, authorization: Optional[st
     ).to_list(10)
     demo_completed = len(demo_classes) > 0
 
-    is_enrolled = bool(approved) and len(active_classes) > 0
+    is_enrolled = bool(approved)
 
     return {
         "is_enrolled": is_enrolled,

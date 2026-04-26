@@ -437,6 +437,29 @@ const TeacherDashboard = () => {
           </div>
         )}
 
+        {/* Awaiting Payment - students accepted but haven't paid yet */}
+        {dashboardData?.awaiting_payment?.length > 0 && (
+          <div className="mb-8" data-testid="awaiting-payment-section">
+            <h2 className="text-lg font-bold text-orange-700 mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-orange-500" /> Awaiting Student Payment ({dashboardData.awaiting_payment.length})</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {dashboardData.awaiting_payment.map(a => (
+                <div key={a.assignment_id} className="bg-orange-50 rounded-2xl border-2 border-orange-200 p-5" data-testid={`awaiting-payment-${a.assignment_id}`}>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h3 className="font-bold text-slate-900">{a.student_name}</h3>
+                      <p className="text-sm text-slate-600">{a.student_email}</p>
+                      {a.learning_plan_name && <p className="text-xs text-sky-700 mt-1">Plan: {a.learning_plan_name}</p>}
+                      {a.counselor_name && <p className="text-xs text-slate-400 mt-0.5">Assigned by: {a.counselor_name}</p>}
+                    </div>
+                    <span className="bg-orange-200 text-orange-800 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap">Payment Pending</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-3">You accepted this student. Waiting for them to complete payment before you can schedule a class.</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Class Sections - Tabbed */}
         <Tabs value={classTab} onValueChange={setClassTab} className="mb-8">
           <TabsList data-testid="class-tabs">

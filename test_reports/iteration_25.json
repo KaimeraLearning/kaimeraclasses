@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 25: Validated 'disappearing assignment' bug fix. Backend tests confirm /api/auth/login does NOT leak password_hash, /api/admin/all-assignments returns the patched target assignment (assign_a8d0d87a9efe) with status='approved' and payment_status='pending', and that auth gating on /api/teacher/dashboard and /api/student/dashboard works. Code review confirms /api/teacher/dashboard returns 'awaiting_payment' array (routes/teacher.py line 108-110, 147) and /api/student/dashboard returns assignments with payment_status (routes/student.py line 66-68, 77). Frontend TeacherDashboard.js (line 441-461) renders 'Awaiting Student Payment' section with data-testid='awaiting-payment-section'; StudentDashboard.js (line 353-374) renders 'Payment Required' section with data-testid='unpaid-assignment-{id}'. Admin login UI smoke test passed end-to-end. Direct UI verification of teacher/student dashboards was not possible because admin-created accounts (teacher@k.com, sanyam@k.com) require OTP verification before login and credentials are unknown.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration25_disappearing_assignment.py",
+    "/app/test_reports/pytest/iteration_25.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "The teacher dashboard query for 'awaiting_payment' uses payment_status: {$ne: 'paid'} which correctly catches both 'pending' and missing fields - good defensive handling for legacy data.",
+    "Student dashboard query at routes/student.py:66 returns ALL approved assignments regardless of payment_status (good - frontend filters into Payment Required vs Active Enrollments).",
+    "/auth/login response correctly excludes password_hash via model_dump(exclude={'password_hash'}) in routes/auth.py:191.",
+    "Recommendation: Consider adding payment_status to the response default in /api/student/enrollment-status for clarity (currently only checks status='approved'); fine for is_enrolled flag but front-end consumers may want to know payment state."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration25_disappearing_assignment.py"
+  ],
+  "success_rate": {"backend": "100% (7/7 tests passing)", "frontend": "100% (admin login + landing verified, teacher/student UI verified via code review only)"},
+  "test_credentials": "Admin info@kaimeralearning.com / solidarity&peace2023 - works. Teacher/Student admin-created accounts cannot be logged in due to OTP-gated verification and unknown passwords.",
+  "seed_data_creation": "None - relied on existing patched assignment assign_a8d0d87a9efe.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The bug fix for 'disappearing assignment' is verified at API contract level and via code review. To run end-to-end UI verification of awaiting_payment / Payment Required sections, an OTP-verified teacher and student account are required. The pytest file /app/backend/tests/test_iteration25_disappearing_assignment.py can be re-run to ensure regression-free behaviour. Target assignment id=assign_a8d0d87a9efe, teacher_id=user_df2cb7dd0ae5, student_id=user_5f939c35795e exists in DB with status=approved & payment_status=pending.",
+  "rca of the issue": "Original RCA: Teacher dashboard endpoint filtered approved_students by payment_status='paid', which hid 'approved + awaiting payment' assignments from the teacher view. The student-side enrollment check passed but no UI surface existed to inform the teacher of the in-flight assignment. Fix: split the query into two arrays - approved_students (paid) and awaiting_payment (status=approved & payment_status!=paid) and added matching UI section. Legacy assignments missing the payment_status field were patched. Verified by API tests + code review."
+}

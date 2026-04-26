@@ -34,6 +34,12 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Eliminated hardcoded `REACT_APP_BACKEND_URL` from all source files — deployed app now routes API calls to its own domain
 - Fixed password_hash leak in `/api/auth/login` and `/api/auth/me` responses
 
+### Assignment Visibility Fix (Feb 2026)
+- Fixed "disappearing assignment" bug: after teacher accepts a student, the assignment was invisible on both teacher and student dashboards
+- Root cause: Teacher dashboard only showed approved students with payment_status="paid", creating a gap for "approved but awaiting payment" assignments
+- Added `awaiting_payment` array to teacher dashboard API and new "Awaiting Student Payment" UI section
+- Fixed legacy data: patched assignments missing the payment_status field
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)
