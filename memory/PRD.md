@@ -70,6 +70,15 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Teacher doesn't need to recreate the class — just reschedule the postponed session
 - Admin can configure rating deduction per cancellation via Financials > Teacher Cancellation Penalty
 
+### Zoom Integration & Error Notifications (Feb 2026)
+- Replaced Jitsi with Zoom Meeting SDK. Backend creates Zoom meetings via Server-to-Server OAuth API
+- Frontend VideoClass.js uses embedded Zoom Component View with SDK signature authentication
+- Screenshot button (teacher-only) captures screen showing both teacher and student via Screen Capture API
+- Fallback: if embedded Zoom fails, opens Zoom join URL in new tab
+- Global error handlers: DB errors return 503, unhandled exceptions return 500 with type info
+- Login error: shows "Invalid email or password" instead of body stream errors
+- All error toasts now show human-readable messages based on HTTP status codes
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)
