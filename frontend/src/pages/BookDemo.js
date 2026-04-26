@@ -6,8 +6,7 @@ import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
 import { GraduationCap, Send, Calendar, Clock, User, Mail, Phone, Building, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import { API } from '../utils/api';
 
 const BookDemo = () => {
   const navigate = useNavigate();

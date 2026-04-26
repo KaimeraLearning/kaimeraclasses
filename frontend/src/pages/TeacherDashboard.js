@@ -7,11 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle, XCircle, CheckCircle, Clock, Camera, CalendarCheck } from 'lucide-react';
-import { getApiError } from '../utils/api';
+import { getApiError, API } from '../utils/api';
 import { ViewProfilePopup } from '../components/ViewProfilePopup';
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
 
 const TeacherDashboard = () => {
   const navigate = useNavigate();

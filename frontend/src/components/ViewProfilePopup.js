@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { User, Star, FileText, MapPin, GraduationCap, Briefcase, Heart, Calendar } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import { API } from '../utils/api';
 
 export function ViewProfilePopup({ open, onOpenChange, userId, userRole }) {
   const [profile, setProfile] = useState(null);

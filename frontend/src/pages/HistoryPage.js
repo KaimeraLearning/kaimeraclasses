@@ -5,8 +5,7 @@ import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import { ArrowLeft, Search, User, GraduationCap, Clock, BookOpen, FileText, MessageSquare, Star, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import { API } from '../utils/api';
 
 const HistoryPage = () => {
   const navigate = useNavigate();

@@ -1,4 +1,4 @@
-import { getApiError } from '../utils/api';
+import { getApiError, API } from '../utils/api';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -8,8 +8,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { toast } from 'sonner';
 import { ArrowLeft, Plus, MessageSquare, CheckCircle } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
 
 const ComplaintsPage = () => {
   const navigate = useNavigate();

@@ -6,8 +6,7 @@ import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
 import { GraduationCap, Mail, Lock, User, Phone, MapPin, BookOpen, ArrowLeft, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
 
-const BACKEND = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND}/api`;
+import { API } from '../utils/api';
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
 const Login = () => {

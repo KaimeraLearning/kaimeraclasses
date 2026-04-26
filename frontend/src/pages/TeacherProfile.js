@@ -6,10 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { ArrowLeft, User, Save, Upload, FileText, Lock, Star, Camera } from 'lucide-react';
-import { getApiError } from '../utils/api';
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import { getApiError, API } from '../utils/api';
 
 export default function TeacherProfile() {
   const navigate = useNavigate();

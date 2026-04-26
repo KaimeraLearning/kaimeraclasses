@@ -1,4 +1,4 @@
-import { getApiError } from '../utils/api';
+import { getApiError, API } from '../utils/api';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -7,8 +7,6 @@ import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
 import { ArrowLeft, CheckCircle, XCircle, Clock, FileText, Image } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
 
 const CounsellorProofs = () => {
   const navigate = useNavigate();

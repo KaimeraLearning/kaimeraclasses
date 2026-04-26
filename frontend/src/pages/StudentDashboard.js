@@ -6,11 +6,8 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { GraduationCap, LogOut, Calendar, CreditCard, BookOpen, Play, MessageSquare, Bell, AlertCircle, Lock, Star, Clock, User, XCircle, IndianRupee, Download, CheckCircle } from 'lucide-react';
-import { getApiError } from '../utils/api';
+import { getApiError, API } from '../utils/api';
 import { ViewProfilePopup } from '../components/ViewProfilePopup';
-
-const BACKEND = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND}/api`;
 
 const StudentDashboard = () => {
   const navigate = useNavigate();

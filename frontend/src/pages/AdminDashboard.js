@@ -12,10 +12,7 @@ import {
   Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil, IndianRupee, Download
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { getApiError } from '../utils/api';
-
-const BACKEND = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND}/api`;
+import { getApiError, API } from '../utils/api';
 
 // ─── Reusable Sub-Components ───
 

@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 24 - Verified frontend refactor from hardcoded REACT_APP_BACKEND_URL to relative '/api' paths. All 9 backend auth/admin tests passed (login, /auth/me, logout, /admin/all-users, /admin/classes, /admin/learning-plans, role-based access). Frontend Playwright tests confirm: login redirects admin to /admin-dashboard, all 4 dashboard tabs (User Management, Learning Plans, Financials, Reports) visible and clickable, logout button works and redirects to /login, ProtectedRoute redirects unauth users to /login, and all API requests resolve to the same preview origin (no hardcoded domains in network calls). grep confirms 0 occurrences of process.env.REACT_APP_BACKEND_URL in /app/frontend/src/.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/auth/login", "issue": "Response payload includes user.password_hash field (security leak)"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "features_verified": {
+    "login_admin": "PASSED - admin login redirects to /admin-dashboard",
+    "dashboard_tabs": "PASSED - User Management, Learning Plans, Financials, Reports visible and clickable",
+    "logout": "PASSED - [data-testid=logout-button] click redirects to /login",
+    "protected_route": "PASSED - unauth visit to /admin-dashboard redirects to /login",
+    "relative_api_paths": "PASSED - all /api/* network requests use same-origin (skill-exchange-149.preview.emergentagent.com); 0 hardcoded REACT_APP_BACKEND_URL references in src/",
+    "auth_me_with_token": "PASSED",
+    "admin_all_users": "PASSED",
+    "admin_classes": "PASSED",
+    "admin_learning_plans": "PASSED",
+    "unauthorized_admin_access": "PASSED - 401 returned without token"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration24_relative_api.py",
+    "/app/test_reports/pytest/pytest_iteration24.xml"
+  ],
+  "action_items": [
+    "(Pre-existing, not from this refactor) Backend /api/auth/login returns user.password_hash in JSON response — should be excluded via Pydantic response_model."
+  ],
+  "critical_code_review_comments": [
+    "utils/api.js cleanly exports relative '/api' base. All 26 frontend files now import from this single source — refactor verified end-to-end.",
+    "Login response leaks password_hash (security). Not introduced by this refactor but worth fixing."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration24_relative_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9)",
+    "frontend": "100% (login, all 4 tabs, logout, protected route, same-origin API verified)"
+  },
+  "test_credentials": {
+    "admin": "info@kaimeralearning.com / solidarity&peace2023"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Frontend uses relative /api paths via /app/frontend/src/utils/api.js (export const API = '/api'). Confirmed 0 process.env.REACT_APP_BACKEND_URL refs in src/. Cookie auth (httponly, samesite=none, secure) + Bearer fallback both work. Logout button has data-testid='logout-button' in admin header. AdminDashboard fetch endpoints: /api/admin/all-users, /api/admin/classes, /api/admin/transactions, /api/admin/learning-plans, /api/admin/complaints, /api/admin/approved-proofs, /api/admin/badge-templates, /api/admin/counsellor-tracking, /api/admin/payments."
+}

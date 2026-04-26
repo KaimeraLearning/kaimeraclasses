@@ -1,12 +1,10 @@
-import { getApiError } from '../utils/api';
+import { getApiError, API } from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { ArrowLeft, Users, Calendar, Clock, Phone, Mail, Building, CheckCircle2, UserPlus, Loader2, RefreshCw, Zap } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
 
 const DemoLiveSheet = () => {
   const navigate = useNavigate();

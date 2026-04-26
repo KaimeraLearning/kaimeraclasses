@@ -1,3 +1,6 @@
+/** API base path — always relative so it works on any deployed domain */
+export const API = "/api";
+
 /**
  * Parse API error response and return a user-friendly error message.
  * Handles: JSON with detail field, plain text, network errors, and non-JSON responses.

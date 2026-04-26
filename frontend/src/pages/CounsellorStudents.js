@@ -6,8 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { toast } from 'sonner';
 import { ArrowLeft, User, CreditCard, Calendar, MapPin, Target, CalendarClock, Phone, Search } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import { API } from '../utils/api';
 
 const CounsellorStudents = () => {
   const navigate = useNavigate();

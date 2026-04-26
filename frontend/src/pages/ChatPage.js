@@ -5,8 +5,7 @@ import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import { ArrowLeft, Send, MessageSquare, User, Search } from 'lucide-react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import { API } from '../utils/api';
 
 const ChatPage = () => {
   const navigate = useNavigate();

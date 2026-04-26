@@ -3,10 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { ArrowLeft, IndianRupee, Download, CreditCard, History, FileText, CheckCircle, Clock, Loader2 } from 'lucide-react';
-import { getApiError } from '../utils/api';
-
-const BACKEND = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND}/api`;
+import { getApiError, API } from '../utils/api';
 
 const WalletPage = () => {
   const navigate = useNavigate();

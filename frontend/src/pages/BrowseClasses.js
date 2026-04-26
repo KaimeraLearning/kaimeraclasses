@@ -4,10 +4,7 @@ import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { GraduationCap, ArrowLeft, CreditCard, Users, Check, IndianRupee, Loader2 } from 'lucide-react';
-import { getApiError } from '../utils/api';
-
-const BACKEND = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND}/api`;
+import { getApiError, API } from '../utils/api';
 
 const CREDIT_PACKAGES = [
   { id: 'pack_2000', credits: 2000, price: 2000, label: '2,000' },
