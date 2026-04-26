@@ -300,11 +300,7 @@ async def teacher_cancel_class(class_id: str, request: Request, authorization: O
         }}
     )
 
-    # Get admin-configured rating deduction (or default 0.2)
-    pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
-    cancel_rating_deduction = pricing.get("cancel_rating_deduction", 0.2) if pricing else 0.2
-
-    # Record rating event with configurable deduction
+    # Record rating event (deduction amount is read from system_pricing in rating service)
     rating, suspended = await record_rating_event(user.user_id, "cancellation", f"Cancelled session for '{cls['title']}' on {today}")
 
     # Notify student

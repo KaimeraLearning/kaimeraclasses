@@ -456,7 +456,7 @@ async def get_system_pricing(request: Request, authorization: Optional[str] = He
         raise HTTPException(status_code=403, detail="Access denied")
     pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
     if not pricing:
-        return {"demo_price_student": 0.0, "class_price_student": 0.0, "demo_earning_teacher": 0.0, "class_earning_teacher": 0.0}
+        return {"demo_price_student": 0.0, "class_price_student": 0.0, "demo_earning_teacher": 0.0, "class_earning_teacher": 0.0, "cancel_rating_deduction": 0.2}
     if isinstance(pricing.get('updated_at'), str):
         pricing['updated_at'] = datetime.fromisoformat(pricing['updated_at'])
     return pricing

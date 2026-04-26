@@ -63,6 +63,13 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Attendance on non-class day: backend detects no scheduled class and asks teacher "why?" (forgot/rescheduled) + which class it's for. Records off_day_marking, reason, class_id
 - Counsellor can view full attendance history per student including off-day markings and reasons (new endpoint)
 
+### Session-Level Cancel & Mandatory Reschedule (Feb 2026)
+- Teacher cancel now only cancels TODAY's session, NOT the entire class. Class stays active, end_date shifts +1 day
+- needs_reschedule flag blocks starting next session until teacher reschedules
+- Reschedule updates timings for all remaining days, clears the block
+- Teacher doesn't need to recreate the class — just reschedule the postponed session
+- Admin can configure rating deduction per cancellation via Financials > Teacher Cancellation Penalty
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)
