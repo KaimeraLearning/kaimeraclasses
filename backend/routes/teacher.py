@@ -740,9 +740,46 @@ async def reschedule_class(class_id: str, request: Request, authorization: Optio
         update_fields["date"] = new_date
         update_fields["start_time"] = new_start_time
         update_fields["end_time"] = new_end_time
-        end_date = datetime.fromisoformat(new_date) + timedelta(days=cls.get("duration_days", 1) - 1)
+        # Shift end_date by reschedule count (each reschedule adds 1 day)
+        reschedule_num = cls.get("reschedule_count", 0) + 1
+        end_date = datetime.fromisoformat(new_date) + timedelta(days=cls.get("duration_days", 1) - 1 + reschedule_num)
         update_fields["end_date"] = end_date.isoformat().split('T')[0]
         update_fields["can_reschedule"] = False
+
+        # Reclaim the per-class credit refund that was given on cancel
+        student_id = cls.get("assigned_student_id")
+        refund_to_reclaim = cls.get("credits_required", 0)
+        if student_id and refund_to_reclaim > 0:
+            await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": -refund_to_reclaim}})
+            await db.transactions.insert_one({
+                "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+                "user_id": student_id, "type": "reschedule_recharge",
+                "amount": -refund_to_reclaim,
+                "description": f"Re-charged: Class '{cls['title']}' rescheduled by teacher (refund reversed)",
+                "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
+            })
+
+        # If full assignment refund was issued, reverse it too
+        if student_id:
+            assignment = await db.student_teacher_assignments.find_one(
+                {"teacher_id": user.user_id, "student_id": student_id, "status": "approved", "payment_status": "refunded"},
+                {"_id": 0}
+            )
+            if assignment:
+                plan_price = assignment.get("learning_plan_price") or assignment.get("credit_price", 0)
+                if plan_price > 0:
+                    await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": -plan_price}})
+                    await db.transactions.insert_one({
+                        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+                        "user_id": student_id, "type": "refund_reversal",
+                        "amount": -plan_price,
+                        "description": f"Refund reversed: Teacher rescheduled class. Assignment payment re-applied.",
+                        "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
+                    })
+                    await db.student_teacher_assignments.update_one(
+                        {"assignment_id": assignment["assignment_id"]},
+                        {"$set": {"payment_status": "paid", "refunded_at": None}}
+                    )
 
     await db.class_sessions.update_one(
         {"class_id": class_id},

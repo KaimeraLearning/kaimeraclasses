@@ -77,6 +77,17 @@ async def get_student_profile(student_id: str, request: Request, authorization: 
     return {"student": student, "current_assignment": assignment, "class_history": classes, "demo_history": demo_history}
 
 
+@router.get("/counsellor/student-attendance/{student_id}")
+async def counsellor_student_attendance(student_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Counsellor views a student's full attendance history including off-day markings"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+
+    records = await db.attendance.find({"student_id": student_id}, {"_id": 0}).sort("date", -1).to_list(500)
+    return records
+
+
 @router.get("/counsellor/pending-proofs")
 async def get_pending_proofs(request: Request, authorization: Optional[str] = Header(None)):
     """Get all pending class proofs for counsellor verification"""

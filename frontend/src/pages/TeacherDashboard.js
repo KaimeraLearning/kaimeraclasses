@@ -41,6 +41,8 @@ const TeacherDashboard = () => {
   const [viewProfileRole, setViewProfileRole] = useState(null);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [showAttendanceDialog, setShowAttendanceDialog] = useState(false);
+  const [showAttendanceReasonDialog, setShowAttendanceReasonDialog] = useState(false);
+  const [attendanceReasonData, setAttendanceReasonData] = useState(null); // {studentId, date, status, availableClasses}
 
   const openProfile = (userId, role) => { setViewProfileUserId(userId); setViewProfileRole(role); setViewProfileOpen(true); };
 
@@ -106,14 +108,26 @@ const TeacherDashboard = () => {
     } catch {}
   };
 
-  const markAttendance = async (studentId, date, status) => {
+  const markAttendance = async (studentId, date, status, reason, classId) => {
     try {
+      const payload = { student_id: studentId, date, status };
+      if (reason) payload.reason = reason;
+      if (classId) payload.class_id = classId;
       const res = await fetch(`${API}/attendance/mark`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ student_id: studentId, date, status })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error(await getApiError(res));
+      const data = await res.json();
+      if (data.needs_reason) {
+        // No class scheduled — ask teacher why
+        setAttendanceReasonData({ studentId, date, status, availableClasses: data.available_classes || [] });
+        setShowAttendanceReasonDialog(true);
+        return;
+      }
       toast.success(`Attendance marked as ${status}`);
+      setShowAttendanceReasonDialog(false);
+      setAttendanceReasonData(null);
       fetchAttendance();
     } catch (err) { toast.error(err.message); }
   };
@@ -823,6 +837,50 @@ const TeacherDashboard = () => {
 
       <ViewProfilePopup open={viewProfileOpen} onOpenChange={setViewProfileOpen} userId={viewProfileUserId} userRole={viewProfileRole} />
 
+      {/* Attendance Reason Dialog - when marking on non-class day */}
+      <Dialog open={showAttendanceReasonDialog} onOpenChange={setShowAttendanceReasonDialog}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader><DialogTitle className="text-xl font-bold flex items-center gap-2"><AlertCircle className="w-5 h-5 text-amber-500" /> No Class Scheduled Today</DialogTitle></DialogHeader>
+          {attendanceReasonData && (
+            <div className="space-y-4 mt-4">
+              <p className="text-sm text-slate-600">There is no class scheduled for this student on {attendanceReasonData.date}. Why are you marking attendance?</p>
+              <div className="space-y-2">
+                <Button onClick={() => {
+                  if (attendanceReasonData.availableClasses.length === 0) {
+                    toast.error('No active classes available to link this attendance to');
+                    return;
+                  }
+                  setAttendanceReasonData({ ...attendanceReasonData, reason: 'forgot_to_mark', step: 'select_class' });
+                }} variant="outline" className="w-full rounded-xl py-4 text-left justify-start" data-testid="reason-forgot">
+                  <Clock className="w-4 h-4 mr-2 text-amber-500" /> I forgot to mark attendance earlier
+                </Button>
+                <Button onClick={() => {
+                  if (attendanceReasonData.availableClasses.length === 0) {
+                    toast.error('No active classes available to link this attendance to');
+                    return;
+                  }
+                  setAttendanceReasonData({ ...attendanceReasonData, reason: 'rescheduled_class', step: 'select_class' });
+                }} variant="outline" className="w-full rounded-xl py-4 text-left justify-start" data-testid="reason-rescheduled">
+                  <CalendarDays className="w-4 h-4 mr-2 text-sky-500" /> This is for a rescheduled class
+                </Button>
+              </div>
+              {attendanceReasonData.step === 'select_class' && (
+                <div className="space-y-2 mt-3">
+                  <p className="text-sm font-semibold text-slate-700">Select the class:</p>
+                  {attendanceReasonData.availableClasses.map(cls => (
+                    <Button key={cls.class_id} onClick={() => {
+                      markAttendance(attendanceReasonData.studentId, attendanceReasonData.date, attendanceReasonData.status, attendanceReasonData.reason, cls.class_id);
+                    }} variant="outline" className="w-full rounded-xl py-3 text-left justify-start" data-testid={`select-class-${cls.class_id}`}>
+                      {cls.title} ({cls.date} - {cls.end_date})
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Attendance History Dialog */}
       <Dialog open={showAttendanceDialog} onOpenChange={setShowAttendanceDialog}>
         <DialogContent className="sm:max-w-2xl rounded-3xl max-h-[90vh] overflow-y-auto">
@@ -834,20 +892,26 @@ const TeacherDashboard = () => {
                   <th className="text-left p-2 text-xs text-slate-500">Date</th>
                   <th className="text-left p-2 text-xs text-slate-500">Student</th>
                   <th className="text-center p-2 text-xs text-slate-500">Status</th>
+                  <th className="text-left p-2 text-xs text-slate-500">Notes</th>
                 </tr>
               </thead>
               <tbody>
                 {attendanceRecords.map((r, i) => (
-                  <tr key={i} className="border-b border-slate-100">
+                  <tr key={i} className={`border-b border-slate-100 ${r.off_day_marking ? 'bg-amber-50' : ''}`}>
                     <td className="p-2 text-xs">{r.date}</td>
                     <td className="p-2 text-xs font-semibold">{r.student_name}</td>
                     <td className="p-2 text-center">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${r.status === 'present' ? 'bg-emerald-100 text-emerald-700' : r.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
                     </td>
+                    <td className="p-2 text-xs text-slate-500">
+                      {r.off_day_marking && <span className="text-amber-600 font-semibold">Off-day</span>}
+                      {r.reason === 'forgot_to_mark' && <span> (Forgot)</span>}
+                      {r.reason === 'rescheduled_class' && <span> (Rescheduled)</span>}
+                    </td>
                   </tr>
                 ))}
                 {attendanceRecords.length === 0 && (
-                  <tr><td colSpan="3" className="text-center p-8 text-slate-400">No attendance records yet</td></tr>
+                  <tr><td colSpan="4" className="text-center p-8 text-slate-400">No attendance records yet</td></tr>
                 )}
               </tbody>
             </table>

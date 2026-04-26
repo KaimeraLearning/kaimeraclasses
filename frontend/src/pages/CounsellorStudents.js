@@ -16,6 +16,7 @@ const CounsellorStudents = () => {
   const [studentProfile, setStudentProfile] = useState(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [studentAttendance, setStudentAttendance] = useState([]);
 
   useEffect(() => { fetchStudents(); }, []);
 
@@ -39,6 +40,8 @@ const CounsellorStudents = () => {
     try {
       const res = await fetch(`${API}/counsellor/student-profile/${student.user_id}`, { credentials: 'include' });
       if (res.ok) setStudentProfile(await res.json());
+      const attRes = await fetch(`${API}/counsellor/student-attendance/${student.user_id}`, { credentials: 'include' });
+      if (attRes.ok) setStudentAttendance(await attRes.json());
     } catch (error) { console.error(error); }
   };
 
@@ -217,6 +220,27 @@ const CounsellorStudents = () => {
                             {cls.rescheduled && <span className="bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold">RESCHEDULED</span>}
                           </div>
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Attendance History */}
+              {studentAttendance.length > 0 && (
+                <div>
+                  <p className="text-sm font-semibold text-slate-700 mb-2">Attendance History ({studentAttendance.length})</p>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {studentAttendance.map((r, i) => (
+                      <div key={i} className={`rounded-lg p-2 flex justify-between items-center text-xs ${r.off_day_marking ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
+                        <div>
+                          <span className="font-semibold text-slate-700">{r.date}</span>
+                          <span className="text-slate-500 ml-2">by {r.teacher_name}</span>
+                          {r.off_day_marking && <span className="text-amber-600 font-semibold ml-2">(Off-day)</span>}
+                          {r.reason === 'forgot_to_mark' && <span className="text-amber-600 ml-1">- Forgot</span>}
+                          {r.reason === 'rescheduled_class' && <span className="text-sky-600 ml-1">- Rescheduled</span>}
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full font-semibold ${r.status === 'present' ? 'bg-emerald-100 text-emerald-700' : r.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
                       </div>
                     ))}
                   </div>

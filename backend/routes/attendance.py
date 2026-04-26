@@ -21,6 +21,8 @@ async def mark_attendance(request: Request, authorization: Optional[str] = Heade
     student_id = body.get("student_id")
     date = body.get("date")  # YYYY-MM-DD
     status = body.get("status", "present")  # present, absent, late
+    reason = body.get("reason")  # 'forgot_to_mark' or 'rescheduled_class'
+    class_id = body.get("class_id")  # which class this attendance is for
 
     if not student_id or not date:
         raise HTTPException(status_code=400, detail="student_id and date required")
@@ -36,20 +38,53 @@ async def mark_attendance(request: Request, authorization: Optional[str] = Heade
     if not assignment:
         raise HTTPException(status_code=404, detail="Student not found in your class")
 
+    # Check if there's a class scheduled for this date
+    has_class_today = await db.class_sessions.find_one(
+        {"teacher_id": user.user_id, "assigned_student_id": student_id,
+         "status": {"$in": ["scheduled", "in_progress", "completed"]},
+         "date": {"$lte": date}, "end_date": {"$gte": date}},
+        {"_id": 0}
+    )
+
+    # If no class on this date, require reason and class selection
+    if not has_class_today:
+        if not reason:
+            # Return available classes so frontend can ask
+            available_classes = await db.class_sessions.find(
+                {"teacher_id": user.user_id, "assigned_student_id": student_id,
+                 "status": {"$in": ["scheduled", "in_progress"]}},
+                {"_id": 0, "class_id": 1, "title": 1, "date": 1, "end_date": 1}
+            ).to_list(20)
+            return {
+                "needs_reason": True,
+                "message": "No class scheduled for this date. Please specify why you are marking attendance.",
+                "available_classes": available_classes
+            }
+        if not class_id:
+            raise HTTPException(status_code=400, detail="Please select which class this attendance is for")
+
     # Upsert attendance record
     attendance_id = f"att_{uuid.uuid4().hex[:12]}"
+    record = {
+        "attendance_id": attendance_id,
+        "teacher_id": user.user_id,
+        "teacher_name": user.name,
+        "student_id": student_id,
+        "student_name": assignment.get("student_name"),
+        "date": date,
+        "status": status,
+        "marked_at": datetime.now(timezone.utc).isoformat()
+    }
+    if class_id:
+        record["class_id"] = class_id
+    if reason:
+        record["reason"] = reason
+    if not has_class_today:
+        record["off_day_marking"] = True
+
     await db.attendance.update_one(
         {"teacher_id": user.user_id, "student_id": student_id, "date": date},
-        {"$set": {
-            "attendance_id": attendance_id,
-            "teacher_id": user.user_id,
-            "teacher_name": user.name,
-            "student_id": student_id,
-            "student_name": assignment.get("student_name"),
-            "date": date,
-            "status": status,
-            "marked_at": datetime.now(timezone.utc).isoformat()
-        }},
+        {"$set": record},
         upsert=True
     )
 
