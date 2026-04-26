@@ -48,22 +48,20 @@ async def mark_attendance(request: Request, authorization: Optional[str] = Heade
         if matching_class:
             class_id = matching_class["class_id"]
         else:
-            # No class on this date — return available classes for teacher to pick
-            available_classes = await db.class_sessions.find(
-                {"teacher_id": user.user_id, "assigned_student_id": student_id,
-                 "status": {"$in": ["scheduled", "in_progress", "completed"]}},
-                {"_id": 0, "class_id": 1, "title": 1, "date": 1, "end_date": 1}
-            ).to_list(20)
-            if not reason:
+            # No class on this date — need reason + class selection from teacher
+            if not reason or not class_id:
+                available_classes = await db.class_sessions.find(
+                    {"teacher_id": user.user_id, "assigned_student_id": student_id,
+                     "status": {"$in": ["scheduled", "in_progress", "completed"]}},
+                    {"_id": 0, "class_id": 1, "title": 1, "date": 1, "end_date": 1}
+                ).to_list(20)
                 return {
                     "needs_class_selection": True,
                     "message": "No class scheduled for this date. Select which class this attendance is for.",
                     "available_classes": available_classes
                 }
             if reason not in ["forgot_to_mark", "rescheduled_class"]:
-                raise HTTPException(status_code=400, detail="Invalid reason")
-            if not class_id:
-                raise HTTPException(status_code=400, detail="Please select which class this attendance is for")
+                raise HTTPException(status_code=400, detail="Invalid reason. Use: forgot_to_mark or rescheduled_class")
 
     # Get class info for the record
     cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0, "class_id": 1, "title": 1})

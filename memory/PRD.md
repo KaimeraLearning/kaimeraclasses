@@ -79,6 +79,15 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Login error: shows "Invalid email or password" instead of body stream errors
 - All error toasts now show human-readable messages based on HTTP status codes
 
+### Per-Class Per-Day Attendance System (Feb 2026)
+- Attendance is now tied to specific classes (class_id + date), not just student + date
+- Once marked for a class on a date, cannot be changed (409 Conflict)
+- Auto-detects which class covers today's date; if no class, asks teacher to select one
+- GET /attendance/unmarked shows past days with missing attendance per class
+- GET /attendance/class-today/{student_id} shows today's classes with already_marked flag
+- Frontend shows unmarked past-day warnings, per-class Present/Absent buttons that disable after marking
+- Attendance history shows class title + date + status + notes
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)
