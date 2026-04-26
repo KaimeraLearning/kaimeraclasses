@@ -88,6 +88,13 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Frontend shows unmarked past-day warnings, per-class Present/Absent buttons that disable after marking
 - Attendance history shows class title + date + status + notes
 
+### Counsellor Attendance View & Mid-Class Transfer (Feb 2026)
+- Counsellor/Admin can view student attendance history filtered by class (dropdown selector)
+- GET /counsellor/student-attendance/{id} returns {records, classes} for dropdown
+- New POST /counsellor/transfer-student: transfers student mid-class to another teacher
+- Transfer: old classes marked 'transferred', new assignment created with remaining days, old teacher rating deducted
+- Notifications sent to old teacher, new teacher, and student on transfer
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)
