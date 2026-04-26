@@ -45,6 +45,12 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Added `max_days` field to Learning Plans — admin sets max days, counselor assignment auto-locks to that limit
 - Backend enforces: rejects assignment if assigned_days > plan's max_days, auto-fills from plan if not provided
 
+### Cancelled Classes, Auto-Refund, Wallet Payment, Proof Fix (Feb 2026)
+- Separated cancelled classes into their own tab/section on both Teacher and Student dashboards
+- Auto-refund: when teacher cancels ALL classes for an assignment, the Razorpay payment is refunded to student wallet
+- Payment choice: students now choose between "Pay from Wallet" or "Pay via Razorpay" instead of going straight to Razorpay
+- New endpoint: POST /api/payments/pay-from-wallet (deducts wallet credits, marks assignment paid)
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)

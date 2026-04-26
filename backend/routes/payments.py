@@ -157,6 +157,8 @@ async def verify_razorpay_payment(request: Request, authorization: Optional[str]
 async def pay_from_wallet(request: Request, authorization: Optional[str] = Header(None)):
     """Pay for assignment using wallet credits instead of Razorpay"""
     user = await get_current_user(request, authorization)
+    if user.role != "student":
+        raise HTTPException(status_code=403, detail="Student access only")
 
     body = await request.json()
     assignment_id = body.get("assignment_id")
