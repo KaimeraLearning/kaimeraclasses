@@ -160,6 +160,7 @@ class SystemPricing(BaseModel):
     demo_earning_teacher: float  # What teacher earns for demo
     class_earning_teacher: float  # What teacher earns per class
     cancel_rating_deduction: Optional[float] = 0.2  # Rating deducted per teacher cancellation
+    completion_rating_boost: Optional[float] = 0.1  # Rating added when teacher completes all classes successfully
 
 
 class CreateTeacherAccount(BaseModel):

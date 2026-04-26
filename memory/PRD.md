@@ -95,6 +95,12 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Transfer: old classes marked 'transferred', new assignment created with remaining days, old teacher rating deducted
 - Notifications sent to old teacher, new teacher, and student on transfer
 
+### Completion Rating Boost (Feb 2026)
+- When teacher completes all assigned classes AND all proofs are approved by admin, rating is boosted
+- Admin-configurable `completion_rating_boost` (default 0.1) in Financials settings
+- Boost accumulates with each successful completion but total rating CANNOT exceed 5.0
+- Rating formula: avg_feedback + (completions * boost) - (cancellations * deduction) - (transfers * deduction) - (bad_feedbacks * 0.3)
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)

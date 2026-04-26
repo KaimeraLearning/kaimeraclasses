@@ -16,6 +16,7 @@ async def recalc_teacher_rating(teacher_id: str):
     # Get admin-configured rating deduction per cancellation
     pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
     cancel_deduction = pricing.get("cancel_rating_deduction", 0.2) if pricing else 0.2
+    completion_boost = pricing.get("completion_rating_boost", 0.1) if pricing else 0.1
 
     # Get all student feedback ratings for this teacher
     feedbacks = await db.feedback.find(
@@ -34,12 +35,18 @@ async def recalc_teacher_rating(teacher_id: str):
         "created_at": {"$gte": month_start}
     })
 
+    # Count successful completions (all-time, as reward accumulates)
+    total_completions = await db.teacher_rating_events.count_documents({
+        "teacher_id": teacher_id, "event": "completion_boost"
+    })
+
     # Count bad feedbacks (rating <= 2)
     bad_feedbacks = sum(1 for f in feedbacks if f["rating"] <= 2)
 
-    # Rating: subtract configurable amount per cancellation, same per transfer, 0.3 per bad feedback
+    # Rating: base from feedback, add boost per completion, subtract penalty per cancel/transfer/bad
+    bonus = total_completions * completion_boost
     penalty = (monthly_cancellations * cancel_deduction) + (monthly_transfers * cancel_deduction) + (bad_feedbacks * 0.3)
-    star_rating = round(max(0, min(5, avg_feedback - penalty)), 1)
+    star_rating = round(max(0, min(5, avg_feedback + bonus - penalty)), 1)  # Capped at 5
 
     # Auto-suspension: 5+ cancellations this month
     is_suspended = False

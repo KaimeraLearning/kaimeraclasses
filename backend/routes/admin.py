@@ -444,7 +444,7 @@ async def set_system_pricing(pricing: SystemPricing, request: Request, authoriza
     user = await get_current_user(request, authorization)
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access only")
-    pricing_doc = {"pricing_id": "system_pricing", "demo_price_student": pricing.demo_price_student, "class_price_student": pricing.class_price_student, "demo_earning_teacher": pricing.demo_earning_teacher, "class_earning_teacher": pricing.class_earning_teacher, "cancel_rating_deduction": pricing.cancel_rating_deduction, "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": user.user_id}
+    pricing_doc = {"pricing_id": "system_pricing", "demo_price_student": pricing.demo_price_student, "class_price_student": pricing.class_price_student, "demo_earning_teacher": pricing.demo_earning_teacher, "class_earning_teacher": pricing.class_earning_teacher, "cancel_rating_deduction": pricing.cancel_rating_deduction, "completion_rating_boost": pricing.completion_rating_boost, "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": user.user_id}
     await db.system_pricing.update_one({"pricing_id": "system_pricing"}, {"$set": pricing_doc}, upsert=True)
     return {"message": "System pricing updated successfully"}
 
@@ -456,7 +456,7 @@ async def get_system_pricing(request: Request, authorization: Optional[str] = He
         raise HTTPException(status_code=403, detail="Access denied")
     pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
     if not pricing:
-        return {"demo_price_student": 0.0, "class_price_student": 0.0, "demo_earning_teacher": 0.0, "class_earning_teacher": 0.0, "cancel_rating_deduction": 0.2}
+        return {"demo_price_student": 0.0, "class_price_student": 0.0, "demo_earning_teacher": 0.0, "class_earning_teacher": 0.0, "cancel_rating_deduction": 0.2, "completion_rating_boost": 0.1}
     if isinstance(pricing.get('updated_at'), str):
         pricing['updated_at'] = datetime.fromisoformat(pricing['updated_at'])
     return pricing
@@ -758,6 +758,43 @@ async def admin_approve_proof(data: AdminProofApproval, request: Request, author
                 await db.users.update_one({"user_id": proof['teacher_id']}, {"$inc": {"credits": earning}})
                 await db.transactions.insert_one({"transaction_id": f"txn_{uuid.uuid4().hex[:12]}", "user_id": proof['teacher_id'], "type": "earning", "amount": earning, "description": f"Admin approved: {proof.get('class_title', 'Class')}", "proof_id": data.proof_id, "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()})
                 await db.notifications.insert_one({"notification_id": f"notif_{uuid.uuid4().hex[:12]}", "user_id": proof['teacher_id'], "type": "credit_earned", "title": "Credits Earned!", "message": f"{earning} credits added to your wallet for '{proof.get('class_title', 'Class')}'.", "read": False, "related_id": data.proof_id, "created_at": datetime.now(timezone.utc).isoformat()})
+
+            # Check if all classes for this teacher-student assignment are completed with approved proofs
+            if cls:
+                student_id = cls.get("assigned_student_id")
+                teacher_id = proof['teacher_id']
+                if student_id:
+                    # Find the assignment
+                    assignment = await db.student_teacher_assignments.find_one(
+                        {"teacher_id": teacher_id, "student_id": student_id, "status": "approved", "payment_status": "paid"},
+                        {"_id": 0}
+                    )
+                    if assignment:
+                        # Get all classes for this assignment
+                        all_classes = await db.class_sessions.find(
+                            {"teacher_id": teacher_id, "assigned_student_id": student_id,
+                             "status": {"$in": ["scheduled", "in_progress", "completed"]}},
+                            {"_id": 0, "class_id": 1, "status": 1}
+                        ).to_list(100)
+
+                        # Check if ALL are completed
+                        all_completed = len(all_classes) > 0 and all(c.get("status") == "completed" for c in all_classes)
+
+                        if all_completed:
+                            # Check all have approved proofs
+                            class_ids = [c["class_id"] for c in all_classes]
+                            approved_proofs = await db.class_proofs.count_documents(
+                                {"class_id": {"$in": class_ids}, "admin_status": "approved"}
+                            )
+                            # At least one proof per class approved
+                            if approved_proofs >= len(all_classes):
+                                # All classes completed with proofs approved — boost rating!
+                                boost = pricing.get("completion_rating_boost", 0.1)
+                                from services.rating import record_rating_event
+                                await record_rating_event(
+                                    teacher_id, "completion_boost",
+                                    f"Successfully completed all {len(all_classes)} classes for student {assignment.get('student_name')}"
+                                )
 
     action = "approved & teacher credited" if data.approved else "rejected"
     return {"message": f"Proof {action} by admin"}
