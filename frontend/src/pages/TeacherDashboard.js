@@ -291,6 +291,7 @@ const TeacherDashboard = () => {
   const todaySessions = dashboardData?.todays_sessions || [];
   const upcomingClasses = dashboardData?.upcoming_classes || [];
   const conductedClasses = dashboardData?.conducted_classes || [];
+  const cancelledClasses = dashboardData?.cancelled_classes || [];
 
   const renderClassCard = (cls, section) => {
     const isLive = cls.status === 'in_progress';
@@ -466,6 +467,7 @@ const TeacherDashboard = () => {
             <TabsTrigger value="today" data-testid="tab-today">Today's Sessions ({todaySessions.length})</TabsTrigger>
             <TabsTrigger value="upcoming" data-testid="tab-upcoming">Upcoming ({upcomingClasses.length})</TabsTrigger>
             <TabsTrigger value="conducted" data-testid="tab-conducted">Conducted ({conductedClasses.length})</TabsTrigger>
+            <TabsTrigger value="cancelled" data-testid="tab-cancelled">Cancelled ({cancelledClasses.length})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="today">
@@ -494,6 +496,28 @@ const TeacherDashboard = () => {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {conductedClasses.map(cls => renderClassCard(cls, 'conducted'))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="cancelled">
+            {cancelledClasses.length === 0 ? (
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-500">No cancelled classes</p></div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {cancelledClasses.map(cls => (
+                  <div key={cls.class_id} className="bg-red-50 rounded-2xl border-2 border-red-200 p-4" data-testid={`cancelled-class-${cls.class_id}`}>
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-sm">{cls.title}</h3>
+                        <p className="text-xs text-slate-600">{cls.subject} | {cls.class_type}</p>
+                        <p className="text-xs text-slate-500">{cls.date} {cls.start_time}-{cls.end_time}</p>
+                      </div>
+                      <span className="bg-red-200 text-red-800 px-2 py-0.5 rounded-full text-[10px] font-bold">CANCELLED</span>
+                    </div>
+                    <p className="text-xs text-red-600">Cancelled by: {cls.cancelled_by || 'teacher'}</p>
+                  </div>
+                ))}
               </div>
             )}
           </TabsContent>

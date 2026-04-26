@@ -32,13 +32,16 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
     upcoming = []
     completed = []
     pending_rating = []
+    cancelled = []
 
     for cls in all_classes:
         status = cls.get('status', 'scheduled')
         cls_date = cls.get('date', '')
         cls_end_date = cls.get('end_date', cls_date)
 
-        if status == 'in_progress' or (status == 'scheduled' and cls_date == today_str):
+        if status == 'cancelled':
+            cancelled.append(cls)
+        elif status == 'in_progress' or (status == 'scheduled' and cls_date == today_str):
             live_classes.append(cls)
         elif status == 'completed':
             # Check if student has rated it
@@ -73,6 +76,7 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
         "upcoming_classes": upcoming,
         "completed_classes": completed,
         "pending_rating": pending_rating,
+        "cancelled_classes": cancelled,
         "past_classes": completed + pending_rating,
         "assignments": assignments
     }

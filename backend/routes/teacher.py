@@ -43,6 +43,7 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
     todays_sessions = []
     upcoming_classes = []
     conducted_classes = []
+    cancelled_classes = []
 
     for cls in all_classes:
         cls_date = cls.get('date', '')
@@ -50,7 +51,7 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         status = cls.get('status', 'scheduled')
 
         if status in ('cancelled',):
-            conducted_classes.append(cls)
+            cancelled_classes.append(cls)
         elif status == 'completed':
             conducted_classes.append(cls)
         elif cls_end_date < today_str:
@@ -143,6 +144,7 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         "classes": todays_sessions, "other_classes": upcoming_classes + conducted_classes,
         "todays_sessions": todays_sessions, "upcoming_classes": upcoming_classes,
         "conducted_classes": conducted_classes,
+        "cancelled_classes": cancelled_classes,
         "pending_assignments": pending_assignments, "approved_students": approved_students,
         "awaiting_payment": awaiting_payment
     }
@@ -281,6 +283,41 @@ async def teacher_cancel_class(class_id: str, request: Request, authorization: O
             "message": f"Teacher {user.name} cancelled '{cls['title']}'. Credits refunded.",
             "read": False, "created_at": datetime.now(timezone.utc).isoformat()
         })
+
+        # Check if ALL classes for this student-teacher assignment are now cancelled
+        # If so, refund the Razorpay assignment payment to student wallet
+        remaining_active = await db.class_sessions.find_one(
+            {"teacher_id": user.user_id, "assigned_student_id": student_id,
+             "status": {"$nin": ["cancelled"]}},
+            {"_id": 0}
+        )
+        if not remaining_active:
+            assignment = await db.student_teacher_assignments.find_one(
+                {"teacher_id": user.user_id, "student_id": student_id, "status": "approved"},
+                {"_id": 0}
+            )
+            if assignment and assignment.get("payment_status") == "paid":
+                plan_price = assignment.get("learning_plan_price") or assignment.get("credit_price", 0)
+                if plan_price > 0:
+                    await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": plan_price}})
+                    await db.transactions.insert_one({
+                        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+                        "user_id": student_id, "type": "full_cancellation_refund",
+                        "amount": plan_price,
+                        "description": f"Full refund: All classes cancelled by teacher. Assignment payment refunded to wallet.",
+                        "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
+                    })
+                    await db.student_teacher_assignments.update_one(
+                        {"assignment_id": assignment["assignment_id"]},
+                        {"$set": {"payment_status": "refunded", "refunded_at": datetime.now(timezone.utc).isoformat()}}
+                    )
+                    await db.notifications.insert_one({
+                        "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+                        "user_id": student_id, "type": "payment_refunded",
+                        "title": "Payment Refunded",
+                        "message": f"All your classes with {user.name} were cancelled. Your payment of Rs.{plan_price} has been refunded to your wallet.",
+                        "read": False, "created_at": datetime.now(timezone.utc).isoformat()
+                    })
 
     msg = f"Class cancelled. Your rating is now {rating}."
     if suspended:

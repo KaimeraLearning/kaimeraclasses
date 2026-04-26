@@ -153,6 +153,80 @@ async def verify_razorpay_payment(request: Request, authorization: Optional[str]
     }
 
 
+@router.post("/payments/pay-from-wallet")
+async def pay_from_wallet(request: Request, authorization: Optional[str] = Header(None)):
+    """Pay for assignment using wallet credits instead of Razorpay"""
+    user = await get_current_user(request, authorization)
+
+    body = await request.json()
+    assignment_id = body.get("assignment_id")
+
+    if not assignment_id:
+        raise HTTPException(status_code=400, detail="assignment_id required")
+
+    assignment = await db.student_teacher_assignments.find_one(
+        {"assignment_id": assignment_id, "student_id": user.user_id}, {"_id": 0}
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    if assignment.get("payment_status") == "paid":
+        raise HTTPException(status_code=400, detail="Already paid")
+
+    amount = assignment.get("learning_plan_price") or assignment.get("credit_price", 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Invalid payment amount")
+
+    # Check wallet balance
+    student = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+    if student.get("credits", 0) < amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient wallet balance. Required: Rs.{amount}, Available: Rs.{student.get('credits', 0)}"
+        )
+
+    # Deduct from wallet
+    await db.users.update_one({"user_id": user.user_id}, {"$inc": {"credits": -amount}})
+
+    # Record transaction
+    payment_id = f"pay_{uuid.uuid4().hex[:12]}"
+    receipt_id = f"rcpt_{uuid.uuid4().hex[:12]}"
+    await db.payment_transactions.insert_one({
+        "payment_id": payment_id,
+        "assignment_id": assignment_id,
+        "student_id": user.user_id,
+        "student_name": user.name,
+        "student_email": user.email,
+        "teacher_name": assignment.get("teacher_name"),
+        "learning_plan_name": assignment.get("learning_plan_name"),
+        "amount": amount,
+        "amount_paise": int(amount * 100),
+        "currency": "INR",
+        "receipt_id": receipt_id,
+        "status": "paid",
+        "payment_method": "wallet",
+        "paid_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    await db.transactions.insert_one({
+        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id, "type": "assignment_payment",
+        "amount": -amount,
+        "description": f"Assignment payment (wallet): {assignment.get('learning_plan_name', 'Standard')} with {assignment.get('teacher_name')}",
+        "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    # Mark assignment as paid
+    await db.student_teacher_assignments.update_one(
+        {"assignment_id": assignment_id},
+        {"$set": {"payment_status": "paid", "payment_method": "wallet", "paid_at": datetime.now(timezone.utc).isoformat()}}
+    )
+
+    return {"message": "Payment successful from wallet!", "payment_id": payment_id, "receipt_id": receipt_id}
+
+
+
 @router.get("/payments/receipt/{payment_id}")
 async def get_receipt(payment_id: str, request: Request, authorization: Optional[str] = Header(None)):
     """Get payment receipt details"""

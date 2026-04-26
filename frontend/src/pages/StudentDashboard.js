@@ -35,6 +35,8 @@ const StudentDashboard = () => {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [showAttendanceDialog, setShowAttendanceDialog] = useState(false);
+  const [cancelledClasses, setCancelledClasses] = useState([]);
+  const [showPaymentChoice, setShowPaymentChoice] = useState(null);
 
   const openProfile = (userId, role) => { setViewProfileUserId(userId); setViewProfileRole(role); setViewProfileOpen(true); };
 
@@ -68,6 +70,7 @@ const StudentDashboard = () => {
         setCompletedClasses(d.completed_classes || []);
         setPendingRating(d.pending_rating || []);
         setAssignments(d.assignments || []);
+        setCancelledClasses(d.cancelled_classes || []);
       }
       if (notifRes.ok) setNotifications(await notifRes.json());
       if (enrollRes.ok) setEnrollment(await enrollRes.json());
@@ -99,7 +102,27 @@ const StudentDashboard = () => {
     });
   };
 
-  const handlePayNow = async (assignmentId) => {
+  const handlePayNow = (assignmentId) => {
+    const assignment = assignments.find(a => a.assignment_id === assignmentId);
+    setShowPaymentChoice(assignment);
+  };
+
+  const handlePayWithWallet = async (assignmentId) => {
+    setPaymentLoading(true);
+    try {
+      const res = await fetch(`${API}/payments/pay-from-wallet`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignment_id: assignmentId })
+      });
+      if (!res.ok) throw new Error(await getApiError(res));
+      toast.success('Payment successful from wallet! Your classes will begin soon.');
+      setShowPaymentChoice(null);
+      fetchData();
+    } catch (err) { toast.error(err.message); }
+    finally { setPaymentLoading(false); }
+  };
+
+  const handlePayWithRazorpay = async (assignmentId) => {
     setPaymentLoading(true);
     try {
       const res = await fetch(`${API}/payments/create-order`, {
@@ -131,6 +154,7 @@ const StudentDashboard = () => {
             });
             if (!verifyRes.ok) throw new Error(await getApiError(verifyRes));
             toast.success('Payment successful! Your classes will begin soon.');
+            setShowPaymentChoice(null);
             fetchData();
           } catch (err) { toast.error('Payment verification failed: ' + err.message); }
         },
@@ -477,6 +501,25 @@ const StudentDashboard = () => {
             </div>
           </div>
         )}
+
+        {/* Cancelled Classes */}
+        {cancelledClasses.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-xl font-bold text-red-600 mb-4 flex items-center gap-2"><XCircle className="w-5 h-5 text-red-500" /> Cancelled Classes ({cancelledClasses.length})</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {cancelledClasses.map(cls => (
+                <div key={cls.class_id} className="bg-red-50 rounded-2xl border-2 border-red-200 p-4" data-testid={`cancelled-class-${cls.class_id}`}>
+                  <div className="flex items-start justify-between mb-1">
+                    <h3 className="font-semibold text-slate-700 text-sm">{cls.title}</h3>
+                    <span className="bg-red-200 text-red-800 px-2 py-0.5 rounded-full text-[10px] font-bold">CANCELLED</span>
+                  </div>
+                  <p className="text-xs text-slate-500">{cls.subject} | {cls.date} | Teacher: {cls.teacher_name}</p>
+                  {cls.cancelled_by && <p className="text-xs text-red-600 mt-1">Cancelled by: {cls.cancelled_by}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Rating Dialog */}
@@ -530,6 +573,45 @@ const StudentDashboard = () => {
       {renderProfileDialog()}
       {renderNotifDialog()}
       <ViewProfilePopup open={viewProfileOpen} onOpenChange={setViewProfileOpen} userId={viewProfileUserId} userRole={viewProfileRole} />
+
+      {/* Payment Choice Dialog */}
+      <Dialog open={!!showPaymentChoice} onOpenChange={(open) => { if (!open) setShowPaymentChoice(null); }}>
+        <DialogContent className="sm:max-w-md rounded-3xl">
+          <DialogHeader><DialogTitle className="text-xl font-bold flex items-center gap-2"><IndianRupee className="w-5 h-5 text-orange-500" /> Choose Payment Method</DialogTitle></DialogHeader>
+          {showPaymentChoice && (
+            <div className="space-y-4 mt-4">
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                <p className="font-semibold text-slate-900">Assignment with {showPaymentChoice.teacher_name}</p>
+                <p className="text-sm text-slate-600">{showPaymentChoice.learning_plan_name || 'Standard Plan'}</p>
+                <p className="text-2xl font-black text-orange-600 mt-2">&#8377;{showPaymentChoice.learning_plan_price || showPaymentChoice.credit_price}</p>
+              </div>
+              <div className="bg-sky-50 rounded-xl p-3 border border-sky-200">
+                <p className="text-sm text-slate-700">Your Wallet Balance: <span className="font-bold text-sky-700">&#8377;{user?.credits || 0}</span></p>
+              </div>
+              <div className="space-y-3">
+                <Button
+                  onClick={() => handlePayWithWallet(showPaymentChoice.assignment_id)}
+                  disabled={paymentLoading || (user?.credits || 0) < (showPaymentChoice.learning_plan_price || showPaymentChoice.credit_price)}
+                  className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold disabled:opacity-50"
+                  data-testid="pay-wallet-btn">
+                  <CreditCard className="w-4 h-4 mr-2" /> Pay from Wallet
+                  {(user?.credits || 0) < (showPaymentChoice.learning_plan_price || showPaymentChoice.credit_price) && (
+                    <span className="ml-2 text-xs opacity-75">(Insufficient balance)</span>
+                  )}
+                </Button>
+                <Button
+                  onClick={() => handlePayWithRazorpay(showPaymentChoice.assignment_id)}
+                  disabled={paymentLoading}
+                  variant="outline"
+                  className="w-full rounded-full py-6 font-bold border-2 border-orange-300 text-orange-700 hover:bg-orange-50"
+                  data-testid="pay-razorpay-btn">
+                  <IndianRupee className="w-4 h-4 mr-2" /> Pay via Razorpay (UPI/Card/NetBanking)
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Attendance Dialog */}
       <Dialog open={showAttendanceDialog} onOpenChange={setShowAttendanceDialog}>
