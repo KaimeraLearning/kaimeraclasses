@@ -13,6 +13,10 @@ async def recalc_teacher_rating(teacher_id: str):
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
 
+    # Get admin-configured rating deduction per cancellation
+    pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+    cancel_deduction = pricing.get("cancel_rating_deduction", 0.2) if pricing else 0.2
+
     # Get all student feedback ratings for this teacher
     feedbacks = await db.feedback.find(
         {"teacher_id": teacher_id, "rating": {"$exists": True}},
@@ -29,8 +33,8 @@ async def recalc_teacher_rating(teacher_id: str):
     # Count bad feedbacks (rating <= 2)
     bad_feedbacks = sum(1 for f in feedbacks if f["rating"] <= 2)
 
-    # Rating: start at avg_feedback, subtract 0.2 per cancellation, 0.3 per bad feedback
-    penalty = (monthly_cancellations * 0.2) + (bad_feedbacks * 0.3)
+    # Rating: start at avg_feedback, subtract configurable amount per cancellation, 0.3 per bad feedback
+    penalty = (monthly_cancellations * cancel_deduction) + (bad_feedbacks * 0.3)
     star_rating = round(max(0, min(5, avg_feedback - penalty)), 1)
 
     # Auto-suspension: 5+ cancellations this month

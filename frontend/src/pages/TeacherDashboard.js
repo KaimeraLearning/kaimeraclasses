@@ -161,13 +161,18 @@ const TeacherDashboard = () => {
 
   const [cancellingClassId, setCancellingClassId] = useState(null);
   const handleTeacherCancelClass = async (classId) => {
-    if (!window.confirm('Cancel this class? This will impact your rating and refund the student.')) return;
+    if (!window.confirm("Cancel today's session? You must reschedule before the next session can start.")) return;
     setCancellingClassId(classId);
     try {
       const res = await fetch(`${API}/teacher/cancel-class/${classId}`, { method: 'POST', credentials: 'include' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed to cancel class');
+      if (!res.ok) throw new Error(data.detail || 'Failed to cancel session');
       toast.success(data.message);
+      if (data.needs_reschedule) {
+        // Auto-open reschedule dialog
+        const cls = [...(dashboardData?.todays_sessions || []), ...(dashboardData?.upcoming_classes || [])].find(c => c.class_id === classId);
+        if (cls) { setRescheduleTarget(cls); setShowRescheduleDialog(true); }
+      }
       fetchDashboardData();
     } catch (err) { toast.error(err.message); }
     setCancellingClassId(null);
@@ -326,20 +331,25 @@ const TeacherDashboard = () => {
           </div>
         </div>
 
-        {cancellations > 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-1.5 mb-2 text-xs text-amber-800 font-semibold">Cancelled {cancellations}/{cls.max_cancellations || 3} sessions</div>}
-        {cls.cancelled_today && (
+        {cancellations > 0 && <div className="bg-amber-50 border border-amber-200 rounded-lg p-1.5 mb-2 text-xs text-amber-800 font-semibold">Cancelled {cancellations} session(s)</div>}
+        {cls.needs_reschedule && (
           <div className="bg-red-50 rounded-lg p-2 text-center text-xs text-red-700 font-semibold border border-red-200 mb-2">
-            <AlertCircle className="w-3 h-3 inline mr-1" /> Session cancelled by student
+            <AlertCircle className="w-3 h-3 inline mr-1" /> Must reschedule before next session
           </div>
         )}
-        {cls.cancelled_today && (
+        {cls.cancelled_today && !cls.needs_reschedule && (
+          <div className="bg-red-50 rounded-lg p-2 text-center text-xs text-red-700 font-semibold border border-red-200 mb-2">
+            <AlertCircle className="w-3 h-3 inline mr-1" /> Session cancelled
+          </div>
+        )}
+        {(cls.cancelled_today || cls.needs_reschedule) && (
           <Button onClick={() => { setRescheduleTarget(cls); setShowRescheduleDialog(true); }} className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full text-xs h-7 mb-2" data-testid={`reschedule-${cls.class_id}`}>
             <CalendarDays className="w-3 h-3 mr-1" /> Reschedule Session
           </Button>
         )}
 
         <div className="space-y-1.5">
-          {cls.status === 'scheduled' && !cls.cancelled_today && (
+          {cls.status === 'scheduled' && !cls.cancelled_today && !cls.needs_reschedule && (
             <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8" data-testid={`start-class-${cls.class_id}`}>
               <Play className="w-3 h-3 mr-1" /> Start Class
             </Button>
@@ -361,7 +371,7 @@ const TeacherDashboard = () => {
           )}
           {section !== 'conducted' && cls.status !== 'completed' && cls.status !== 'cancelled' && (
             <div className="flex gap-1.5">
-              <Button onClick={() => handleTeacherCancelClass(cls.class_id)} disabled={cancellingClassId === cls.class_id} variant="outline" className="flex-1 rounded-full text-xs h-7 border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed" data-testid={`teacher-cancel-${cls.class_id}`}><XCircle className="w-3 h-3 mr-1" /> {cancellingClassId === cls.class_id ? 'Cancelling...' : 'Cancel'}</Button>
+              <Button onClick={() => handleTeacherCancelClass(cls.class_id)} disabled={cancellingClassId === cls.class_id} variant="outline" className="flex-1 rounded-full text-xs h-7 border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed" data-testid={`teacher-cancel-${cls.class_id}`}><XCircle className="w-3 h-3 mr-1" /> {cancellingClassId === cls.class_id ? 'Cancelling...' : "Cancel Today's Session"}</Button>
             </div>
           )}
           {section === 'today' && (

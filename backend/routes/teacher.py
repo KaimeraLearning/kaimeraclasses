@@ -252,7 +252,7 @@ async def approve_student_assignment(
 
 @router.post("/teacher/cancel-class/{class_id}")
 async def teacher_cancel_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Teacher cancels a class - impacts their rating"""
+    """Teacher cancels today's session - class continues, session is postponed. Must reschedule."""
     user = await get_current_user(request, authorization)
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
@@ -267,76 +267,61 @@ async def teacher_cancel_class(class_id: str, request: Request, authorization: O
     if cls.get('status') == 'cancelled':
         raise HTTPException(status_code=400, detail="This class is already cancelled")
 
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Check if already cancelled today
+    cancellations = cls.get("cancellations", [])
+    if any(c.get("date") == today and c.get("cancelled_by") == user.user_id for c in cancellations):
+        raise HTTPException(status_code=400, detail="You already cancelled today's session")
+
+    # Add today's cancellation to the list (session-level, not class-level)
+    cancellations.append({
+        "date": today,
+        "cancelled_by": user.user_id,
+        "cancelled_by_role": "teacher",
+        "cancelled_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    # Shift end_date by 1 day to account for cancelled session
+    end_date = cls.get("end_date", cls.get("date"))
+    new_end = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # Class stays active but needs reschedule before next session can start
     await db.class_sessions.update_one(
         {"class_id": class_id},
         {"$set": {
-            "status": "cancelled", "cancelled_by": "teacher",
-            "cancelled_at": datetime.now(timezone.utc).isoformat(),
-            "can_reschedule": True
+            "cancellations": cancellations,
+            "cancellation_count": len(cancellations),
+            "cancelled_today": True,
+            "end_date": new_end,
+            "needs_reschedule": True,
+            "last_cancelled_by": "teacher",
+            "last_cancelled_at": datetime.now(timezone.utc).isoformat()
         }}
     )
 
+    # Get admin-configured rating deduction (or default 0.2)
+    pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+    cancel_rating_deduction = pricing.get("cancel_rating_deduction", 0.2) if pricing else 0.2
+
+    # Record rating event with configurable deduction
+    rating, suspended = await record_rating_event(user.user_id, "cancellation", f"Cancelled session for '{cls['title']}' on {today}")
+
+    # Notify student
     student_id = cls.get("assigned_student_id")
-    refund = cls.get("credits_required", 0)
-    if student_id and refund > 0:
-        await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": refund}})
-        await db.transactions.insert_one({
-            "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
-            "user_id": student_id, "type": "teacher_cancel_refund", "amount": refund,
-            "description": f"Refund: Teacher cancelled '{cls['title']}'",
-            "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
-        })
-
-    rating, suspended = await record_rating_event(user.user_id, "cancellation", f"Cancelled class {cls['title']}")
-
     if student_id:
         await db.notifications.insert_one({
             "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
-            "user_id": student_id, "type": "teacher_cancelled",
-            "title": "Class Cancelled by Teacher",
-            "message": f"Teacher {user.name} cancelled '{cls['title']}'. Credits refunded.",
+            "user_id": student_id, "type": "teacher_cancelled_session",
+            "title": "Today's Session Cancelled",
+            "message": f"Teacher {user.name} cancelled today's session for '{cls['title']}'. It will be rescheduled.",
             "read": False, "created_at": datetime.now(timezone.utc).isoformat()
         })
 
-        # Check if ALL classes for this student-teacher assignment are now cancelled
-        # If so, refund the Razorpay assignment payment to student wallet
-        remaining_active = await db.class_sessions.find_one(
-            {"teacher_id": user.user_id, "assigned_student_id": student_id,
-             "status": {"$nin": ["cancelled"]}},
-            {"_id": 0}
-        )
-        if not remaining_active:
-            assignment = await db.student_teacher_assignments.find_one(
-                {"teacher_id": user.user_id, "student_id": student_id, "status": "approved"},
-                {"_id": 0}
-            )
-            if assignment and assignment.get("payment_status") == "paid":
-                plan_price = assignment.get("learning_plan_price") or assignment.get("credit_price", 0)
-                if plan_price > 0:
-                    await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": plan_price}})
-                    await db.transactions.insert_one({
-                        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
-                        "user_id": student_id, "type": "full_cancellation_refund",
-                        "amount": plan_price,
-                        "description": f"Full refund: All classes cancelled by teacher. Assignment payment refunded to wallet.",
-                        "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
-                    })
-                    await db.student_teacher_assignments.update_one(
-                        {"assignment_id": assignment["assignment_id"]},
-                        {"$set": {"payment_status": "refunded", "refunded_at": datetime.now(timezone.utc).isoformat()}}
-                    )
-                    await db.notifications.insert_one({
-                        "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
-                        "user_id": student_id, "type": "payment_refunded",
-                        "title": "Payment Refunded",
-                        "message": f"All your classes with {user.name} were cancelled. Your payment of Rs.{plan_price} has been refunded to your wallet.",
-                        "read": False, "created_at": datetime.now(timezone.utc).isoformat()
-                    })
-
-    msg = f"Class cancelled. Your rating is now {rating}."
+    msg = f"Today's session cancelled. Please reschedule to continue. Rating: {rating}."
     if suspended:
-        msg += " WARNING: Your account has been suspended for 3 days due to excessive cancellations."
-    return {"message": msg, "star_rating": rating, "is_suspended": suspended}
+        msg += " WARNING: Your account has been suspended due to excessive cancellations."
+    return {"message": msg, "star_rating": rating, "is_suspended": suspended, "needs_reschedule": True}
 
 
 @router.get("/teacher/my-rating")
@@ -719,66 +704,24 @@ async def reschedule_class(class_id: str, request: Request, authorization: Optio
     if not cls:
         raise HTTPException(status_code=404, detail="Class not found")
 
-    # Allow reschedule if: student cancelled today's session OR teacher cancelled the class
-    is_teacher_cancelled = cls.get("status") == "cancelled" and cls.get("cancelled_by") == "teacher"
+    # Allow reschedule if: needs_reschedule flag set (teacher cancelled today) OR student cancelled today
+    needs_reschedule = cls.get("needs_reschedule", False)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     student_cancelled_today = any(c.get("date") == today for c in (cls.get("cancellations") or []))
 
-    if not is_teacher_cancelled and not student_cancelled_today:
-        raise HTTPException(status_code=400, detail="Can only reschedule cancelled classes or student-cancelled sessions")
+    if not needs_reschedule and not student_cancelled_today:
+        raise HTTPException(status_code=400, detail="No cancelled session to reschedule")
 
     update_fields = {
         "rescheduled": True, "rescheduled_date": new_date,
         "rescheduled_start_time": new_start_time, "rescheduled_end_time": new_end_time,
         "rescheduled_at": datetime.now(timezone.utc).isoformat(), "cancelled_today": False,
-        "reschedule_count": (cls.get("reschedule_count", 0) + 1)
+        "needs_reschedule": False,
+        "reschedule_count": (cls.get("reschedule_count", 0) + 1),
+        # Update the class timings for remaining days
+        "start_time": new_start_time,
+        "end_time": new_end_time
     }
-
-    # If teacher cancelled the whole class, reactivate it with new schedule
-    if is_teacher_cancelled:
-        update_fields["status"] = "scheduled"
-        update_fields["date"] = new_date
-        update_fields["start_time"] = new_start_time
-        update_fields["end_time"] = new_end_time
-        # Shift end_date by 1 day for this reschedule
-        end_date = datetime.fromisoformat(new_date) + timedelta(days=cls.get("duration_days", 1) - 1 + 1)
-        update_fields["end_date"] = end_date.isoformat().split('T')[0]
-        update_fields["can_reschedule"] = False
-
-        # Reclaim the per-class credit refund that was given on cancel
-        student_id = cls.get("assigned_student_id")
-        refund_to_reclaim = cls.get("credits_required", 0)
-        if student_id and refund_to_reclaim > 0:
-            await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": -refund_to_reclaim}})
-            await db.transactions.insert_one({
-                "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
-                "user_id": student_id, "type": "reschedule_recharge",
-                "amount": -refund_to_reclaim,
-                "description": f"Re-charged: Class '{cls['title']}' rescheduled by teacher (refund reversed)",
-                "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
-            })
-
-        # If full assignment refund was issued, reverse it too
-        if student_id:
-            assignment = await db.student_teacher_assignments.find_one(
-                {"teacher_id": user.user_id, "student_id": student_id, "status": "approved", "payment_status": "refunded"},
-                {"_id": 0}
-            )
-            if assignment:
-                plan_price = assignment.get("learning_plan_price") or assignment.get("credit_price", 0)
-                if plan_price > 0:
-                    await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": -plan_price}})
-                    await db.transactions.insert_one({
-                        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
-                        "user_id": student_id, "type": "refund_reversal",
-                        "amount": -plan_price,
-                        "description": f"Refund reversed: Teacher rescheduled class. Assignment payment re-applied.",
-                        "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
-                    })
-                    await db.student_teacher_assignments.update_one(
-                        {"assignment_id": assignment["assignment_id"]},
-                        {"$set": {"payment_status": "paid", "refunded_at": None}}
-                    )
 
     await db.class_sessions.update_one(
         {"class_id": class_id},

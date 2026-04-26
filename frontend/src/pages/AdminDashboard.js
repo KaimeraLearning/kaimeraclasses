@@ -97,7 +97,7 @@ const AdminDashboard = () => {
   const [expandedCounsellor, setExpandedCounsellor] = useState(null);
 
   // System Pricing
-  const [pricingForm, setPricingForm] = useState({ demo_price_student: '', class_price_student: '', demo_earning_teacher: '', class_earning_teacher: '' });
+  const [pricingForm, setPricingForm] = useState({ demo_price_student: '', class_price_student: '', demo_earning_teacher: '', class_earning_teacher: '', cancel_rating_deduction: '' });
   const [pricingLoaded, setPricingLoaded] = useState(false);
 
   // Student Edit
@@ -407,7 +407,8 @@ const AdminDashboard = () => {
           demo_price_student: data.demo_price_student ?? '',
           class_price_student: data.class_price_student ?? '',
           demo_earning_teacher: data.demo_earning_teacher ?? '',
-          class_earning_teacher: data.class_earning_teacher ?? ''
+          class_earning_teacher: data.class_earning_teacher ?? '',
+          cancel_rating_deduction: data.cancel_rating_deduction ?? '0.2'
         });
         setPricingLoaded(true);
       }
@@ -422,7 +423,8 @@ const AdminDashboard = () => {
           demo_price_student: parseFloat(pricingForm.demo_price_student) || 0,
           class_price_student: parseFloat(pricingForm.class_price_student) || 0,
           demo_earning_teacher: parseFloat(pricingForm.demo_earning_teacher) || 0,
-          class_earning_teacher: parseFloat(pricingForm.class_earning_teacher) || 0
+          class_earning_teacher: parseFloat(pricingForm.class_earning_teacher) || 0,
+          cancel_rating_deduction: parseFloat(pricingForm.cancel_rating_deduction) || 0.2
         })
       });
       if (!res.ok) throw new Error(await getApiError(res));
@@ -1065,7 +1067,16 @@ const AdminDashboard = () => {
                         </div>
                       </div>
                     </div>
-                    <Button onClick={handleSavePricing} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold" data-testid="save-pricing-btn">
+                    {/* Rating Penalty Settings */}
+                    <div className="bg-red-50 rounded-xl p-4 border border-red-200 mt-4">
+                      <h4 className="text-sm font-bold text-red-800 mb-2">Teacher Cancellation Penalty</h4>
+                      <div>
+                        <Label className="text-xs text-red-700">Rating Deducted Per Cancellation</Label>
+                        <Input type="number" step="0.1" min="0" max="2" value={pricingForm.cancel_rating_deduction} onChange={e => setPricingForm({...pricingForm, cancel_rating_deduction: e.target.value})} className="rounded-xl bg-white" data-testid="pricing-cancel-deduction" />
+                        <p className="text-[10px] text-slate-500 mt-1">Points deducted from teacher rating each time they cancel a session (default 0.2)</p>
+                      </div>
+                    </div>
+                    <Button onClick={handleSavePricing} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold mt-4" data-testid="save-pricing-btn">
                       <Save className="w-5 h-5 mr-2" /> Save System Pricing
                     </Button>
                   </div>

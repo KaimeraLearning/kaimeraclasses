@@ -444,7 +444,7 @@ async def set_system_pricing(pricing: SystemPricing, request: Request, authoriza
     user = await get_current_user(request, authorization)
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access only")
-    pricing_doc = {"pricing_id": "system_pricing", "demo_price_student": pricing.demo_price_student, "class_price_student": pricing.class_price_student, "demo_earning_teacher": pricing.demo_earning_teacher, "class_earning_teacher": pricing.class_earning_teacher, "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": user.user_id}
+    pricing_doc = {"pricing_id": "system_pricing", "demo_price_student": pricing.demo_price_student, "class_price_student": pricing.class_price_student, "demo_earning_teacher": pricing.demo_earning_teacher, "class_earning_teacher": pricing.class_earning_teacher, "cancel_rating_deduction": pricing.cancel_rating_deduction, "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": user.user_id}
     await db.system_pricing.update_one({"pricing_id": "system_pricing"}, {"$set": pricing_doc}, upsert=True)
     return {"message": "System pricing updated successfully"}
 

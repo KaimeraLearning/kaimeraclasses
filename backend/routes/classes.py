@@ -332,6 +332,10 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
     if cls['status'] not in ['scheduled', 'in_progress']:
         raise HTTPException(status_code=400, detail=f"Cannot start class with status: {cls['status']}")
 
+    # Block starting if a cancelled session needs reschedule first
+    if cls.get("needs_reschedule"):
+        raise HTTPException(status_code=400, detail="Cannot start class: A cancelled session needs to be rescheduled first.")
+
     # Verify payment for assigned student (skip for demo classes)
     if not cls.get("is_demo") and cls.get("assigned_student_id"):
         assignment = await db.student_teacher_assignments.find_one(

@@ -159,6 +159,7 @@ class SystemPricing(BaseModel):
     class_price_student: float  # What student pays per class (can be overridden per student)
     demo_earning_teacher: float  # What teacher earns for demo
     class_earning_teacher: float  # What teacher earns per class
+    cancel_rating_deduction: Optional[float] = 0.2  # Rating deducted per teacher cancellation
 
 
 class CreateTeacherAccount(BaseModel):
