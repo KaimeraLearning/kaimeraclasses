@@ -51,6 +51,12 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Payment choice: students now choose between "Pay from Wallet" or "Pay via Razorpay" instead of going straight to Razorpay
 - New endpoint: POST /api/payments/pay-from-wallet (deducts wallet credits, marks assignment paid)
 
+### Per-Day Proof, Reschedule on Cancel, Counsellor Visibility (Feb 2026)
+- Proof is now per-day for multi-day classes — teacher submits proof after each session, not in bulk
+- Teacher can reschedule cancelled classes (not just student-cancelled sessions) with no reschedule limit
+- Reschedule reactivates the class with new date/time and notifies the student
+- Counsellor can see who cancelled each class and whether it was rescheduled (with count and new date)
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)
