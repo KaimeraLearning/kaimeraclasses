@@ -335,11 +335,15 @@ const TeacherDashboard = () => {
               <Play className="w-3 h-3 mr-1" /> Rejoin Live
             </Button>
           )}
-          {section === 'conducted' && cls.status !== 'cancelled' && !cls.proof_submitted && (
-            <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="w-full rounded-full text-xs h-7" data-testid={`submit-proof-${cls.class_id}`}><Upload className="w-3 h-3 mr-1" /> Submit Proof</Button>
+          {/* Proof button: shows for conducted classes AND today's sessions that ended */}
+          {(section === 'conducted' || section === 'today') && cls.status !== 'cancelled' && !cls.proof_submitted && (
+            <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="w-full rounded-full text-xs h-7" data-testid={`submit-proof-${cls.class_id}`}><Upload className="w-3 h-3 mr-1" /> Submit Today's Proof</Button>
           )}
-          {section === 'conducted' && cls.proof_submitted && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1 text-center text-xs text-emerald-700 font-medium" data-testid={`proof-submitted-${cls.class_id}`}><CheckCircle className="w-3 h-3 inline mr-1" />Proof Submitted</div>
+          {(section === 'conducted' || section === 'today') && cls.proof_submitted && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1 text-center text-xs text-emerald-700 font-medium" data-testid={`proof-submitted-${cls.class_id}`}>
+              <CheckCircle className="w-3 h-3 inline mr-1" />Today's Proof Submitted
+              {cls.total_proofs > 0 && cls.duration_days > 1 && <span className="ml-1">({cls.total_proofs}/{cls.duration_days} days)</span>}
+            </div>
           )}
           {section !== 'conducted' && cls.status !== 'completed' && cls.status !== 'cancelled' && (
             <div className="flex gap-1.5">
@@ -513,9 +517,23 @@ const TeacherDashboard = () => {
                         <p className="text-xs text-slate-600">{cls.subject} | {cls.class_type}</p>
                         <p className="text-xs text-slate-500">{cls.date} {cls.start_time}-{cls.end_time}</p>
                       </div>
-                      <span className="bg-red-200 text-red-800 px-2 py-0.5 rounded-full text-[10px] font-bold">CANCELLED</span>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="bg-red-200 text-red-800 px-2 py-0.5 rounded-full text-[10px] font-bold">CANCELLED</span>
+                        {cls.rescheduled && <span className="bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold">RESCHEDULED</span>}
+                      </div>
                     </div>
-                    <p className="text-xs text-red-600">Cancelled by: {cls.cancelled_by || 'teacher'}</p>
+                    <p className="text-xs text-red-600 mb-2">Cancelled by: {cls.cancelled_by || 'teacher'}</p>
+                    {cls.can_reschedule && !cls.rescheduled && (
+                      <Button onClick={() => { setRescheduleTarget(cls); setShowRescheduleDialog(true); }}
+                        className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-full text-xs h-8" data-testid={`reschedule-cancelled-${cls.class_id}`}>
+                        <CalendarDays className="w-3 h-3 mr-1" /> Reschedule This Class
+                      </Button>
+                    )}
+                    {cls.rescheduled && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mt-1">
+                        <p className="text-xs text-amber-800 font-semibold">Rescheduled to: {cls.rescheduled_date} {cls.rescheduled_start_time}-{cls.rescheduled_end_time}</p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

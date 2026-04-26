@@ -193,14 +193,30 @@ const CounsellorStudents = () => {
                   <p className="text-sm font-semibold text-slate-700 mb-2">Class History ({studentProfile.class_history.length})</p>
                   <div className="space-y-2 max-h-48 overflow-y-auto">
                     {studentProfile.class_history.map(cls => (
-                      <div key={cls.class_id} className="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
-                        <div>
-                          <p className="font-medium text-slate-900 text-sm">{cls.title}</p>
-                          <p className="text-xs text-slate-500">{cls.date} | {cls.teacher_name}</p>
+                      <div key={cls.class_id} className={`rounded-lg p-3 ${cls.status === 'cancelled' ? 'bg-red-50' : cls.rescheduled ? 'bg-amber-50' : 'bg-slate-50'}`}>
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="font-medium text-slate-900 text-sm">{cls.title}</p>
+                            <p className="text-xs text-slate-500">{cls.date} | {cls.teacher_name}</p>
+                            {cls.status === 'cancelled' && cls.cancelled_by && (
+                              <p className="text-xs text-red-600 font-semibold mt-0.5">Cancelled by: {cls.cancelled_by}</p>
+                            )}
+                            {cls.rescheduled && (
+                              <p className="text-xs text-amber-700 font-semibold mt-0.5">Rescheduled to: {cls.rescheduled_date} {cls.rescheduled_start_time}-{cls.rescheduled_end_time}</p>
+                            )}
+                            {cls.reschedule_count > 0 && (
+                              <p className="text-xs text-amber-600 mt-0.5">Rescheduled {cls.reschedule_count} time(s)</p>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                              cls.status === 'cancelled' ? 'bg-red-200 text-red-800' :
+                              cls.status === 'completed' ? 'bg-emerald-100 text-emerald-800' :
+                              cls.status === 'scheduled' ? 'bg-sky-100 text-sky-800' : 'bg-slate-100 text-slate-800'
+                            }`}>{cls.status}</span>
+                            {cls.rescheduled && <span className="bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-bold">RESCHEDULED</span>}
+                          </div>
                         </div>
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          cls.status === 'scheduled' ? 'bg-sky-100 text-sky-800' : 'bg-slate-100 text-slate-800'
-                        }`}>{cls.status}</span>
                       </div>
                     ))}
                   </div>

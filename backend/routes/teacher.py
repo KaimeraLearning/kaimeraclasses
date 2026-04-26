@@ -1,6 +1,6 @@
 """Teacher routes"""
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional
 
@@ -126,16 +126,26 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
                 a["counselor_name"] = counselor_map.get(a["assigned_by"], "")
                 a["counselor_id"] = a["assigned_by"]
 
-    # Check proof submission status for conducted classes
-    all_check_classes = conducted_classes + [c for c in todays_sessions if c.get('status') == 'completed']
+    # Check proof submission status for conducted classes AND today's ended sessions
+    all_check_classes = conducted_classes + [c for c in todays_sessions if c.get('status') in ('completed', 'scheduled')]
     class_ids = [c['class_id'] for c in all_check_classes]
+    today_str_proof = now.strftime('%Y-%m-%d')
     if class_ids:
+        # Get all proofs for these classes
         proofs = await db.class_proofs.find(
-            {"class_id": {"$in": class_ids}}, {"_id": 0, "class_id": 1}
-        ).to_list(1000)
-        proof_class_ids = set(p['class_id'] for p in proofs)
+            {"class_id": {"$in": class_ids}}, {"_id": 0, "class_id": 1, "proof_date": 1}
+        ).to_list(5000)
+        # For multi-day classes: check if TODAY's proof is submitted
+        # For single-day classes: check if any proof exists
         for cls in all_check_classes:
-            cls['proof_submitted'] = cls['class_id'] in proof_class_ids
+            cls_proofs = [p for p in proofs if p['class_id'] == cls['class_id']]
+            if cls.get('duration_days', 1) > 1:
+                # Multi-day: proof needed per day
+                today_proof = any(p.get('proof_date') == today_str_proof for p in cls_proofs)
+                cls['proof_submitted'] = today_proof
+                cls['total_proofs'] = len(cls_proofs)
+            else:
+                cls['proof_submitted'] = len(cls_proofs) > 0
 
     return {
         "is_approved": user.is_approved, "is_suspended": False,
@@ -259,7 +269,11 @@ async def teacher_cancel_class(class_id: str, request: Request, authorization: O
 
     await db.class_sessions.update_one(
         {"class_id": class_id},
-        {"$set": {"status": "cancelled", "cancelled_by": "teacher", "cancelled_at": datetime.now(timezone.utc).isoformat()}}
+        {"$set": {
+            "status": "cancelled", "cancelled_by": "teacher",
+            "cancelled_at": datetime.now(timezone.utc).isoformat(),
+            "can_reschedule": True
+        }}
     )
 
     student_id = cls.get("assigned_student_id")
@@ -688,7 +702,7 @@ async def get_teacher_schedule(request: Request, authorization: Optional[str] = 
 
 @router.post("/teacher/reschedule-class/{class_id}")
 async def reschedule_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Teacher reschedules a session - only if student cancelled today's session"""
+    """Teacher reschedules a class - works for student-cancelled sessions and teacher-cancelled classes"""
     user = await get_current_user(request, authorization)
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teachers only")
@@ -705,30 +719,46 @@ async def reschedule_class(class_id: str, request: Request, authorization: Optio
     if not cls:
         raise HTTPException(status_code=404, detail="Class not found")
 
+    # Allow reschedule if: student cancelled today's session OR teacher cancelled the class
+    is_teacher_cancelled = cls.get("status") == "cancelled" and cls.get("cancelled_by") == "teacher"
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cancelled_today = any(c.get("date") == today for c in (cls.get("cancellations") or []))
-    if not cancelled_today:
-        raise HTTPException(status_code=400, detail="Can only reschedule if student cancelled today's session")
+    student_cancelled_today = any(c.get("date") == today for c in (cls.get("cancellations") or []))
+
+    if not is_teacher_cancelled and not student_cancelled_today:
+        raise HTTPException(status_code=400, detail="Can only reschedule cancelled classes or student-cancelled sessions")
+
+    update_fields = {
+        "rescheduled": True, "rescheduled_date": new_date,
+        "rescheduled_start_time": new_start_time, "rescheduled_end_time": new_end_time,
+        "rescheduled_at": datetime.now(timezone.utc).isoformat(), "cancelled_today": False,
+        "reschedule_count": (cls.get("reschedule_count", 0) + 1)
+    }
+
+    # If teacher cancelled the whole class, reactivate it with new schedule
+    if is_teacher_cancelled:
+        update_fields["status"] = "scheduled"
+        update_fields["date"] = new_date
+        update_fields["start_time"] = new_start_time
+        update_fields["end_time"] = new_end_time
+        end_date = datetime.fromisoformat(new_date) + timedelta(days=cls.get("duration_days", 1) - 1)
+        update_fields["end_date"] = end_date.isoformat().split('T')[0]
+        update_fields["can_reschedule"] = False
 
     await db.class_sessions.update_one(
         {"class_id": class_id},
-        {"$set": {
-            "rescheduled": True, "rescheduled_date": new_date,
-            "rescheduled_start_time": new_start_time, "rescheduled_end_time": new_end_time,
-            "rescheduled_at": datetime.now(timezone.utc).isoformat(), "cancelled_today": False
-        }}
+        {"$set": update_fields}
     )
 
     for s in cls.get("enrolled_students", []):
         await db.notifications.insert_one({
             "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
             "user_id": s["user_id"], "type": "class_rescheduled",
-            "title": "Session Rescheduled",
+            "title": "Class Rescheduled",
             "message": f"Your class '{cls['title']}' has been rescheduled to {new_date} at {new_start_time}-{new_end_time}",
             "read": False, "created_at": datetime.now(timezone.utc).isoformat()
         })
 
-    return {"message": "Session rescheduled successfully"}
+    return {"message": "Class rescheduled successfully"}
 
 
 

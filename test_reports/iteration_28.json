@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 28 (per-day proof, wallet refund on cancel, reschedule on teacher-cancel, counsellor visibility) validated. 15/15 backend pytest PASSED covering: admin login, module imports (no syntax errors), source-level guarantees for all 4 features, and HTTP-contract checks (auth + role gating) for /api/teacher/cancel-class, /api/teacher/reschedule-class, /api/counsellor/student-profile. Frontend smoke: admin login UI redirects to /admin-dashboard with welcome toast. UI source verified: TeacherDashboard.js shows 'Submit Today's Proof' (line 340), uses cls.proof_submitted+cls.total_proofs (lines 339-345), cancelled tab renders reschedule-cancelled-{id} button when can_reschedule && !rescheduled (lines 526-531). CounsellorStudents.js renders cancelled_by, rescheduled_date/time, reschedule_count (lines 201-217). Teacher/student UI not exercised end-to-end (OTP-gated logins, no known credentials).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration28_proof_reschedule.py",
+    "/app/test_reports/pytest/iteration_28.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "teacher.py:303-307 'remaining_active' query for full-cancellation refund uses status: {$nin: ['cancelled']}. This treats 'completed' classes as remaining_active, so the wallet refund only fires when ALL classes are cancelled (correct per intent). Add inline comment so future devs do not mistakenly add 'completed' to $nin.",
+    "teacher.py:743 reschedule recomputes end_date from new_date + duration_days-1 using datetime.fromisoformat which works only for YYYY-MM-DD; if frontend ever sends a full ISO datetime, fromisoformat will accept but timedelta math could shift timezones. Consider explicit %Y-%m-%d parsing for safety.",
+    "teacher.py:725 student_cancelled_today reads cls.get('cancellations') which is a per-day cancellation list — the structure is implicit. Document the schema near the field or add a Pydantic model to keep contract clear.",
+    "counsellor.py:65 class_history is returned as raw class_sessions docs (only _id excluded). This implicitly exposes ALL fields including future internal flags. Consider an explicit projection of allowlisted fields (class_id, title, date, status, cancelled_by, rescheduled, reschedule_count, rescheduled_*, etc.) to harden the API contract.",
+    "teacher.py:130 proof check builds all_check_classes from conducted + today-sessions filtered by status in ('completed','scheduled'). 'in_progress' today sessions are excluded — proof_submitted will not be populated for live classes that have not yet auto-completed. Minor; verify if intended.",
+    "teacher.py:739-744 when reactivating a teacher-cancelled class, can_reschedule is set to False, but 'cancelled_by'/'cancelled_at' fields are not cleared. Class will show as RESCHEDULED in cancelled tab forever (correct per current UI), but if someone re-queries by status='cancelled' it will not return — which is intended since status is flipped to 'scheduled'. Document that historical cancel metadata is intentionally retained on the doc."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration28_proof_reschedule.py",
+    "/app/test_reports/iteration_28.json",
+    "/app/test_reports/pytest/iteration_28.xml"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "Admin login UI verified end-to-end. Teacher/Student UI flows verified via source grep; not exercisable without OTP-gated tokens."},
+  "test_credentials": "Admin info@kaimeralearning.com / solidarity&peace2023 — works. Teacher and student passwords unknown (OTP-gated). Reschedule endpoint (teacher-only) cannot be exercised end-to-end without a teacher session; covered via source-level + 401/403 contract assertions.",
+  "seed_data_creation": "None. Used existing seeded data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression at /app/backend/tests/test_iteration28_proof_reschedule.py covers per-day proof, teacher cancel can_reschedule flag, reschedule reactivation source guarantees, counsellor student-profile shape. To exercise the success path of /api/teacher/reschedule-class, a teacher session token is needed: (1) login as teacher (user_df2cb7dd0ae5) via OTP, (2) cancel a class via POST /api/teacher/cancel-class/{id}, (3) call POST /api/teacher/reschedule-class/{id} with {new_date, new_start_time, new_end_time} and verify status returns to 'scheduled' with new fields. Same applies for verifying multi-day proof_submitted toggling per proof_date in dashboard response.",
+  "rca of the issue": "N/A — feature validation iteration. All four implemented changes verified via pytest + source review."
+}
