@@ -740,9 +740,8 @@ async def reschedule_class(class_id: str, request: Request, authorization: Optio
         update_fields["date"] = new_date
         update_fields["start_time"] = new_start_time
         update_fields["end_time"] = new_end_time
-        # Shift end_date by reschedule count (each reschedule adds 1 day)
-        reschedule_num = cls.get("reschedule_count", 0) + 1
-        end_date = datetime.fromisoformat(new_date) + timedelta(days=cls.get("duration_days", 1) - 1 + reschedule_num)
+        # Shift end_date by 1 day for this reschedule
+        end_date = datetime.fromisoformat(new_date) + timedelta(days=cls.get("duration_days", 1) - 1 + 1)
         update_fields["end_date"] = end_date.isoformat().split('T')[0]
         update_fields["can_reschedule"] = False
 

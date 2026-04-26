@@ -57,6 +57,12 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Reschedule reactivates the class with new date/time and notifies the student
 - Counsellor can see who cancelled each class and whether it was rescheduled (with count and new date)
 
+### Refund Loophole Fix, End-Date Shift, Smart Attendance (Feb 2026)
+- Fixed refund loophole: when teacher reschedules a cancelled class, the credit refund is reversed (re-charged). Full assignment refunds also reversed.
+- Each reschedule extends class end_date by 1 extra day to account for the lost session
+- Attendance on non-class day: backend detects no scheduled class and asks teacher "why?" (forgot/rescheduled) + which class it's for. Records off_day_marking, reason, class_id
+- Counsellor can view full attendance history per student including off-day markings and reasons (new endpoint)
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)

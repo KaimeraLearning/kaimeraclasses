@@ -62,6 +62,8 @@ async def mark_attendance(request: Request, authorization: Optional[str] = Heade
             }
         if not class_id:
             raise HTTPException(status_code=400, detail="Please select which class this attendance is for")
+        if reason not in ["forgot_to_mark", "rescheduled_class"]:
+            raise HTTPException(status_code=400, detail="Invalid reason. Use: forgot_to_mark or rescheduled_class")
 
     # Upsert attendance record
     attendance_id = f"att_{uuid.uuid4().hex[:12]}"
