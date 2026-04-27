@@ -4,6 +4,7 @@ import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { ArrowLeft, IndianRupee, Download, CreditCard, History, FileText, CheckCircle, Clock, Loader2 } from 'lucide-react';
 import { getApiError, API } from '../utils/api';
+import { useDateRangeFilter } from '../components/DateRangeFilter';
 
 const WalletPage = () => {
   const navigate = useNavigate();
@@ -32,6 +33,10 @@ const WalletPage = () => {
     const token = localStorage.getItem('token');
     window.open(`${API}/payments/receipt-pdf/${paymentId}?token=${token}`, '_blank');
   };
+
+  // Date range filters — must be called before any early return (hooks rule)
+  const paymentsFilter = useDateRangeFilter(payments, 'created_at');
+  const txnsFilter = useDateRangeFilter(transactions, 'created_at');
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -67,16 +72,21 @@ const WalletPage = () => {
 
         {/* Payment Receipts */}
         <div className="mb-8">
-          <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <h2 className="text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
             <FileText className="w-5 h-5 text-sky-500" /> Payment Receipts
           </h2>
+          {payments.length > 0 && paymentsFilter.FilterBar}
           {payments.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400">
               No payments yet
             </div>
+          ) : paymentsFilter.filtered.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400" data-testid="no-payments-in-range">
+              No payments in selected range
+            </div>
           ) : (
             <div className="space-y-3">
-              {payments.map(p => (
+              {paymentsFilter.filtered.map(p => (
                 <div key={p.payment_id} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between hover:shadow-sm transition-shadow" data-testid={`receipt-${p.payment_id}`}>
                   <div className="flex items-center gap-4">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center ${p.status === 'paid' ? 'bg-emerald-100' : 'bg-amber-100'}`}>
@@ -113,31 +123,38 @@ const WalletPage = () => {
         {/* Credit Transactions */}
         {transactions.length > 0 && (
           <div>
-            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <h2 className="text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
               <History className="w-5 h-5 text-violet-500" /> Transaction History
             </h2>
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="text-left p-3 text-xs text-slate-500">Date</th>
-                    <th className="text-left p-3 text-xs text-slate-500">Description</th>
-                    <th className="text-right p-3 text-xs text-slate-500">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.map(t => (
-                    <tr key={t.transaction_id} className="border-t border-slate-100">
-                      <td className="p-3 text-xs text-slate-600">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '-'}</td>
-                      <td className="p-3 text-xs font-medium">{t.description}</td>
-                      <td className={`p-3 text-right text-xs font-bold ${t.type === 'debit' ? 'text-red-600' : 'text-emerald-600'}`}>
-                        {t.type === 'debit' ? '-' : '+'}{t.amount}
-                      </td>
+            {txnsFilter.FilterBar}
+            {txnsFilter.filtered.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400" data-testid="no-txns-in-range">
+                No transactions in selected range
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden max-h-[60vh] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr>
+                      <th className="text-left p-3 text-xs text-slate-500">Date</th>
+                      <th className="text-left p-3 text-xs text-slate-500">Description</th>
+                      <th className="text-right p-3 text-xs text-slate-500">Amount</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {txnsFilter.filtered.map(t => (
+                      <tr key={t.transaction_id} className="border-t border-slate-100">
+                        <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '-'}</td>
+                        <td className="p-3 text-xs font-medium">{t.description}</td>
+                        <td className={`p-3 text-right text-xs font-bold ${t.amount < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                          {t.amount < 0 ? '' : '+'}{t.amount}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>

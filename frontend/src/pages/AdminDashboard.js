@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { getApiError, API } from '../utils/api';
+import { useDateRangeFilter } from '../components/DateRangeFilter';
 
 // ─── Reusable Sub-Components ───
 
@@ -27,6 +28,32 @@ const StatCard = ({ label, value, color = 'slate' }) => (
     <p className={`text-2xl font-bold text-${color}-700`}>{value}</p>
   </div>
 );
+
+// User-drawer wallet history with date filter (sorted desc inside the hook)
+const DrawerWalletHistory = ({ transactions }) => {
+  const { filtered, FilterBar } = useDateRangeFilter(transactions, 'created_at');
+  return (
+    <div data-testid="drawer-wallet-history">
+      <p className="text-xs font-semibold text-slate-700 mb-1">Wallet History ({transactions.length} total)</p>
+      {FilterBar}
+      {filtered.length === 0 ? (
+        <p className="text-xs text-slate-400 text-center py-3" data-testid="drawer-wallet-empty">No transactions in selected range</p>
+      ) : (
+        <div className="space-y-1 max-h-48 overflow-y-auto">
+          {filtered.map((t, i) => (
+            <div key={t.transaction_id || i} className="bg-slate-50 rounded-lg p-2 flex justify-between items-center text-xs gap-2">
+              <div className="min-w-0">
+                <p className="font-medium text-slate-700 truncate">{t.description}</p>
+                <p className="text-[10px] text-slate-400">{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</p>
+              </div>
+              <span className={`font-semibold whitespace-nowrap ${t.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{t.amount > 0 ? '+' : ''}{t.amount}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ─── Main Component ───
 
@@ -1384,14 +1411,7 @@ const AdminDashboard = () => {
                     </div>
                   )}
                   {drawerData.transactions?.length > 0 && (
-                    <div><p className="text-xs font-semibold text-slate-700 mb-1">Wallet History ({drawerData.transactions.length})</p>
-                      <div className="space-y-1 max-h-28 overflow-y-auto">{drawerData.transactions.map((t, i) => (
-                        <div key={i} className="bg-slate-50 rounded-lg p-2 flex justify-between text-xs">
-                          <span>{t.description}</span>
-                          <span className={`font-semibold ${t.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{t.amount > 0 ? '+' : ''}{t.amount}</span>
-                        </div>
-                      ))}</div>
-                    </div>
+                    <DrawerWalletHistory transactions={drawerData.transactions} />
                   )}
                 </>
               )}
