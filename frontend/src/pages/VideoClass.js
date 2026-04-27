@@ -2,20 +2,37 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
-import { Camera, PhoneOff, ArrowLeft, Loader2, ExternalLink } from 'lucide-react';
+import { Camera, PhoneOff, ArrowLeft, Loader2 } from 'lucide-react';
 import { getApiError, API } from '../utils/api';
+
+const JITSI_SCRIPT_SRC = 'https://meet.jit.si/external_api.js';
+
+const loadJitsiScript = () => new Promise((resolve, reject) => {
+  if (window.JitsiMeetExternalAPI) return resolve();
+  const existing = document.querySelector(`script[src="${JITSI_SCRIPT_SRC}"]`);
+  if (existing) {
+    existing.addEventListener('load', () => resolve());
+    existing.addEventListener('error', () => reject(new Error('Jitsi script load failed')));
+    return;
+  }
+  const s = document.createElement('script');
+  s.src = JITSI_SCRIPT_SRC;
+  s.async = true;
+  s.onload = () => resolve();
+  s.onerror = () => reject(new Error('Jitsi script load failed'));
+  document.head.appendChild(s);
+});
 
 const VideoClass = () => {
   const { classId } = useParams();
   const navigate = useNavigate();
-  const zoomContainerRef = useRef(null);
-  const zoomClientRef = useRef(null);
+  const containerRef = useRef(null);
+  const apiRef = useRef(null);
   const [user, setUser] = useState(null);
   const [classInfo, setClassInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isTeacher, setIsTeacher] = useState(false);
-  const [zoomReady, setZoomReady] = useState(false);
-  const [zoomFailed, setZoomFailed] = useState(false);
+  const [jitsiReady, setJitsiReady] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -24,7 +41,7 @@ const VideoClass = () => {
         fetch(`${API}/classes/status/${classId}`, { credentials: 'include' })
       ]);
       if (!userRes.ok) throw new Error('Authentication failed. Please log in again.');
-      if (!statusRes.ok) throw new Error('Class not found or you do not have access.');
+      if (!statusRes.ok) throw new Error(await getApiError(statusRes));
       const userData = await userRes.json();
       const classData = await statusRes.json();
       setUser(userData);
@@ -39,102 +56,80 @@ const VideoClass = () => {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Join Zoom embedded when class is in progress
+  // Embed Jitsi iframe once class is in_progress and we have a room name
   useEffect(() => {
-    if (!classInfo || loading || !classInfo.zoom_meeting_id || classInfo.status !== 'in_progress') return;
-    if (zoomClientRef.current || zoomFailed) return;
+    if (!classInfo || loading) return;
+    if (classInfo.status !== 'in_progress' || !classInfo.jitsi_room) return;
+    if (apiRef.current) return;
 
-    const joinZoom = async () => {
+    const start = async () => {
       try {
-        // Create a dedicated DOM element outside React's control
-        const zoomRoot = document.createElement('div');
-        zoomRoot.id = 'zoom-sdk-root';
-        zoomRoot.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;';
-        if (zoomContainerRef.current) {
-          zoomContainerRef.current.appendChild(zoomRoot);
-        }
+        await loadJitsiScript();
+        if (!containerRef.current) return;
 
-        // Wait one frame so the container has measured dimensions
-        await new Promise((r) => requestAnimationFrame(() => r()));
-        const rootWidth = zoomRoot.clientWidth || window.innerWidth;
-        const rootHeight = zoomRoot.clientHeight || (window.innerHeight - 64);
-
-        const ZoomMtgEmbedded = (await import('@zoom/meetingsdk/embedded')).default;
-        const client = ZoomMtgEmbedded.createClient();
-
-        await client.init({
-          zoomAppRoot: zoomRoot,
-          language: 'en-US',
-          patchJsMedia: true,
-          leaveOnPageUnload: true,
-          customize: {
-            video: {
-              isResizable: false,
-              viewSizes: {
-                default: { width: rootWidth, height: rootHeight },
-                ribbon: { width: 300, height: rootHeight }
-              }
-            },
-            toolbar: { buttons: [] }
+        const domain = classInfo.jitsi_domain || 'meet.jit.si';
+        const isMod = !!classInfo.is_moderator;
+        const options = {
+          roomName: classInfo.jitsi_room,
+          parentNode: containerRef.current,
+          width: '100%',
+          height: '100%',
+          userInfo: {
+            displayName: user?.name || (isMod ? 'Teacher' : 'Student'),
+            email: user?.email || ''
+          },
+          configOverwrite: {
+            prejoinPageEnabled: false,
+            disableDeepLinking: true,
+            startWithAudioMuted: !isMod,
+            startWithVideoMuted: false,
+            enableWelcomePage: false,
+            enableClosePage: false,
+            disableInviteFunctions: true,
+            readOnlyName: true,
+            requireDisplayName: false
+          },
+          interfaceConfigOverwrite: {
+            MOBILE_APP_PROMO: false,
+            SHOW_JITSI_WATERMARK: false,
+            SHOW_BRAND_WATERMARK: false,
+            DEFAULT_REMOTE_DISPLAY_NAME: 'Participant',
+            TOOLBAR_BUTTONS: isMod
+              ? ['microphone', 'camera', 'desktop', 'fullscreen', 'fodeviceselection', 'hangup', 'chat', 'raisehand', 'videoquality', 'tileview', 'mute-everyone', 'security']
+              : ['microphone', 'camera', 'fullscreen', 'fodeviceselection', 'hangup', 'chat', 'raisehand', 'videoquality', 'tileview']
           }
-        });
-
-        await client.join({
-          signature: classInfo.zoom_signature,
-          sdkKey: classInfo.zoom_sdk_key,
-          meetingNumber: classInfo.zoom_meeting_id,
-          password: classInfo.zoom_password || '',
-          userName: user?.name || 'Participant',
-          userEmail: user?.email || ''
-        });
-
-        // Force-resize after join in case Zoom rendered before layout settled
-        try {
-          const ms = client.getMeetingClient && client.getMeetingClient();
-          if (ms && ms.getMediaStream) {
-            const stream = ms.getMediaStream();
-            if (stream && stream.resizeVideoCanvas) {
-              stream.resizeVideoCanvas({ width: zoomRoot.clientWidth, height: zoomRoot.clientHeight });
-            }
-          }
-        } catch {}
-
-        // Window resize handler keeps the SDK matched to container
-        const onResize = () => {
-          try {
-            const ms = client.getMeetingClient && client.getMeetingClient();
-            const stream = ms && ms.getMediaStream && ms.getMediaStream();
-            if (stream && stream.resizeVideoCanvas && zoomRoot) {
-              stream.resizeVideoCanvas({ width: zoomRoot.clientWidth, height: zoomRoot.clientHeight });
-            }
-          } catch {}
         };
-        window.addEventListener('resize', onResize);
-        zoomClientRef.current = client;
-        zoomClientRef.current._onResize = onResize;
-        setZoomReady(true);
-        toast.success('Connected to video class!');
+
+        const api = new window.JitsiMeetExternalAPI(domain, options);
+        apiRef.current = api;
+        setJitsiReady(true);
+
+        api.addListener('videoConferenceJoined', () => {
+          if (isMod) {
+            // Lock the room with a per-class password derived from class_id (informational; not crypto)
+            // Free meet.jit.si moderator can also enable lobby manually; here we just rely on app-level gating.
+            toast.success('Class connected — you are the host.');
+          } else {
+            toast.success('Joined class.');
+          }
+        });
+        api.addListener('readyToClose', () => {
+          handleLeave();
+        });
       } catch (err) {
-        console.error('Zoom SDK error:', err);
-        setZoomFailed(true);
+        console.error('Jitsi init error:', err);
+        toast.error('Failed to load video. Please refresh the page.');
       }
     };
 
-    joinZoom();
+    start();
 
     return () => {
-      if (zoomClientRef.current) {
-        if (zoomClientRef.current._onResize) {
-          window.removeEventListener('resize', zoomClientRef.current._onResize);
-        }
-        try { zoomClientRef.current.leaveMeeting(); } catch {}
-        zoomClientRef.current = null;
-      }
-      // Clean up the zoom root element
-      const existing = document.getElementById('zoom-sdk-root');
-      if (existing) existing.remove();
+      try { apiRef.current && apiRef.current.dispose(); } catch {}
+      apiRef.current = null;
     };
-  }, [classInfo, loading, user, zoomFailed]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classInfo, loading, user]);
 
   const handleStartClass = async () => {
     try {
@@ -150,10 +145,8 @@ const VideoClass = () => {
     try {
       const res = await fetch(`${API}/classes/end/${classId}`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
-      if (zoomClientRef.current) {
-        try { zoomClientRef.current.leaveMeeting(); } catch {}
-        zoomClientRef.current = null;
-      }
+      try { apiRef.current && apiRef.current.dispose(); } catch {}
+      apiRef.current = null;
       toast.success('Class ended');
       navigate('/teacher-dashboard');
     } catch (error) { toast.error(error.message); }
@@ -188,10 +181,8 @@ const VideoClass = () => {
   };
 
   const handleLeave = () => {
-    if (zoomClientRef.current) {
-      try { zoomClientRef.current.leaveMeeting(); } catch {}
-      zoomClientRef.current = null;
-    }
+    try { apiRef.current && apiRef.current.dispose(); } catch {}
+    apiRef.current = null;
     navigate(isTeacher ? '/teacher-dashboard' : '/student-dashboard');
   };
 
@@ -224,7 +215,7 @@ const VideoClass = () => {
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-12 border border-white/20 text-center text-white max-w-md">
           <h2 className="text-2xl font-bold mb-3">{classInfo?.title}</h2>
-          <p className="text-white/70 mb-6">Start the class to create a Zoom meeting</p>
+          <p className="text-white/70 mb-6">Start the class to open the live video room</p>
           <Button onClick={handleStartClass} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full py-6 font-bold text-lg mb-4" data-testid="start-class-button">
             Start Class Now
           </Button>
@@ -236,7 +227,7 @@ const VideoClass = () => {
     );
   }
 
-  // Class in progress — show embedded Zoom or fallback
+  // Class in progress — embedded Jitsi iframe (filling container)
   return (
     <div className="h-screen bg-slate-900 flex flex-col">
       {/* Top bar */}
@@ -264,36 +255,13 @@ const VideoClass = () => {
         </div>
       </div>
 
-      {/* Zoom container or fallback */}
-      <div ref={zoomContainerRef} className="flex-1 relative" id="zoom-container" data-testid="zoom-container">
-        {!zoomReady && !zoomFailed && (
-          <div className="flex items-center justify-center h-full">
+      {/* Jitsi iframe container — fills the rest of the viewport */}
+      <div ref={containerRef} className="flex-1 relative bg-black" id="jitsi-container" data-testid="jitsi-container">
+        {!jitsiReady && (
+          <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center text-white">
               <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-sky-400" />
-              <p>Connecting to Zoom...</p>
-            </div>
-          </div>
-        )}
-
-        {zoomFailed && (
-          <div className="flex items-center justify-center h-full">
-            <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-12 border border-white/20 text-center text-white max-w-lg">
-              <ExternalLink className="w-16 h-16 text-sky-400 mx-auto mb-4" />
-              <h2 className="text-xl font-bold mb-3">Open Zoom Meeting</h2>
-              <p className="text-white/70 mb-6">Embedded view unavailable. Join via Zoom app instead.</p>
-              {classInfo?.zoom_join_url && (
-                <Button onClick={() => window.open(classInfo.zoom_join_url, '_blank')}
-                  className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold text-lg" data-testid="join-zoom-btn">
-                  <ExternalLink className="w-5 h-5 mr-2" /> Open Zoom Meeting
-                </Button>
-              )}
-              {isTeacher && (
-                <div className="mt-4 pt-4 border-t border-white/10">
-                  <Button onClick={handleTakeScreenshot} variant="outline" className="rounded-full border-white/20 text-white hover:bg-white/10 text-sm">
-                    <Camera className="w-4 h-4 mr-2" /> Capture Screenshot for Proof
-                  </Button>
-                </div>
-              )}
+              <p>Connecting to video...</p>
             </div>
           </div>
         )}

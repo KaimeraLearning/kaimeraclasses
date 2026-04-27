@@ -7,7 +7,7 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - **Frontend**: React + Shadcn/UI + Tailwind CSS
 - **Backend**: FastAPI (modular routes)
 - **Database**: MongoDB Atlas (`mongodb+srv://...@cluster0.oxrrozs.mongodb.net/`) — use local MongoDB if Atlas IP not whitelisted
-- **Video**: Zoom Meeting SDK (Component View, embedded)
+- **Video**: Free public Jitsi (`meet.jit.si`) embedded via JitsiMeetExternalAPI iframe. Identity is gated at the application layer (only assigned teacher/student can fetch room name from `/api/classes/status`). Reverted from Zoom on user request — Zoom S2S app type confusion was blocking start-class.
 - **Auth**: Cookie-based sessions + Google OAuth (manual GIS script, on-demand). Self-signup OTP flow REMOVED — replaced with Book-a-Free-Demo dialog (Apr 2026).
 - **Payments**: Razorpay (on-demand script loading, no npm package)
 - **Email**: Gmail SMTP (smtplib STARTTLS port 587) — used for admin/teacher OTP verification, demo notifications

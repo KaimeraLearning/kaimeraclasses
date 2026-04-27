@@ -1,6 +1,6 @@
 """Class CRUD and lifecycle routes"""
-import os
 import uuid
+import secrets
 from datetime import datetime, timezone, timedelta, timedelta
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional
@@ -8,9 +8,13 @@ from typing import Optional
 from database import db
 from models.schemas import ClassSessionCreate, BookingRequest
 from services.auth import get_current_user
-from services.zoom import create_zoom_meeting, generate_zoom_sdk_signature
 
 router = APIRouter()
+
+
+def _build_jitsi_room_name(class_id: str, room_secret: str) -> str:
+    """Stable, hard-to-guess room name derived from class_id + per-class secret."""
+    return f"kaimera-{class_id}-{room_secret}"
 
 
 @router.get("/classes/browse")
@@ -421,41 +425,23 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
         if assignment and assignment.get("payment_status") != "paid":
             raise HTTPException(status_code=400, detail="Cannot start class: Student payment is still pending.")
 
-    # Create Zoom meeting (or reuse existing)
-    zoom_data = cls.get("zoom_meeting")
-    if not zoom_data or not zoom_data.get("id"):
-        try:
-            zoom_meeting = create_zoom_meeting(
-                topic=f"{cls['title']} - Kaimera Learning",
-                duration=120
-            )
-            zoom_data = {
-                "id": zoom_meeting["id"],
-                "join_url": zoom_meeting["join_url"],
-                "password": zoom_meeting.get("password", ""),
-                "host_email": zoom_meeting.get("host_email", "")
-            }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to create video meeting: {str(e)}")
-
-    # Generate SDK signatures for host (teacher) and participant (student)
-    meeting_number = zoom_data["id"]
-    try:
-        host_signature = generate_zoom_sdk_signature(meeting_number, role=1)
-        participant_signature = generate_zoom_sdk_signature(meeting_number, role=0)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate video credentials: {str(e)}")
+    # Create or reuse Jitsi room (free meet.jit.si). Identity is enforced at app level.
+    jitsi_room = cls.get("jitsi_room")
+    room_secret = cls.get("jitsi_secret")
+    if not jitsi_room or not room_secret:
+        room_secret = secrets.token_urlsafe(8)
+        jitsi_room = _build_jitsi_room_name(class_id, room_secret)
 
     await db.class_sessions.update_one(
         {"class_id": class_id},
         {"$set": {
             "status": "in_progress",
-            "zoom_meeting": zoom_data,
-            "zoom_host_signature": host_signature,
-            "zoom_participant_signature": participant_signature,
-            "room_id": str(meeting_number),
+            "jitsi_room": jitsi_room,
+            "jitsi_secret": room_secret,
+            "room_id": jitsi_room,
             "last_started_at": datetime.now(timezone.utc).isoformat()
-        }}
+        },
+         "$unset": {"zoom_meeting": "", "zoom_host_signature": "", "zoom_participant_signature": ""}}
     )
 
     for student in cls.get('enrolled_students', []):
@@ -468,12 +454,10 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
 
     return {
         "message": "Class started",
-        "room_id": str(meeting_number),
-        "zoom_meeting_id": meeting_number,
-        "zoom_join_url": zoom_data["join_url"],
-        "zoom_password": zoom_data["password"],
-        "zoom_signature": host_signature,
-        "zoom_sdk_key": os.environ.get("ZOOM_SDK_KEY", "")
+        "room_id": jitsi_room,
+        "jitsi_room": jitsi_room,
+        "jitsi_domain": "meet.jit.si",
+        "is_moderator": True
     }
 
 
@@ -537,38 +521,37 @@ async def end_class(class_id: str, request: Request, authorization: Optional[str
 
 @router.get("/classes/status/{class_id}")
 async def get_class_status(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Get class current status and room info - restricted to involved users"""
+    """Get class current status and room info — strictly gated to teacher-of-record, assigned student, or admin/counsellor."""
     user = await get_current_user(request, authorization)
 
     cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
     if not cls:
         raise HTTPException(status_code=404, detail="Class not found")
 
-    # Only allow involved users or admin/counsellor
-    if user.role not in ["admin", "counsellor"]:
-        if user.role == "teacher" and cls['teacher_id'] != user.user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to view this class")
-        if user.role == "student" and cls.get('assigned_student_id') != user.user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to view this class")
+    is_teacher_of_class = (user.role == "teacher" and cls['teacher_id'] == user.user_id)
+    is_assigned_student = (
+        user.role == "student" and (
+            cls.get('assigned_student_id') == user.user_id
+            or any(s.get('user_id') == user.user_id for s in cls.get('enrolled_students', []))
+        )
+    )
+    is_admin_or_counsellor = user.role in ("admin", "counsellor")
 
-    # Determine role for Zoom signature
-    zoom_meeting = cls.get("zoom_meeting", {})
-    zoom_signature = ""
-    zoom_sdk_key = os.environ.get("ZOOM_SDK_KEY", "")
-    if zoom_meeting.get("id") and cls['status'] == 'in_progress':
-        role = 1 if user.role == "teacher" and cls['teacher_id'] == user.user_id else 0
-        zoom_signature = generate_zoom_sdk_signature(zoom_meeting["id"], role)
+    if not (is_teacher_of_class or is_assigned_student or is_admin_or_counsellor):
+        raise HTTPException(status_code=403, detail="You are not allowed to join this class")
+
+    # Only release Jitsi room name to teacher-of-class or assigned student (not admin/counsellor by default)
+    jitsi_room = cls.get("jitsi_room") if (is_teacher_of_class or is_assigned_student) and cls['status'] == 'in_progress' else None
 
     return {
         "class_id": cls['class_id'], "title": cls['title'],
         "status": cls['status'], "room_id": cls.get('room_id'),
         "teacher_id": cls['teacher_id'], "teacher_name": cls['teacher_name'],
         "is_in_progress": cls['status'] == 'in_progress',
-        "zoom_meeting_id": zoom_meeting.get("id"),
-        "zoom_join_url": zoom_meeting.get("join_url"),
-        "zoom_password": zoom_meeting.get("password", ""),
-        "zoom_signature": zoom_signature,
-        "zoom_sdk_key": zoom_sdk_key
+        "jitsi_room": jitsi_room,
+        "jitsi_domain": "meet.jit.si",
+        "is_moderator": is_teacher_of_class,
+        "viewer_role": "teacher" if is_teacher_of_class else ("student" if is_assigned_student else user.role)
     }
 
 

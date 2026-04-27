@@ -84,6 +84,19 @@ code {
     }
 }
 
+/* === Jitsi External API iframe — fill container === */
+#jitsi-container {
+  position: relative;
+  overflow: hidden;
+}
+#jitsi-container iframe {
+  width: 100% !important;
+  height: 100% !important;
+  border: 0 !important;
+  position: absolute !important;
+  inset: 0 !important;
+}
+
 /* === Zoom Meeting SDK Component View — force iframe-style embed === */
 #zoom-container {
   position: relative;
