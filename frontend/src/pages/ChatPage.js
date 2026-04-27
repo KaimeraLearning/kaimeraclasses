@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import { ArrowLeft, Send, MessageSquare, User, Search } from 'lucide-react';
 
-import { API } from '../utils/api';
+import { API, getApiError } from '../utils/api';
 
 const ChatPage = () => {
   const navigate = useNavigate();
@@ -80,8 +80,7 @@ const ChatPage = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ recipient_id: selectedContact.user_id, message: newMessage.trim() })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       setNewMessage('');
       fetchMessages(selectedContact.user_id);
     } catch (err) { toast.error(err.message); }

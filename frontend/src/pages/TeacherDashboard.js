@@ -178,13 +178,12 @@ const TeacherDashboard = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify(classForm)
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Class created!');
       setShowCreateClass(false);
       setClassForm({ title: '', subject: '', class_type: '1:1', date: '', start_time: '', end_time: '', max_students: 1, assigned_student_id: '', duration_days: 1, is_demo: false });
       fetchDashboardData();
-    } catch (err) { toast.error(err.message); }
+    } catch (err) { toast.error(err.message || 'Failed to create class'); }
   };
 
   const handleDeleteClass = async (classId) => {
@@ -202,11 +201,11 @@ const TeacherDashboard = () => {
     setCancellingClassId(classId);
     try {
       const res = await fetch(`${API}/teacher/cancel-class/${classId}`, { method: 'POST', credentials: 'include' });
-      const data = await res.json();
+      let data;
+      try { data = await res.json(); } catch { throw new Error('Failed to cancel session. Please try again.'); }
       if (!res.ok) throw new Error(data.detail || 'Failed to cancel session');
       toast.success(data.message);
       if (data.needs_reschedule) {
-        // Auto-open reschedule dialog
         const cls = [...(dashboardData?.todays_sessions || []), ...(dashboardData?.upcoming_classes || [])].find(c => c.class_id === classId);
         if (cls) { setRescheduleTarget(cls); setShowRescheduleDialog(true); }
       }

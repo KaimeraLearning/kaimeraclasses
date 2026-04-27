@@ -200,8 +200,7 @@ const StudentDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ class_id: ratingTarget.class_id, rating: ratingForm.rating, comments: ratingForm.comments })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail);
+      if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Rating submitted!');
       setShowRatingDialog(false); setRatingTarget(null);
       setRatingForm({ rating: 5, comments: '' });

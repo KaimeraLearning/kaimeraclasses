@@ -247,9 +247,8 @@ const AdminDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, blocked })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Operation failed');
-      toast.success(data.message || `User ${blocked ? 'blocked' : 'unblocked'}`);
+      if (!res.ok) throw new Error(await getApiError(res));
+      toast.success(`User ${blocked ? 'blocked' : 'unblocked'}`);
       fetchAll();
     } catch (err) { toast.error(err.message || 'Failed to update user status'); }
   };
@@ -279,7 +278,8 @@ const AdminDashboard = () => {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      const data = await res.json();
+      let data;
+      try { data = await res.json(); } catch { throw new Error('Password reset failed. Please try again.'); }
       if (!res.ok) throw new Error(data.detail || 'Password reset failed');
       toast.success(`Password reset for ${data.email} (${data.role})`);
       setResetEmail(''); setResetPassword(''); setResetSelectedUser(null); setResetSearchResults([]);

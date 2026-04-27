@@ -94,7 +94,8 @@ const Login = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ credential: response.credential })
               });
-              const data = await res.json();
+              let data;
+              try { data = await res.json(); } catch { throw new Error('Google login failed. Please try again.'); }
               if (!res.ok) throw new Error(data.detail || 'Google login failed');
               localStorage.setItem('token', data.session_token);
               localStorage.setItem('user', JSON.stringify(data.user));
@@ -154,10 +155,11 @@ const Login = () => {
     setLoading(true);
     try {
       const res = await fetch(`${API}/auth/verify-otp`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.email, otp })
       });
-      const data = await res.json();
+      let data;
+      try { data = await res.json(); } catch { throw new Error('Verification failed. Please try again.'); }
       if (!res.ok) throw new Error(data.detail || 'OTP verification failed');
       toast.success('Email verified! Complete your registration.');
       setMode('register-details');
@@ -176,7 +178,8 @@ const Login = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, role: 'student' })
       });
-      const data = await res.json();
+      let data;
+      try { data = await res.json(); } catch { throw new Error('Registration failed. Please try again.'); }
       if (!res.ok) throw new Error(data.detail || 'Registration failed');
 
       localStorage.setItem('token', data.session_token);
@@ -196,7 +199,8 @@ const Login = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: verifyEmail, otp })
       });
-      const data = await res.json();
+      let data;
+      try { data = await res.json(); } catch { throw new Error('Verification failed. Please try again.'); }
       if (!res.ok) throw new Error(data.detail || 'Verification failed');
 
       localStorage.setItem('token', data.session_token);
@@ -211,10 +215,11 @@ const Login = () => {
     setLoading(true);
     try {
       const res = await fetch(`${API}/auth/resend-verification-otp`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: verifyEmail })
       });
-      const data = await res.json();
+      let data;
+      try { data = await res.json(); } catch { throw new Error('Failed to resend. Please try again.'); }
       if (!res.ok) throw new Error(data.detail || 'Failed');
       toast.success(data.message);
     } catch (err) { toast.error(err.message); }
