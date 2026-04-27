@@ -17,16 +17,16 @@ router = APIRouter()
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
 
 
-def validate_gmail(email: str):
-    """Enforce @gmail.com only for manual user creation"""
-    if not email.lower().endswith('@gmail.com'):
-        raise HTTPException(status_code=400, detail="Only @gmail.com email addresses are allowed")
+def validate_email(email: str):
+    """Basic email validation"""
+    if not email or '@' not in email or '.' not in email.split('@')[-1]:
+        raise HTTPException(status_code=400, detail="Invalid email address")
 
 
 @router.post("/auth/register")
 async def register(user_data: UserRegister):
     """Register new student - requires OTP verification first"""
-    validate_gmail(user_data.email)
+    validate_email(user_data.email)
 
     existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
@@ -96,7 +96,7 @@ async def send_otp(request: Request):
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
 
-    validate_gmail(email)
+    validate_email(email)
 
     existing = await db.users.find_one({"email": email}, {"_id": 0})
     if existing:
