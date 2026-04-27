@@ -55,6 +55,169 @@ const DrawerWalletHistory = ({ transactions }) => {
   );
 };
 
+// Admin proofs panel: groups by teacher+student, supports date filter, side-by-side compare with previous proof.
+const AdminProofsPanel = ({ proofs, onApprove }) => {
+  const { filtered, FilterBar } = useDateRangeFilter(proofs, 'submitted_at');
+  const [open, setOpen] = useState({});
+  const [selected, setSelected] = useState(null);
+  const [history, setHistory] = useState({ current: [], archived: [] });
+  const [adminNotes, setAdminNotes] = useState('');
+
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const p of filtered) {
+      const k = `${p.teacher_id}_${p.student_id}`;
+      if (!map.has(k)) {
+        map.set(k, { key: k, teacher_id: p.teacher_id, teacher_name: p.teacher_details?.name || p.teacher_name, student_name: p.student_details?.name || '-', proofs: [] });
+      }
+      map.get(k).proofs.push(p);
+    }
+    const out = [];
+    for (const g of map.values()) {
+      g.proofs.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+      g.last = g.proofs[0]?.submitted_at;
+      out.push(g);
+    }
+    out.sort((a, b) => new Date(b.last) - new Date(a.last));
+    return out;
+  }, [filtered]);
+
+  const openDetail = async (p) => {
+    setSelected(p);
+    setAdminNotes('');
+    try {
+      const r = await fetch(`${API}/counsellor/proof-history/${p.class_id}`, { credentials: 'include' });
+      if (r.ok) setHistory(await r.json()); else setHistory({ current: [], archived: [] });
+    } catch { setHistory({ current: [], archived: [] }); }
+  };
+
+  const previousProof = (() => {
+    if (!selected) return null;
+    const all = [...history.current, ...history.archived].filter(p => p.proof_id !== selected.proof_id);
+    all.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+    return all[0] || null;
+  })();
+  const isDup = previousProof && selected && previousProof.screenshot_hash && selected.screenshot_hash && previousProof.screenshot_hash === selected.screenshot_hash;
+
+  return (
+    <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
+      {FilterBar}
+      {groups.length === 0 ? (
+        <div className="text-center py-12"><Shield className="w-12 h-12 text-slate-300 mx-auto mb-3" /><p className="text-slate-500">No proofs in selected range</p></div>
+      ) : (
+        <div className="space-y-3">
+          {groups.map(g => {
+            const isOpen = !!open[g.key];
+            return (
+              <div key={g.key} className="rounded-2xl border-2 border-slate-200 overflow-hidden" data-testid={`admin-group-${g.key}`}>
+                <button onClick={() => setOpen(s => ({ ...s, [g.key]: !s[g.key] }))} className="w-full p-3 flex items-center justify-between hover:bg-slate-50">
+                  <div className="text-left">
+                    <p className="font-bold text-slate-900 text-sm">{g.teacher_name} → {g.student_name}</p>
+                    <p className="text-[11px] text-slate-500">{g.proofs.length} session{g.proofs.length !== 1 ? 's' : ''} · last {g.last ? new Date(g.last).toLocaleString() : '-'}</p>
+                  </div>
+                  {isOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                </button>
+                {isOpen && (
+                  <div className="border-t border-slate-100 divide-y divide-slate-100">
+                    {g.proofs.map(p => (
+                      <button key={p.proof_id} onClick={() => openDetail(p)} className="w-full p-3 flex items-center justify-between text-left hover:bg-slate-50" data-testid={`admin-proof-row-${p.proof_id}`}>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-semibold text-slate-900 text-sm truncate">{p.class_title}</p>
+                            {p.submission_count > 1 && <span className="text-[10px] px-2 rounded-full bg-orange-100 text-orange-700">resubmit #{p.submission_count}</span>}
+                            {p.credit_blocked && <span className="text-[10px] px-2 rounded-full bg-red-100 text-red-700">credit blocked</span>}
+                          </div>
+                          <p className="text-[11px] text-slate-500">{p.proof_date} · {p.meeting_duration_minutes || 0} min</p>
+                        </div>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${p.admin_status === 'approved' ? 'bg-emerald-100 text-emerald-700' : (p.status === 'rejected' || p.admin_status === 'rejected') ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {p.admin_status === 'approved' ? 'APPROVED' : (p.status === 'rejected' || p.admin_status === 'rejected') ? 'REJECTED' : 'AWAITING'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <Dialog open={!!selected} onOpenChange={v => !v && setSelected(null)}>
+        <DialogContent className="sm:max-w-4xl rounded-3xl max-h-[92vh] overflow-y-auto" data-testid="admin-proof-detail">
+          <DialogHeader><DialogTitle>Admin Proof Review</DialogTitle></DialogHeader>
+          {selected && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="bg-slate-50 rounded p-2"><p className="text-slate-500">Class</p><p className="font-semibold truncate">{selected.class_title}</p></div>
+                <div className="bg-slate-50 rounded p-2"><p className="text-slate-500">Teacher</p><p className="font-semibold truncate">{selected.teacher_name}</p></div>
+                <div className="bg-slate-50 rounded p-2"><p className="text-slate-500">Real Duration</p><p className="font-semibold">{selected.meeting_duration_minutes || 0} min</p></div>
+                <div className="bg-slate-50 rounded p-2"><p className="text-slate-500">Submission</p><p className="font-semibold">#{selected.submission_count || 1}</p></div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-[11px]">
+                <div className="bg-slate-50 rounded p-2"><p className="text-slate-500">Started</p><p className="font-mono">{selected.started_at_actual ? new Date(selected.started_at_actual).toLocaleTimeString() : '-'}</p></div>
+                <div className="bg-slate-50 rounded p-2"><p className="text-slate-500">Student Left</p><p className="font-mono">{selected.student_left_at ? new Date(selected.student_left_at).toLocaleTimeString() : '—'}</p></div>
+                <div className="bg-slate-50 rounded p-2"><p className="text-slate-500">Teacher Ended</p><p className="font-mono">{selected.ended_at_actual ? new Date(selected.ended_at_actual).toLocaleTimeString() : '-'}</p></div>
+              </div>
+              {selected.credit_blocked && (
+                <div className="bg-red-50 border-2 border-red-200 rounded-xl p-3 text-red-700 text-sm" data-testid="admin-credit-blocked">
+                  This proof was rejected twice. Even if approved now, the teacher will NOT be credited.
+                </div>
+              )}
+              {selected.reviewer_notes && (
+                <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-3 text-amber-900 text-sm" data-testid="admin-counsellor-note">
+                  <p className="font-semibold text-xs text-amber-800 mb-1">Counsellor Note</p>{selected.reviewer_notes}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-slate-700">Current Submission</p>
+                    {isDup && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700" data-testid="admin-duplicate-badge">DUPLICATE</span>}
+                    {!isDup && previousProof && <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">DIFFERENT</span>}
+                  </div>
+                  {selected.screenshot_base64
+                    ? <img src={selected.screenshot_base64} alt="Current" className="rounded-lg w-full max-h-72 object-contain border" />
+                    : <p className="text-xs text-slate-400 italic">No screenshot</p>}
+                  <p className="text-[10px] text-slate-400 font-mono break-all mt-1">SHA-256: {selected.screenshot_hash || '-'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <p className="text-xs font-semibold text-slate-700 mb-2">Previous Submission</p>
+                  {previousProof ? (
+                    <>
+                      {previousProof.screenshot_base64
+                        ? <img src={previousProof.screenshot_base64} alt="Previous" className="rounded-lg w-full max-h-72 object-contain border" />
+                        : <p className="text-xs text-slate-400 italic">No screenshot</p>}
+                      <p className="text-[10px] text-slate-400 font-mono break-all mt-1">SHA-256: {previousProof.screenshot_hash || '-'}</p>
+                      <p className="text-[10px] text-slate-500">{previousProof.proof_date} · {previousProof.status?.toUpperCase()}</p>
+                      {previousProof.reviewer_notes && <p className="text-[10px] italic text-amber-700 mt-1">"{previousProof.reviewer_notes}"</p>}
+                    </>
+                  ) : <p className="text-xs text-slate-400 italic">No prior proof</p>}
+                </div>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs font-semibold text-slate-700 mb-1">Topics Covered</p><p className="text-sm">{selected.topics_covered || '-'}</p></div>
+              <div className="bg-slate-50 rounded-xl p-3"><p className="text-xs font-semibold text-slate-700 mb-1">Teacher Feedback</p><p className="text-sm">{selected.feedback_text || '-'}</p></div>
+
+              {selected.admin_status === 'pending' && (
+                <div className="space-y-2 pt-2 border-t border-slate-200">
+                  <Label className="text-xs">Admin Note</Label>
+                  <textarea value={adminNotes} onChange={e => setAdminNotes(e.target.value)} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2" rows={3} placeholder="Reason for approval / rejection" data-testid="admin-note-input" />
+                  <div className="flex gap-3">
+                    <Button onClick={() => { onApprove(selected.proof_id, true, adminNotes); setSelected(null); }} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full py-5 font-bold" data-testid="admin-approve-btn"><Check className="w-4 h-4 mr-2" /> Approve & Credit</Button>
+                    <Button onClick={() => { onApprove(selected.proof_id, false, adminNotes); setSelected(null); }} variant="outline" className="flex-1 border-2 border-red-200 text-red-600 rounded-full py-5 font-bold" data-testid="admin-reject-btn"><X className="w-4 h-4 mr-2" /> Reject</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+
 // ─── Main Component ───
 
 const AdminDashboard = () => {
@@ -148,6 +311,14 @@ const AdminDashboard = () => {
   const [rpFilterTo, setRpFilterTo] = useState('');
 
   useEffect(() => { fetchAll(); }, []);
+
+  // Live polling: refresh admin data every 15s while tab is visible
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchAll();
+    }, 15000);
+    return () => clearInterval(t);
+  }, []);
 
   const fetchAll = async () => {
     try {
@@ -335,8 +506,10 @@ const AdminDashboard = () => {
     } catch { toast.error('Failed to adjust credits'); }
   };
 
-  const handleApproveProof = async (proofId, approved) => {
-    const notes = approved ? '' : (prompt('Reason for rejection:') || '');
+  const handleApproveProof = async (proofId, approved, providedNotes) => {
+    const notes = providedNotes !== undefined
+      ? providedNotes
+      : (approved ? '' : (prompt('Reason for rejection:') || ''));
     try {
       const res = await fetch(`${API}/admin/approve-proof`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -1058,44 +1231,7 @@ const AdminDashboard = () => {
 
               {/* ── Proofs & Approvals ── */}
               <TabsContent value="proofs">
-                <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
-                  <div className="flex flex-wrap gap-3 items-end mb-4">
-                    <div><Label className="text-xs text-slate-500">From</Label><Input type="date" value={proofDateFrom} onChange={e => setProofDateFrom(e.target.value)} className="rounded-xl w-40" data-testid="proof-date-from" /></div>
-                    <div><Label className="text-xs text-slate-500">To</Label><Input type="date" value={proofDateTo} onChange={e => setProofDateTo(e.target.value)} className="rounded-xl w-40" data-testid="proof-date-to" /></div>
-                    <Button onClick={async () => {
-                      const params = new URLSearchParams();
-                      if (proofDateFrom) params.set('date_from', proofDateFrom);
-                      if (proofDateTo) params.set('date_to', proofDateTo);
-                      const res = await fetch(`${API}/admin/approved-proofs?${params}`, { credentials: 'include' });
-                      if (res.ok) setPendingProofs(await res.json());
-                    }} className="bg-sky-500 text-white rounded-xl" data-testid="filter-proofs-btn"><Filter className="w-4 h-4 mr-1" /> Filter</Button>
-                  </div>
-                  {pendingProofs.length === 0 ? (
-                    <div className="text-center py-12"><Shield className="w-12 h-12 text-slate-300 mx-auto mb-3" /><p className="text-slate-500">No pending proofs</p></div>
-                  ) : (
-                    <div className="space-y-3">
-                      {pendingProofs.map(proof => (
-                        <div key={proof.proof_id} className="rounded-2xl border border-slate-200 p-4" data-testid={`proof-${proof.proof_id}`}>
-                          <div className="flex items-start justify-between mb-2">
-                            <div>
-                              <h4 className="font-bold text-slate-900 text-sm">{proof.class_title || proof.class_details?.title || 'Class'}</h4>
-                              <p className="text-xs text-slate-500">
-                                {proof.teacher_details && `Teacher: ${proof.teacher_details.name}`}
-                                {proof.student_details && ` | Student: ${proof.student_details.name}`}
-                              </p>
-                            </div>
-                            <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-xs font-semibold">Awaiting</span>
-                          </div>
-                          {proof.description && <p className="text-sm text-slate-600 bg-slate-50 rounded-lg p-2 mb-2">{proof.description}</p>}
-                          <div className="flex gap-2">
-                            <Button onClick={() => handleApproveProof(proof.proof_id, true)} size="sm" className="bg-emerald-500 text-white rounded-full flex-1" data-testid={`approve-proof-${proof.proof_id}`}><Check className="w-3 h-3 mr-1" /> Approve & Credit</Button>
-                            <Button onClick={() => handleApproveProof(proof.proof_id, false)} size="sm" variant="outline" className="rounded-full border-red-200 text-red-600 flex-1" data-testid={`reject-proof-${proof.proof_id}`}><X className="w-3 h-3 mr-1" /> Reject</Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <AdminProofsPanel proofs={pendingProofs} onApprove={(proofId, approved, notes) => handleApproveProof(proofId, approved, notes)} />
               </TabsContent>
 
               {/* ── System Pricing ── */}

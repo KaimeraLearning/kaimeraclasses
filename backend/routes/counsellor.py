@@ -162,13 +162,28 @@ async def get_all_proofs(request: Request, authorization: Optional[str] = Header
     user = await get_current_user(request, authorization)
     if user.role not in ["counsellor", "admin"]:
         raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
-    proofs = await db.class_proofs.find({}, {"_id": 0}).to_list(1000)
+    proofs = await db.class_proofs.find({}, {"_id": 0}).sort("submitted_at", -1).to_list(1000)
     return proofs
+
+
+@router.get("/counsellor/proof-history/{class_id}")
+async def get_proof_history(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Returns the full proof history for a class (current + archived rejected proofs)
+    so reviewers can compare screenshots and detect duplicates by hash."""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+    current = await db.class_proofs.find({"class_id": class_id}, {"_id": 0}).sort("submitted_at", -1).to_list(50)
+    archived = await db.class_proof_history.find({"class_id": class_id}, {"_id": 0}).sort("submitted_at", -1).to_list(50)
+    return {"current": current, "archived": archived}
 
 
 @router.post("/counsellor/verify-proof")
 async def verify_class_proof(verification: ProofVerification, request: Request, authorization: Optional[str] = Header(None)):
-    """Counsellor verifies a class proof - if approved, forwards to Admin"""
+    """Counsellor verifies a class proof - if approved, forwards to Admin.
+    On rejection: increments rejection_count. If rejection_count reaches 2 → marks credit_blocked,
+    teacher will not earn for this session even if a future submission is approved.
+    """
     user = await get_current_user(request, authorization)
     if user.role not in ["counsellor", "admin"]:
         raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
@@ -182,11 +197,18 @@ async def verify_class_proof(verification: ProofVerification, request: Request, 
     new_status = "verified" if verification.approved else "rejected"
     update_data = {
         "status": new_status, "reviewed_by": user.user_id,
+        "reviewer_role": user.role,
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
         "reviewer_notes": verification.reviewer_notes
     }
     if verification.approved:
         update_data["admin_status"] = "pending"
+    else:
+        # Increment rejection counter; lock credit if this is the 2nd+ rejection
+        new_rejection_count = (proof.get("rejection_count") or 0) + 1
+        update_data["rejection_count"] = new_rejection_count
+        if new_rejection_count >= 2:
+            update_data["credit_blocked"] = True
 
     await db.class_proofs.update_one({"proof_id": verification.proof_id}, {"$set": update_data})
     await db.class_sessions.update_one({"class_id": proof['class_id']}, {"$set": {"verification_status": new_status}})
@@ -202,6 +224,17 @@ async def verify_class_proof(verification: ProofVerification, request: Request, 
                 "read": False, "related_id": verification.proof_id,
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
+    else:
+        # Notify teacher to resubmit
+        msg_extra = " (FINAL: this session will not be credited even if next submission is approved.)" if (proof.get("rejection_count") or 0) + 1 >= 2 else " Please resubmit a new proof."
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": proof['teacher_id'], "type": "proof_rejected",
+            "title": "Proof Rejected — Resubmit",
+            "message": f"Your proof for '{proof.get('class_title', '')}' was rejected by {user.name}. Reason: {verification.reviewer_notes or 'No reason given'}.{msg_extra}",
+            "read": False, "related_id": verification.proof_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
 
     action = "approved (forwarded to Admin)" if verification.approved else "rejected"
     return {"message": f"Proof {action} successfully"}

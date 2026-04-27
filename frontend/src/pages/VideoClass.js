@@ -113,6 +113,17 @@ const VideoClass = () => {
             toast.success('Joined class.');
           }
         });
+        // Capture exact timestamp when student leaves the room — used by backend
+        // to compute real conducted duration alongside teacher-end time.
+        api.addListener('videoConferenceLeft', async () => {
+          if (!isMod) {
+            try {
+              await fetch(`${API}/classes/student-left/${classId}`, {
+                method: 'POST', credentials: 'include'
+              });
+            } catch {}
+          }
+        });
         api.addListener('readyToClose', () => {
           handleLeave();
         });

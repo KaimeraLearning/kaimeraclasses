@@ -57,6 +57,18 @@ const TeacherDashboard = () => {
 
   useEffect(() => { fetchUser(); fetchDashboardData(); fetchNotifications(); fetchUnmarkedAttendance(); }, []);
 
+  // Live polling: refresh dashboard data + notifications every 15s while tab is visible
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDashboardData();
+        fetchNotifications();
+      }
+    };
+    const t = setInterval(tick, 15000);
+    return () => clearInterval(t);
+  }, []);
+
   // Auto-refresh on tab focus
   useEffect(() => {
     const handleVisibility = () => { if (document.visibilityState === 'visible') { fetchDashboardData(); fetchNotifications(); } };
@@ -431,7 +443,18 @@ const TeacherDashboard = () => {
                 )}
                 {/* Proof button: after class time ends OR class completed */}
                 {(section === 'conducted' || (isToday && (cls.status === 'completed' || classTimeEnded))) && cls.status !== 'cancelled' && !cls.proof_submitted && (
-                  <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="w-full rounded-full text-xs h-7" data-testid={`submit-proof-${cls.class_id}`}><Upload className="w-3 h-3 mr-1" /> Submit Today's Proof</Button>
+                  <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className={`w-full rounded-full text-xs h-7 ${cls.latest_proof_status === 'rejected' || cls.latest_proof_admin_status === 'rejected' ? 'border-red-300 text-red-700 hover:bg-red-50' : ''}`} data-testid={`submit-proof-${cls.class_id}`}>
+                    <Upload className="w-3 h-3 mr-1" />
+                    {cls.latest_proof_status === 'rejected' || cls.latest_proof_admin_status === 'rejected' ? 'Resubmit Proof (Rejected)' : "Submit Today's Proof"}
+                  </Button>
+                )}
+                {(cls.latest_proof_status === 'rejected' || cls.latest_proof_admin_status === 'rejected') && cls.latest_proof_rejection_reason && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-1.5 text-[11px] text-red-700" data-testid={`proof-rejection-reason-${cls.class_id}`}>
+                    <span className="font-bold">Reason:</span> {cls.latest_proof_rejection_reason}
+                    {cls.latest_proof_credit_blocked && (
+                      <p className="font-bold mt-1">⚠ FINAL: even if approved this time, this session will not be credited.</p>
+                    )}
+                  </div>
                 )}
                 {(section === 'conducted' || section === 'today') && cls.proof_submitted && (
                   <div className="bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1 text-center text-xs text-emerald-700 font-medium" data-testid={`proof-submitted-${cls.class_id}`}>

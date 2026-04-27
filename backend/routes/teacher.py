@@ -1,5 +1,7 @@
 """Teacher routes"""
 import uuid
+import hashlib
+import base64 as b64lib
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional
@@ -14,6 +16,19 @@ from services.helpers import send_email
 from services.rating import recalc_teacher_rating, record_rating_event
 
 router = APIRouter()
+
+
+def _hash_screenshot(b64_str: str) -> str:
+    """Compute a stable SHA-256 hash of the screenshot for duplicate detection."""
+    if not b64_str:
+        return ""
+    # Strip data: prefix if present
+    raw = b64_str.split(",", 1)[-1]
+    try:
+        decoded = b64lib.b64decode(raw, validate=False)
+        return hashlib.sha256(decoded).hexdigest()
+    except Exception:
+        return hashlib.sha256(b64_str.encode("utf-8")).hexdigest()
 
 
 @router.get("/teacher/dashboard")
@@ -131,21 +146,29 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
     class_ids = [c['class_id'] for c in all_check_classes]
     today_str_proof = now.strftime('%Y-%m-%d')
     if class_ids:
-        # Get all proofs for these classes
+        # Get all proofs for these classes (include status fields so UI can show resubmit CTA)
         proofs = await db.class_proofs.find(
-            {"class_id": {"$in": class_ids}}, {"_id": 0, "class_id": 1, "proof_date": 1}
+            {"class_id": {"$in": class_ids}},
+            {"_id": 0, "class_id": 1, "proof_date": 1, "status": 1, "admin_status": 1, "rejection_count": 1, "credit_blocked": 1, "reviewer_notes": 1, "admin_notes": 1}
         ).to_list(5000)
-        # For multi-day classes: check if TODAY's proof is submitted
-        # For single-day classes: check if any proof exists
         for cls in all_check_classes:
             cls_proofs = [p for p in proofs if p['class_id'] == cls['class_id']]
+            today_proof = next((p for p in cls_proofs if p.get('proof_date') == today_str_proof), None)
             if cls.get('duration_days', 1) > 1:
-                # Multi-day: proof needed per day
-                today_proof = any(p.get('proof_date') == today_str_proof for p in cls_proofs)
-                cls['proof_submitted'] = today_proof
+                cls['proof_submitted'] = bool(today_proof) and (today_proof.get('status') != 'rejected') and (today_proof.get('admin_status') != 'rejected')
                 cls['total_proofs'] = len(cls_proofs)
             else:
-                cls['proof_submitted'] = len(cls_proofs) > 0
+                cls['proof_submitted'] = any(
+                    (p.get('status') != 'rejected') and (p.get('admin_status') != 'rejected') for p in cls_proofs
+                ) if cls_proofs else False
+            # Surface rejection status for resubmit UI
+            relevant = today_proof if cls.get('duration_days', 1) > 1 else (cls_proofs[0] if cls_proofs else None)
+            if relevant:
+                cls['latest_proof_status'] = relevant.get('status')
+                cls['latest_proof_admin_status'] = relevant.get('admin_status')
+                cls['latest_proof_rejection_count'] = relevant.get('rejection_count') or 0
+                cls['latest_proof_credit_blocked'] = relevant.get('credit_blocked') or False
+                cls['latest_proof_rejection_reason'] = relevant.get('admin_notes') or relevant.get('reviewer_notes') or ''
 
     return {
         "is_approved": user.is_approved, "is_suspended": False,
@@ -398,7 +421,12 @@ async def update_teacher_profile(profile_data: UpdateTeacherProfile, request: Re
 
 @router.post("/teacher/submit-proof")
 async def submit_class_proof(proof: ClassProofSubmit, request: Request, authorization: Optional[str] = Header(None)):
-    """Teacher submits proof after completing a class"""
+    """Teacher submits proof after completing a class.
+    - Computes SHA-256 hash of screenshot for duplicate detection.
+    - Auto-uses backend-tracked actual_duration (Start->End) instead of trusting client.
+    - Resubmission flow: if last proof for this class+date was rejected, allow resubmit.
+    - 2nd consecutive rejection → mark credit_blocked=True for that proof (no earnings even if later approved).
+    """
     user = await get_current_user(request, authorization)
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
@@ -409,49 +437,80 @@ async def submit_class_proof(proof: ClassProofSubmit, request: Request, authoriz
     if cls['teacher_id'] != user.user_id:
         raise HTTPException(status_code=403, detail="Not your class")
 
-    existing = await db.class_proofs.find_one({"class_id": proof.class_id}, {"_id": 0})
-    if existing:
-        # For multi-day classes, check if proof already submitted today
-        today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-        if cls.get("duration_days", 1) > 1:
-            existing_today = await db.class_proofs.find_one(
-                {"class_id": proof.class_id, "proof_date": today_str}, {"_id": 0}
-            )
-            if existing_today:
-                raise HTTPException(status_code=400, detail="Proof already submitted for today's session")
-        else:
-            raise HTTPException(status_code=400, detail="Proof already submitted for this class")
-
-    proof_id = f"proof_{uuid.uuid4().hex[:12]}"
     today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
-    # Auto-calculate meeting duration from last_started_at
-    meeting_duration_minutes = 0
-    if cls.get("last_started_at"):
+    # Existing proof for this class+date — block unless it was rejected (resubmission).
+    existing_today = await db.class_proofs.find_one(
+        {"class_id": proof.class_id, "proof_date": today_str}, {"_id": 0}
+    )
+    submission_count = 1
+    rejection_count = 0
+    credit_blocked = False
+    if existing_today:
+        # Was the latest submission rejected? If yes, allow resubmission.
+        latest_status = existing_today.get("status")
+        latest_admin_status = existing_today.get("admin_status")
+        was_rejected = (latest_status == "rejected") or (latest_admin_status == "rejected")
+        if not was_rejected:
+            raise HTTPException(status_code=400, detail="Proof already submitted for today's session")
+        # Increment submission/rejection counts from previous record
+        submission_count = (existing_today.get("submission_count") or 1) + 1
+        rejection_count = existing_today.get("rejection_count") or 0
+        # If teacher has already been rejected twice → no earnings will be credited even if next approval happens
+        credit_blocked = rejection_count >= 2
+
+    # Compute screenshot hash for duplicate detection
+    image_hash = _hash_screenshot(proof.screenshot_base64)
+
+    # Use actual conducted duration if backend recorded it (preferred over client value)
+    actual_min = cls.get("actual_duration_minutes")
+    if actual_min is None and cls.get("last_started_at"):
         try:
             start_time = datetime.fromisoformat(cls["last_started_at"])
             if start_time.tzinfo is None:
                 start_time = start_time.replace(tzinfo=timezone.utc)
-            duration = datetime.now(timezone.utc) - start_time
-            meeting_duration_minutes = round(duration.total_seconds() / 60, 1)
+            actual_min = round((datetime.now(timezone.utc) - start_time).total_seconds() / 60, 1)
         except Exception:
-            pass
+            actual_min = 0
+    meeting_duration_minutes = float(actual_min or 0)
 
+    proof_id = f"proof_{uuid.uuid4().hex[:12]}"
     proof_doc = {
         "proof_id": proof_id, "class_id": proof.class_id, "class_title": cls['title'],
         "teacher_id": user.user_id, "teacher_name": user.name,
         "student_id": cls.get('assigned_student_id', ''),
         "feedback_text": proof.feedback_text, "student_performance": proof.student_performance,
         "topics_covered": proof.topics_covered, "screenshot_base64": proof.screenshot_base64,
+        "screenshot_hash": image_hash,
         "meeting_duration_minutes": meeting_duration_minutes,
-        "status": "pending", "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "started_at_actual": cls.get("started_at_actual"),
+        "ended_at_actual": cls.get("ended_at_actual"),
+        "student_left_at": cls.get("student_left_at"),
+        "status": "pending", "admin_status": None,
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
         "proof_date": today_str,
+        "submission_count": submission_count,
+        "rejection_count": rejection_count,
+        "credit_blocked": credit_blocked,
+        "previous_proof_id": existing_today["proof_id"] if existing_today else None,
         "reviewed_by": None, "reviewed_at": None, "reviewer_notes": None
     }
+    # Replace previous-day record (if it was a rejection) so the new submission is the "current" one
+    if existing_today:
+        await db.class_proofs.delete_one({"proof_id": existing_today["proof_id"]})
+        # Archive the previous proof under a separate collection so admin/counsellor can compare
+        archive = {**existing_today, "_archived_at": datetime.now(timezone.utc).isoformat()}
+        await db.class_proof_history.insert_one(archive)
+
     await db.class_proofs.insert_one(proof_doc)
     await db.class_sessions.update_one({"class_id": proof.class_id}, {"$set": {"verification_status": "submitted"}})
 
-    return {"message": "Proof submitted successfully", "proof_id": proof_id}
+    return {
+        "message": "Proof submitted successfully" + (" (resubmission)" if existing_today else ""),
+        "proof_id": proof_id,
+        "submission_count": submission_count,
+        "credit_blocked": credit_blocked
+    }
 
 
 @router.get("/teacher/student-detail/{student_id}")

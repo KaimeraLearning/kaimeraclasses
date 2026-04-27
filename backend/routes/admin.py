@@ -839,9 +839,31 @@ async def admin_approve_proof(data: AdminProofApproval, request: Request, author
         raise HTTPException(status_code=400, detail="Proof not pending admin approval")
 
     new_status = "approved" if data.approved else "rejected"
-    await db.class_proofs.update_one({"proof_id": data.proof_id}, {"$set": {"admin_status": new_status, "admin_reviewed_by": user.user_id, "admin_reviewed_at": datetime.now(timezone.utc).isoformat(), "admin_notes": data.admin_notes}})
+    update_set = {
+        "admin_status": new_status,
+        "admin_reviewed_by": user.user_id,
+        "admin_reviewed_at": datetime.now(timezone.utc).isoformat(),
+        "admin_notes": data.admin_notes
+    }
+    if not data.approved:
+        # Increment rejection counter; lock credit if this is the 2nd+ rejection
+        new_rej = (proof.get("rejection_count") or 0) + 1
+        update_set["rejection_count"] = new_rej
+        if new_rej >= 2:
+            update_set["credit_blocked"] = True
+        # Notify teacher to resubmit (or final-block if 2nd rejection)
+        msg_extra = " (FINAL: this session will not be credited even if next submission is approved.)" if new_rej >= 2 else " Please resubmit a new proof."
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": proof['teacher_id'], "type": "proof_rejected",
+            "title": "Proof Rejected by Admin — Resubmit",
+            "message": f"Admin rejected your proof for '{proof.get('class_title', '')}'. Reason: {data.admin_notes or 'No reason given'}.{msg_extra}",
+            "read": False, "related_id": data.proof_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    await db.class_proofs.update_one({"proof_id": data.proof_id}, {"$set": update_set})
 
-    if data.approved:
+    if data.approved and not proof.get("credit_blocked"):
         pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
         if pricing:
             cls = await db.class_sessions.find_one({"class_id": proof['class_id']}, {"_id": 0})

@@ -46,6 +46,14 @@ const CounsellorDashboard = () => {
 
   useEffect(() => { fetchDashboardData(); fetchLearningPlans(); }, []);
 
+  // Live polling every 15s while tab is visible
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchDashboardData();
+    }, 15000);
+    return () => clearInterval(t);
+  }, []);
+
   // Auto-refresh on tab focus
   useEffect(() => {
     const handleVisibility = () => { if (document.visibilityState === 'visible') fetchDashboardData(); };

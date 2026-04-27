@@ -432,6 +432,7 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
         room_secret = secrets.token_urlsafe(8)
         jitsi_room = _build_jitsi_room_name(class_id, room_secret)
 
+    now_iso = datetime.now(timezone.utc).isoformat()
     await db.class_sessions.update_one(
         {"class_id": class_id},
         {"$set": {
@@ -439,7 +440,12 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
             "jitsi_room": jitsi_room,
             "jitsi_secret": room_secret,
             "room_id": jitsi_room,
-            "last_started_at": datetime.now(timezone.utc).isoformat()
+            "last_started_at": now_iso,
+            "started_at_actual": now_iso,
+            # Reset per-session end markers
+            "ended_at_actual": None,
+            "student_left_at": None,
+            "actual_duration_minutes": None
         },
          "$unset": {"zoom_meeting": "", "zoom_host_signature": "", "zoom_participant_signature": ""}}
     )
@@ -478,13 +484,42 @@ async def end_class(class_id: str, request: Request, authorization: Optional[str
     end_date_str = cls.get('end_date', cls['date'])
     assigned_days = cls.get('duration_days', 1)
     sessions_conducted = cls.get('sessions_conducted', 0) + 1
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
+
+    # ---- Compute REAL conducted duration ----
+    # End-of-session = whichever happened FIRST: student_left OR teacher_end
+    started_at = cls.get("started_at_actual") or cls.get("last_started_at")
+    student_left = cls.get("student_left_at")
+    candidate_ends = [now_dt]
+    if student_left:
+        try:
+            sl = datetime.fromisoformat(student_left)
+            if sl.tzinfo is None:
+                sl = sl.replace(tzinfo=timezone.utc)
+            candidate_ends.append(sl)
+        except Exception:
+            pass
+    real_end_dt = min(candidate_ends)
+    actual_duration_minutes = 0.0
+    if started_at:
+        try:
+            sd = datetime.fromisoformat(started_at)
+            if sd.tzinfo is None:
+                sd = sd.replace(tzinfo=timezone.utc)
+            actual_duration_minutes = max(0.0, round((real_end_dt - sd).total_seconds() / 60, 1))
+        except Exception:
+            actual_duration_minutes = 0.0
 
     # Record this session in session_history
     session_record = {
         "date": today_str,
         "status": "conducted",
-        "started_at": cls.get("last_started_at"),
-        "ended_at": datetime.now(timezone.utc).isoformat()
+        "started_at": started_at,
+        "ended_at": now_iso,
+        "student_left_at": student_left,
+        "real_end_at": real_end_dt.isoformat(),
+        "actual_duration_minutes": actual_duration_minutes
     }
     session_history = cls.get("session_history", [])
     session_history.append(session_record)
@@ -499,7 +534,9 @@ async def end_class(class_id: str, request: Request, authorization: Optional[str
         {"class_id": class_id},
         {"$set": {
             "status": new_status, "room_id": None,
-            "last_ended_at": datetime.now(timezone.utc).isoformat(),
+            "last_ended_at": now_iso,
+            "ended_at_actual": now_iso,
+            "actual_duration_minutes": actual_duration_minutes,
             "sessions_conducted": sessions_conducted,
             "session_history": session_history
         }}
@@ -619,3 +656,31 @@ async def cancel_class_day(class_id: str, request: Request, authorization: Optio
         "cancellation_count": new_count, "remaining_cancellations": remaining,
         "new_end_date": new_end_date.strftime('%Y-%m-%d')
     }
+
+
+@router.post("/classes/student-left/{class_id}")
+async def student_left(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Records the timestamp when a student left the Jitsi room. Used for actual-duration calculation.
+    Only the assigned/enrolled student of the class can call this — never the teacher or anyone else.
+    """
+    user = await get_current_user(request, authorization)
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    is_assigned_student = (
+        user.role == "student" and (
+            cls.get('assigned_student_id') == user.user_id
+            or any(s.get('user_id') == user.user_id for s in cls.get('enrolled_students', []))
+        )
+    )
+    if not is_assigned_student:
+        raise HTTPException(status_code=403, detail="Only the assigned student can record leaving the class")
+
+    # Idempotent: only set once per session (don't overwrite existing earlier timestamp)
+    if not cls.get("student_left_at"):
+        await db.class_sessions.update_one(
+            {"class_id": class_id},
+            {"$set": {"student_left_at": datetime.now(timezone.utc).isoformat()}}
+        )
+    return {"ok": True}
