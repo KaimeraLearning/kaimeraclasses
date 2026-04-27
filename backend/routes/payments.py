@@ -12,6 +12,7 @@ import razorpay
 
 from database import db
 from services.auth import get_current_user
+from services.helpers import insert_admin_mirror_txn
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -218,8 +219,18 @@ async def pay_from_wallet(request: Request, authorization: Optional[str] = Heade
         "description": f"Assignment payment (wallet): {assignment.get('learning_plan_name', 'Standard')} with {assignment.get('teacher_name')}",
         "assignment_id": assignment_id,
         "payment_id": payment_id,
+        "counterparty_user_id": assignment.get('teacher_id'),
         "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
     })
+    # Mirror: platform receives the wallet-payment
+    await insert_admin_mirror_txn(
+        amount=amount,
+        description=f"Assignment payment received from {user.name}: {assignment.get('learning_plan_name', 'Standard')}",
+        txn_type="assignment_payment_received",
+        assignment_id=assignment_id,
+        payment_id=payment_id,
+        counterparty_user_id=user.user_id
+    )
 
     # Mark assignment as paid
     await db.student_teacher_assignments.update_one(
@@ -478,6 +489,14 @@ async def verify_recharge(request: Request, authorization: Optional[str] = Heade
             "payment_id": payment_id,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
+        # Mirror: platform received the rupee inflow via Razorpay
+        await insert_admin_mirror_txn(
+            amount=credits_to_add,
+            description=f"Wallet recharge received via Razorpay from {user.name} (+{credits_to_add} credits)",
+            txn_type="recharge_received",
+            payment_id=payment_id,
+            counterparty_user_id=user.user_id
+        )
 
     return {"message": f"Recharged {payment.get('credits', 0)} credits!", "credits_added": payment.get("credits", 0)}
 

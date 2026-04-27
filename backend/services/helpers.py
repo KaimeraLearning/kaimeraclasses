@@ -22,6 +22,48 @@ def _get_email_config():
     }
 
 
+# Cache for the primary admin user_id so we don't hit Mongo on every transaction.
+_PRIMARY_ADMIN_ID = None
+
+
+async def _get_primary_admin_id():
+    """Return the user_id of the first admin (used as the platform's wallet for double-entry mirrors)."""
+    global _PRIMARY_ADMIN_ID
+    if _PRIMARY_ADMIN_ID:
+        return _PRIMARY_ADMIN_ID
+    admin = await db.users.find_one({"role": "admin"}, {"_id": 0, "user_id": 1})
+    if admin:
+        _PRIMARY_ADMIN_ID = admin["user_id"]
+    return _PRIMARY_ADMIN_ID
+
+
+async def insert_admin_mirror_txn(amount: float, description: str, txn_type: str = "platform_mirror", **refs):
+    """Insert a mirror transaction in the admin's wallet whenever money moves on the platform.
+
+    Convention: pass `amount` with the sign as seen FROM THE ADMIN'S PERSPECTIVE.
+      - Student pays platform / Razorpay recharge → admin gets POSITIVE (+amount)
+      - Admin disburses to teacher (proof approved) / refunds student → admin gets NEGATIVE (-amount)
+    """
+    admin_id = await _get_primary_admin_id()
+    if not admin_id:
+        return  # No admin seeded — silently skip
+    doc = {
+        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+        "user_id": admin_id,
+        "type": txn_type,
+        "amount": amount,
+        "description": description,
+        "status": "completed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Carry over any reference IDs (class_id, payment_id, proof_id, assignment_id, counterparty_user_id, etc.)
+    for k, v in refs.items():
+        if v is not None:
+            doc[k] = v
+    await db.transactions.insert_one(doc)
+
+
+
 async def generate_teacher_code():
     """Auto-generate unique teacher ID like KL-T0001"""
     await db.counters.update_one(

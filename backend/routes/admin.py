@@ -16,7 +16,7 @@ from models.schemas import (
     LearningPlan
 )
 from services.auth import get_current_user, hash_password
-from services.helpers import generate_teacher_code, generate_student_code, send_email, generate_otp
+from services.helpers import generate_teacher_code, generate_student_code, send_email, generate_otp, insert_admin_mirror_txn
 
 router = APIRouter()
 
@@ -118,14 +118,19 @@ async def get_transactions(request: Request, authorization: Optional[str] = Head
     # Enrich with reference labels (class title + receipt id) for admin ledger UX
     class_ids = list({t.get("class_id") for t in transactions if t.get("class_id")})
     payment_ids = list({t.get("payment_id") for t in transactions if t.get("payment_id")})
+    counter_ids = list({t.get("counterparty_user_id") for t in transactions if t.get("counterparty_user_id")})
     cls_map = {}
     pay_map = {}
+    cp_map = {}
     if class_ids:
         for c in await db.class_sessions.find({"class_id": {"$in": class_ids}}, {"_id": 0, "class_id": 1, "title": 1, "date": 1, "teacher_name": 1}).to_list(len(class_ids)):
             cls_map[c["class_id"]] = c
     if payment_ids:
         for p in await db.payments.find({"payment_id": {"$in": payment_ids}}, {"_id": 0, "payment_id": 1, "receipt_id": 1, "razorpay_payment_id": 1, "status": 1}).to_list(len(payment_ids)):
             pay_map[p["payment_id"]] = p
+    if counter_ids:
+        for u in await db.users.find({"user_id": {"$in": counter_ids}}, {"_id": 0, "user_id": 1, "name": 1, "role": 1}).to_list(len(counter_ids)):
+            cp_map[u["user_id"]] = u
     for txn in transactions:
         ref = {}
         if txn.get("class_id") and cls_map.get(txn["class_id"]):
@@ -138,6 +143,10 @@ async def get_transactions(request: Request, authorization: Optional[str] = Head
             ref["payment_id"] = p["payment_id"]
             ref["receipt_id"] = p.get("receipt_id")
             ref["razorpay_payment_id"] = p.get("razorpay_payment_id")
+        if txn.get("counterparty_user_id") and cp_map.get(txn["counterparty_user_id"]):
+            cp = cp_map[txn["counterparty_user_id"]]
+            ref["counterparty_name"] = cp.get("name")
+            ref["counterparty_role"] = cp.get("role")
         txn["reference"] = ref
 
     if view == "daily":
@@ -181,8 +190,22 @@ async def adjust_credits(adjustment: CreditAdjustment, request: Request, authori
     await db.transactions.insert_one({
         "transaction_id": f"txn_{uuid.uuid4().hex[:12]}", "user_id": adjustment.user_id,
         "type": txn_type, "amount": txn_amount, "description": description,
+        "counterparty_user_id": user.user_id,
         "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
     })
+    # Mirror in admin wallet — opposite sign
+    # If admin ADDED credits to user: admin paid out → -amount.
+    # If admin DEDUCTED credits from user: admin reclaimed → +amount.
+    # Skip mirror when admin adjusts admin's own wallet (would double-count).
+    if adjustment.user_id != user.user_id:
+        await insert_admin_mirror_txn(
+            amount=-txn_amount,
+            description=(f"Manual credit ADD to {target_user.get('name','user')} (-{adjustment.amount})"
+                         if adjustment.action == "add"
+                         else f"Manual credit DEDUCT from {target_user.get('name','user')} (+{adjustment.amount})"),
+            txn_type="manual_adjustment",
+            counterparty_user_id=adjustment.user_id
+        )
     return {"message": "Credits adjusted successfully"}
 
 
@@ -765,19 +788,25 @@ async def admin_get_user_detail(user_id: str, request: Request, authorization: O
     txns = result["transactions"]
     cls_ids = list({t.get("class_id") for t in txns if t.get("class_id")})
     pay_ids = list({t.get("payment_id") for t in txns if t.get("payment_id")})
-    cls_m, pay_m = {}, {}
+    cp_ids = list({t.get("counterparty_user_id") for t in txns if t.get("counterparty_user_id")})
+    cls_m, pay_m, cp_m = {}, {}, {}
     if cls_ids:
         for c in await db.class_sessions.find({"class_id": {"$in": cls_ids}}, {"_id": 0, "class_id": 1, "title": 1, "date": 1, "teacher_name": 1}).to_list(len(cls_ids)):
             cls_m[c["class_id"]] = c
     if pay_ids:
         for p in await db.payments.find({"payment_id": {"$in": pay_ids}}, {"_id": 0, "payment_id": 1, "receipt_id": 1, "razorpay_payment_id": 1}).to_list(len(pay_ids)):
             pay_m[p["payment_id"]] = p
+    if cp_ids:
+        for u in await db.users.find({"user_id": {"$in": cp_ids}}, {"_id": 0, "user_id": 1, "name": 1, "role": 1}).to_list(len(cp_ids)):
+            cp_m[u["user_id"]] = u
     for t in txns:
         ref = {}
         if t.get("class_id") and cls_m.get(t["class_id"]):
             c = cls_m[t["class_id"]]; ref.update({"class_title": c.get("title"), "class_date": c.get("date"), "teacher_name": c.get("teacher_name")})
         if t.get("payment_id") and pay_m.get(t["payment_id"]):
             p = pay_m[t["payment_id"]]; ref.update({"payment_id": p["payment_id"], "receipt_id": p.get("receipt_id"), "razorpay_payment_id": p.get("razorpay_payment_id")})
+        if t.get("counterparty_user_id") and cp_m.get(t["counterparty_user_id"]):
+            cp = cp_m[t["counterparty_user_id"]]; ref.update({"counterparty_name": cp.get("name"), "counterparty_role": cp.get("role")})
         t["reference"] = ref
     return result
 
@@ -913,7 +942,16 @@ async def admin_approve_proof(data: AdminProofApproval, request: Request, author
             earning = pricing.get('demo_earning_teacher', 0) if cls and cls.get('is_demo') else pricing.get('class_earning_teacher', 0)
             if earning > 0:
                 await db.users.update_one({"user_id": proof['teacher_id']}, {"$inc": {"credits": earning}})
-                await db.transactions.insert_one({"transaction_id": f"txn_{uuid.uuid4().hex[:12]}", "user_id": proof['teacher_id'], "type": "earning", "amount": earning, "description": f"Admin approved: {proof.get('class_title', 'Class')}", "proof_id": data.proof_id, "class_id": proof['class_id'], "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()})
+                await db.transactions.insert_one({"transaction_id": f"txn_{uuid.uuid4().hex[:12]}", "user_id": proof['teacher_id'], "type": "earning", "amount": earning, "description": f"Admin approved: {proof.get('class_title', 'Class')}", "proof_id": data.proof_id, "class_id": proof['class_id'], "counterparty_user_id": user.user_id, "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()})
+                # Mirror: platform paid out earning to teacher
+                await insert_admin_mirror_txn(
+                    amount=-earning,
+                    description=f"Earning paid to teacher {proof.get('teacher_name','')} for '{proof.get('class_title','Class')}'",
+                    txn_type="earning_paid",
+                    proof_id=data.proof_id,
+                    class_id=proof['class_id'],
+                    counterparty_user_id=proof['teacher_id']
+                )
                 await db.notifications.insert_one({"notification_id": f"notif_{uuid.uuid4().hex[:12]}", "user_id": proof['teacher_id'], "type": "credit_earned", "title": "Credits Earned!", "message": f"{earning} credits added to your wallet for '{proof.get('class_title', 'Class')}'.", "read": False, "related_id": data.proof_id, "created_at": datetime.now(timezone.utc).isoformat()})
 
             # Check if all classes for this teacher-student assignment are completed with approved proofs

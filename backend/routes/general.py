@@ -34,8 +34,9 @@ async def my_transactions(request: Request, authorization: Optional[str] = Heade
     class_ids = list({t.get("class_id") for t in txns if t.get("class_id")})
     payment_ids = list({t.get("payment_id") for t in txns if t.get("payment_id")})
     proof_ids = list({t.get("proof_id") for t in txns if t.get("proof_id")})
+    counter_ids = list({t.get("counterparty_user_id") for t in txns if t.get("counterparty_user_id")})
 
-    cls_map, pay_map, proof_map = {}, {}, {}
+    cls_map, pay_map, proof_map, cp_map = {}, {}, {}, {}
     if class_ids:
         for c in await db.class_sessions.find({"class_id": {"$in": class_ids}}, {"_id": 0, "class_id": 1, "title": 1, "date": 1, "subject": 1, "teacher_name": 1}).to_list(500):
             cls_map[c["class_id"]] = c
@@ -45,6 +46,9 @@ async def my_transactions(request: Request, authorization: Optional[str] = Heade
     if proof_ids:
         for pr in await db.class_proofs.find({"proof_id": {"$in": proof_ids}}, {"_id": 0, "proof_id": 1, "class_title": 1, "proof_date": 1, "class_id": 1}).to_list(500):
             proof_map[pr["proof_id"]] = pr
+    if counter_ids:
+        for u in await db.users.find({"user_id": {"$in": counter_ids}}, {"_id": 0, "user_id": 1, "name": 1, "role": 1}).to_list(500):
+            cp_map[u["user_id"]] = u
 
     for t in txns:
         ref = {}
@@ -64,6 +68,10 @@ async def my_transactions(request: Request, authorization: Optional[str] = Heade
             ref["payment_id"] = p["payment_id"]
             ref["receipt_id"] = p.get("receipt_id")
             ref["razorpay_payment_id"] = p.get("razorpay_payment_id")
+        if t.get("counterparty_user_id") and cp_map.get(t["counterparty_user_id"]):
+            cp = cp_map[t["counterparty_user_id"]]
+            ref["counterparty_name"] = cp.get("name")
+            ref["counterparty_role"] = cp.get("role")
         t["reference"] = ref
     return txns
 

@@ -51,8 +51,14 @@ const DrawerWalletHistory = ({ transactions }) => {
                   </div>
                   <span className={`font-semibold whitespace-nowrap ${t.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{t.amount > 0 ? '+' : ''}{t.amount}</span>
                 </div>
-                {(ref.class_title || ref.receipt_id || ref.razorpay_payment_id) && (
+                {(ref.class_title || ref.receipt_id || ref.razorpay_payment_id || ref.counterparty_name) && (
                   <div className="mt-1 pt-1 border-t border-slate-200 text-[10px] text-slate-500 space-y-0.5">
+                    {ref.counterparty_name && (
+                      <p className={t.amount < 0 ? 'text-red-500' : 'text-emerald-600'}>
+                        {t.amount < 0 ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
+                        {ref.counterparty_role && <span className="text-slate-400"> ({ref.counterparty_role})</span>}
+                      </p>
+                    )}
                     {ref.class_title && <p>📚 {ref.class_title}{ref.class_date ? ` · ${ref.class_date}` : ''}</p>}
                     {ref.receipt_id && <p className="font-mono">Receipt: {ref.receipt_id}</p>}
                     {ref.razorpay_payment_id && <p className="font-mono">RP: {ref.razorpay_payment_id}</p>}
@@ -1227,6 +1233,12 @@ const AdminDashboard = () => {
                                 <td className={`px-4 py-3 text-sm text-right font-bold ${txn.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{txn.amount > 0 ? '+' : ''}{txn.amount}</td>
                                 <td className="px-4 py-3 text-sm text-slate-600 max-w-[260px]">
                                   <p className="truncate">{txn.description}</p>
+                                  {ref.counterparty_name && (
+                                    <p className={`text-[11px] mt-0.5 ${txn.amount < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                                      {txn.amount < 0 ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
+                                      {ref.counterparty_role && <span className="text-slate-400"> ({ref.counterparty_role})</span>}
+                                    </p>
+                                  )}
                                   {ref.class_title && <p className="text-[11px] text-slate-500 mt-0.5">📚 {ref.class_title}{ref.class_date ? ` · ${ref.class_date}` : ''}{ref.teacher_name ? ` · ${ref.teacher_name}` : ''}</p>}
                                   {ref.receipt_id && <p className="text-[10px] font-mono text-slate-400">{ref.receipt_id}</p>}
                                   {ref.razorpay_payment_id && <p className="text-[10px] font-mono text-slate-400">RP: {ref.razorpay_payment_id}</p>}

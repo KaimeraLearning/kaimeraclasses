@@ -153,6 +153,12 @@ const WalletPage = () => {
                         <td className="p-3 text-xs text-slate-600 whitespace-nowrap align-top">{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</td>
                         <td className="p-3 text-xs align-top">
                           <p className="font-semibold text-slate-800">{t.description}</p>
+                          {ref.counterparty_name && (
+                            <p className={`text-[11px] mt-0.5 ${t.amount < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                              {t.amount < 0 ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
+                              {ref.counterparty_role && <span className="text-slate-400"> ({ref.counterparty_role})</span>}
+                            </p>
+                          )}
                           {ref.class_title && <p className="text-[11px] text-slate-500 mt-0.5">📚 {ref.class_title}{ref.class_date ? ` · ${ref.class_date}` : ''}{ref.teacher_name ? ` · ${ref.teacher_name}` : ''}</p>}
                           {ref.receipt_id && <p className="text-[10px] font-mono text-slate-400 mt-0.5">Receipt: {ref.receipt_id}</p>}
                           {ref.razorpay_payment_id && <p className="text-[10px] font-mono text-slate-400">Razorpay: {ref.razorpay_payment_id}</p>}

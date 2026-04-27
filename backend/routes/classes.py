@@ -8,6 +8,7 @@ from typing import Optional
 from database import db
 from models.schemas import ClassSessionCreate, BookingRequest
 from services.auth import get_current_user
+from services.helpers import insert_admin_mirror_txn
 
 router = APIRouter()
 
@@ -279,8 +280,17 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
             "amount": -total_cost,
             "description": f"Class: {class_data.title} ({class_data.duration_days} days x {price_per_day} credits/day)",
             "class_id": class_id,
+            "counterparty_user_id": user.user_id,
             "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
         })
+        # Mirror in admin wallet (platform receives the credits)
+        await insert_admin_mirror_txn(
+            amount=total_cost,
+            description=f"Class booking received from {student.get('name','Student')}: {class_data.title}",
+            txn_type="class_booking_received",
+            class_id=class_id,
+            counterparty_user_id=student['user_id']
+        )
 
     if not class_data.is_demo:
         demo = await db.demo_requests.find_one({
@@ -321,8 +331,17 @@ async def delete_class(class_id: str, request: Request, authorization: Optional[
             "amount": refund_amount,
             "description": f"Refund: Class '{cls['title']}' deleted by admin",
             "class_id": class_id,
+            "counterparty_user_id": user.user_id,
             "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
         })
+        # Mirror: admin paid out the refund
+        await insert_admin_mirror_txn(
+            amount=-refund_amount,
+            description=f"Refund issued to student for cancelled class '{cls['title']}'",
+            txn_type="class_refund_paid",
+            class_id=class_id,
+            counterparty_user_id=student_id
+        )
 
     await db.class_sessions.delete_one({"class_id": class_id})
 
