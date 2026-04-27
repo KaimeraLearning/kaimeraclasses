@@ -316,9 +316,25 @@ const CounsellorStudents = () => {
 
               {/* Transfer Student Button */}
               {studentProfile?.current_assignment && studentProfile.current_assignment.status === 'approved' && (
-                <div className="pt-2 border-t border-slate-200">
+                <div className="pt-2 border-t border-slate-200 space-y-2">
                   <Button onClick={() => setShowTransferDialog(true)} className="w-full bg-orange-500 hover:bg-orange-600 text-white rounded-full font-bold" data-testid="transfer-student-btn">
                     Transfer Student to Another Teacher
+                  </Button>
+                  <Button onClick={async () => {
+                    if (!window.confirm(`Mark ${selectedStudent?.name} as finished? They will be removed from teacher and your dashboard.`)) return;
+                    try {
+                      const res = await fetch(`${API}/counsellor/finish-student`, {
+                        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ student_id: selectedStudent.user_id, teacher_id: studentProfile.current_assignment.teacher_id })
+                      });
+                      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || 'Failed'); }
+                      const data = await res.json();
+                      toast.success(data.message);
+                      setShowDetailsDialog(false);
+                      fetchStudents();
+                    } catch (err) { toast.error(err.message); }
+                  }} variant="outline" className="w-full rounded-full font-bold border-2 border-slate-300 text-slate-700" data-testid="finish-student-btn">
+                    Mark Student as Finished
                   </Button>
                 </div>
               )}

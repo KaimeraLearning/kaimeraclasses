@@ -202,6 +202,10 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     if not assignment:
         raise HTTPException(status_code=403, detail="Student not assigned to you or assignment not approved")
 
+    # Must have paid
+    if assignment.get("payment_status") != "paid":
+        raise HTTPException(status_code=400, detail="Student has not paid for this assignment yet")
+
     # Auto-enforce assigned_days from counsellor's assignment
     enforced_days = assignment.get("assigned_days")
     if enforced_days and enforced_days > 0:
@@ -303,17 +307,29 @@ async def delete_class(class_id: str, request: Request, authorization: Optional[
     # Refund student credits if class was charged
     refund_amount = cls.get("credits_required", 0)
     student_id = cls.get("assigned_student_id")
+    teacher_id = cls.get("teacher_id")
     if student_id and refund_amount > 0 and cls.get("status") != "completed":
         await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": refund_amount}})
         await db.transactions.insert_one({
             "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
             "user_id": student_id, "type": "class_delete_refund",
             "amount": refund_amount,
-            "description": f"Refund: Class '{cls['title']}' deleted by teacher",
+            "description": f"Refund: Class '{cls['title']}' deleted by admin",
             "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
         })
 
     await db.class_sessions.delete_one({"class_id": class_id})
+
+    # Notify teacher
+    if teacher_id:
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": teacher_id, "type": "class_deleted_by_admin",
+            "title": "Class Deleted by Admin",
+            "message": f"Your class '{cls['title']}' has been deleted by admin.",
+            "read": False, "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
     return {"message": "Class deleted successfully", "refunded": refund_amount if student_id and refund_amount > 0 else 0}
 
 

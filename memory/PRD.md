@@ -118,6 +118,14 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Admin/Counsellor: GET /admin/class-detail/{id} — full timeline: session history, attendance, proofs, meeting duration
 - Classes are expandable (not cluttered) — click to see full detail with color-coded timeline
 
+### Dashboard Organization, Finish Flow & Class Guards (Feb 2026)
+- Teacher dashboard: Students as expandable cards — click to see per-student attendance, classes, history
+- Per-student attendance: each student has their own attendance isolated (not one combined table)
+- "Mark Finish": Counsellor marks student as finished → removed from teacher & counsellor dashboards, only admin retains records
+- Class creation guard: teacher can only create class for PAID students without active/scheduled classes
+- Admin delete class: notifies teacher when admin deletes their class
+- Teacher student detail endpoint: GET /teacher/student-detail/{id} returns per-student classes, attendance, has_active_class flag
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)

@@ -210,6 +210,58 @@ async def reassign_student(data: Dict[str, Any], request: Request, authorization
     raise HTTPException(status_code=400, detail="Invalid action")
 
 
+@router.post("/counsellor/finish-student")
+async def finish_student(data: Dict[str, Any], request: Request, authorization: Optional[str] = Header(None)):
+    """Mark a student as finished — removes from teacher and counsellor dashboards. Only admin retains records."""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["counsellor", "admin"]:
+        raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
+
+    student_id = data.get("student_id")
+    teacher_id = data.get("teacher_id")
+    if not student_id:
+        raise HTTPException(status_code=400, detail="student_id required")
+
+    # Mark all assignments for this student as finished
+    query = {"student_id": student_id, "status": {"$in": ["approved", "completed"]}}
+    if teacher_id:
+        query["teacher_id"] = teacher_id
+
+    result = await db.student_teacher_assignments.update_many(
+        query, {"$set": {"status": "finished", "finished_at": datetime.now(timezone.utc).isoformat(), "finished_by": user.user_id}}
+    )
+
+    # Mark all active classes as finished
+    cls_query = {"assigned_student_id": student_id, "status": {"$in": ["scheduled", "in_progress"]}}
+    if teacher_id:
+        cls_query["teacher_id"] = teacher_id
+    await db.class_sessions.update_many(
+        cls_query, {"$set": {"status": "finished", "finished_at": datetime.now(timezone.utc).isoformat()}}
+    )
+
+    # Notify teacher and student
+    if teacher_id:
+        student = await db.users.find_one({"user_id": student_id}, {"_id": 0, "name": 1})
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": teacher_id, "type": "student_finished",
+            "title": "Student Finished",
+            "message": f"Student {student.get('name', '')} has been marked as finished by counsellor. No further classes needed.",
+            "read": False, "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    await db.notifications.insert_one({
+        "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+        "user_id": student_id, "type": "enrollment_finished",
+        "title": "Course Completed",
+        "message": "Your enrollment has been marked as finished. Thank you for learning with us!",
+        "read": False, "created_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    return {"message": f"Student marked as finished. {result.modified_count} assignment(s) updated."}
+
+
+
 @router.post("/counsellor/transfer-student")
 async def transfer_student(data: Dict[str, Any], request: Request, authorization: Optional[str] = Header(None)):
     """Transfer a student from one teacher to another mid-class. Remaining days go to new teacher."""

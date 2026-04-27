@@ -44,7 +44,9 @@ const TeacherDashboard = () => {
   const [showAttendanceReasonDialog, setShowAttendanceReasonDialog] = useState(false);
   const [attendanceReasonData, setAttendanceReasonData] = useState(null);
   const [unmarkedAttendance, setUnmarkedAttendance] = useState([]);
-  const [todayClassesForAttendance, setTodayClassesForAttendance] = useState({}); // {studentId, date, status, availableClasses}
+  const [todayClassesForAttendance, setTodayClassesForAttendance] = useState({});
+  const [expandedStudent, setExpandedStudent] = useState(null);
+  const [studentDetail, setStudentDetail] = useState({}); // {studentId, date, status, availableClasses}
 
   const openProfile = (userId, role) => { setViewProfileUserId(userId); setViewProfileRole(role); setViewProfileOpen(true); };
 
@@ -125,6 +127,21 @@ const TeacherDashboard = () => {
         setTodayClassesForAttendance(prev => ({ ...prev, [studentId]: classes }));
       }
     } catch {}
+  };
+
+  const toggleStudentExpand = async (studentId) => {
+    if (expandedStudent === studentId) { setExpandedStudent(null); return; }
+    setExpandedStudent(studentId);
+    if (!studentDetail[studentId]) {
+      try {
+        const res = await fetch(`${API}/teacher/student-detail/${studentId}`, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          setStudentDetail(prev => ({ ...prev, [studentId]: data }));
+        }
+      } catch {}
+    }
+    fetchTodayClasses(studentId);
   };
 
   const markAttendance = async (studentId, date, status, reason, classId) => {
@@ -618,102 +635,98 @@ const TeacherDashboard = () => {
           </TabsContent>
         </Tabs>
 
-        {/* My Students */}
+        {/* My Students — expandable per-student cards */}
         {dashboardData?.approved_students?.length > 0 && (
           <div className="mb-8">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Users className="w-5 h-5 text-sky-500" /> My Students</h2>
-              <Button variant="outline" onClick={fetchAttendance} className="rounded-full text-xs" data-testid="view-attendance-btn"><CalendarCheck className="w-3.5 h-3.5 mr-1" /> Attendance History</Button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {dashboardData.approved_students.map(s => (
-                <div key={s.assignment_id} className="bg-white rounded-xl border border-slate-200 p-3">
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <p className="font-semibold text-slate-900 text-sm">{s.student_name}</p>
-                        <p className="text-xs text-slate-500">{s.student_email}</p>
-                        {s.payment_status !== 'paid' && (
-                          <p className="text-xs text-amber-600 font-semibold mt-1">
-                            Waiting for Payment
-                          </p>
-                        )}
-
-                        {s.payment_status === 'paid' && (
-                          <p className="text-xs text-emerald-600 font-semibold mt-1">
-                            Payment Completed
-                          </p>
-                        )}
-                        {s.counselor_name && (
-                          <p className="text-xs text-slate-400 mt-0.5">Assigned by: <button onClick={() => openProfile(s.counselor_id, 'counsellor')} className="text-violet-600 hover:underline font-semibold cursor-pointer" data-testid={`view-counselor-${s.counselor_id}`}>{s.counselor_name}</button></p>
-                        )}
+            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-3"><Users className="w-5 h-5 text-sky-500" /> My Students ({dashboardData.approved_students.length})</h2>
+            <div className="space-y-2">
+              {dashboardData.approved_students.map(s => {
+                const isExpanded = expandedStudent === s.student_id;
+                const detail = studentDetail[s.student_id];
+                const unmarkedForStudent = unmarkedAttendance.filter(u => u.student_id === s.student_id);
+                const todayClasses = todayClassesForAttendance[s.student_id] || [];
+                return (
+                  <div key={s.assignment_id} className="bg-white rounded-xl border border-slate-200 overflow-hidden" data-testid={`student-card-${s.student_id}`}>
+                    <button onClick={() => toggleStudentExpand(s.student_id)} className="w-full p-3 flex items-center justify-between hover:bg-slate-50 transition-colors text-left">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-sky-100 flex items-center justify-center text-sky-700 font-bold text-sm">{s.student_name?.charAt(0)}</div>
+                        <div>
+                          <p className="font-semibold text-slate-900 text-sm">{s.student_name}</p>
+                          <p className="text-xs text-slate-500">{s.student_email}</p>
+                        </div>
                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      {s.payment_status === 'paid' ? (
-                        <>
-                          {/* Unmarked past attendance warning */}
-                          {unmarkedAttendance.filter(u => u.student_id === s.student_id).length > 0 && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-800">
-                              <AlertCircle className="w-3 h-3 inline mr-1" />
-                              <strong>{unmarkedAttendance.filter(u => u.student_id === s.student_id).length} unmarked day(s)</strong> — mark before continuing
-                              <div className="mt-1 space-y-1">
-                                {unmarkedAttendance.filter(u => u.student_id === s.student_id).slice(0, 3).map(u => (
-                                  <div key={`${u.class_id}-${u.date}`} className="flex items-center gap-1.5">
-                                    <span className="text-[10px] text-slate-600">{u.date} — {u.class_title}</span>
-                                    <Button onClick={() => markAttendance(u.student_id, u.date, 'present', 'forgot_to_mark', u.class_id)} size="sm" variant="outline" className="rounded-full h-5 px-2 text-[10px]" data-testid={`mark-past-present-${u.class_id}-${u.date}`}>
-                                      <CheckCircle className="w-2.5 h-2.5 text-emerald-500 mr-0.5" /> P
-                                    </Button>
-                                    <Button onClick={() => markAttendance(u.student_id, u.date, 'absent', 'forgot_to_mark', u.class_id)} size="sm" variant="outline" className="rounded-full h-5 px-2 text-[10px]" data-testid={`mark-past-absent-${u.class_id}-${u.date}`}>
-                                      <XCircle className="w-2.5 h-2.5 text-red-500 mr-0.5" /> A
-                                    </Button>
+                      <div className="flex items-center gap-2">
+                        {unmarkedForStudent.length > 0 && <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-[10px] font-bold">{unmarkedForStudent.length} unmarked</span>}
+                        {s.learning_plan_name && <span className="text-[10px] text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full">{s.learning_plan_name}</span>}
+                        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t border-slate-100 p-3 bg-slate-50 space-y-3">
+                        {unmarkedForStudent.length > 0 && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-800">
+                            <AlertCircle className="w-3 h-3 inline mr-1" /><strong>{unmarkedForStudent.length} unmarked day(s)</strong>
+                            <div className="mt-1 space-y-1">
+                              {unmarkedForStudent.slice(0, 5).map(u => (
+                                <div key={`${u.class_id}-${u.date}`} className="flex items-center gap-1.5">
+                                  <span className="text-[10px] text-slate-600">{u.date} — {u.class_title}</span>
+                                  <Button onClick={() => markAttendance(u.student_id, u.date, 'present', 'forgot_to_mark', u.class_id)} size="sm" variant="outline" className="rounded-full h-5 px-2 text-[10px]"><CheckCircle className="w-2.5 h-2.5 text-emerald-500 mr-0.5" /> P</Button>
+                                  <Button onClick={() => markAttendance(u.student_id, u.date, 'absent', 'forgot_to_mark', u.class_id)} size="sm" variant="outline" className="rounded-full h-5 px-2 text-[10px]"><XCircle className="w-2.5 h-2.5 text-red-500 mr-0.5" /> A</Button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {todayClasses.length > 0 && (
+                          <div>
+                            <p className="text-xs font-bold text-slate-700 mb-1">Today's Attendance</p>
+                            {todayClasses.map(cls => (
+                              <div key={cls.class_id} className="flex items-center gap-2 mb-1">
+                                <span className="text-xs text-slate-600">{cls.title}</span>
+                                {cls.already_marked ? (
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${cls.marked_status === 'present' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{cls.marked_status}</span>
+                                ) : (
+                                  <div className="flex gap-1">
+                                    <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'present', null, cls.class_id)} variant="outline" className="rounded-full text-[10px] h-6 px-2"><CheckCircle className="w-3 h-3 text-emerald-500 mr-0.5" /> Present</Button>
+                                    <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'absent', null, cls.class_id)} variant="outline" className="rounded-full text-[10px] h-6 px-2"><XCircle className="w-3 h-3 text-red-500 mr-0.5" /> Absent</Button>
                                   </div>
-                                ))}
+                                )}
                               </div>
+                            ))}
+                          </div>
+                        )}
+                        {detail?.classes?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-bold text-slate-700 mb-1">Classes ({detail.classes.length})</p>
+                            <div className="space-y-1">
+                              {detail.classes.map(c => (
+                                <div key={c.class_id} className="flex items-center justify-between bg-white rounded-lg px-2 py-1.5 text-xs">
+                                  <span className="font-medium">{c.title} <span className="text-slate-400">{c.date} | {c.sessions_conducted || 0}/{c.duration_days}d</span></span>
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${c.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : c.status === 'scheduled' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-700'}`}>{c.status}</span>
+                                </div>
+                              ))}
                             </div>
-                          )}
-
-                          {/* Today's class attendance */}
-                          {(todayClassesForAttendance[s.student_id] || []).map(cls => (
-                            <div key={cls.class_id} className="flex items-center gap-1.5">
-                              <span className="text-[10px] text-slate-600 truncate max-w-[100px]">{cls.title}</span>
-                              {cls.already_marked ? (
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${cls.marked_status === 'present' ? 'bg-emerald-100 text-emerald-700' : cls.marked_status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`} data-testid={`marked-${cls.class_id}`}>
-                                  {cls.marked_status}
-                                </span>
-                              ) : (
-                                <>
-                                  <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'present', null, cls.class_id)} variant="outline" className="rounded-full text-[10px] h-6 px-2" data-testid={`present-${cls.class_id}`}>
-                                    <CheckCircle className="w-3 h-3 text-emerald-500 mr-0.5" /> Present
-                                  </Button>
-                                  <Button onClick={() => markAttendance(s.student_id, new Date().toISOString().split('T')[0], 'absent', null, cls.class_id)} variant="outline" className="rounded-full text-[10px] h-6 px-2" data-testid={`absent-${cls.class_id}`}>
-                                    <XCircle className="w-3 h-3 text-red-500 mr-0.5" /> Absent
-                                  </Button>
-                                </>
-                              )}
+                          </div>
+                        )}
+                        {detail?.attendance?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-bold text-slate-700 mb-1">Attendance ({detail.attendance.length})</p>
+                            <div className="max-h-32 overflow-y-auto space-y-0.5">
+                              {detail.attendance.map((a, i) => (
+                                <div key={i} className="flex items-center justify-between bg-white rounded px-2 py-1 text-[10px]">
+                                  <span>{a.date} {a.class_title && <span className="text-sky-700 ml-1">{a.class_title}</span>}</span>
+                                  <span className={`px-1.5 py-0.5 rounded font-bold ${a.status === 'present' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{a.status}</span>
+                                </div>
+                              ))}
                             </div>
-                          ))}
-
-                          {/* If no today classes loaded yet, show load button */}
-                          {!todayClassesForAttendance[s.student_id] && (
-                            <Button onClick={() => fetchTodayClasses(s.student_id)} variant="outline" className="rounded-full text-xs h-7 px-2" data-testid={`load-attendance-${s.student_id}`}>
-                              <CalendarCheck className="w-3 h-3 mr-1" /> Mark Attendance
-                            </Button>
-                          )}
-
-                          <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs h-7 px-2">
-                            <MessageSquare className="w-3 h-3 mr-1" /> Feedback
-                          </Button>
-                        </>
-                      ) : (
-                        <Button disabled className="rounded-full text-xs h-7 px-3 bg-amber-100 text-amber-700">
-                          Waiting for Payment
-                        </Button>
-                      )}
-                    </div>
+                          </div>
+                        )}
+                        <Button onClick={() => { setFeedbackTarget({ student_id: s.student_id }); setShowFeedbackDialog(true); }} variant="outline" className="rounded-full text-xs h-7 px-3"><MessageSquare className="w-3 h-3 mr-1" /> Feedback</Button>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

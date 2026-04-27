@@ -454,6 +454,34 @@ async def submit_class_proof(proof: ClassProofSubmit, request: Request, authoriz
     return {"message": "Proof submitted successfully", "proof_id": proof_id}
 
 
+@router.get("/teacher/student-detail/{student_id}")
+async def teacher_student_detail(student_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Get per-student detail: attendance, classes, proofs for teacher view"""
+    user = await get_current_user(request, authorization)
+    if user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Teacher access only")
+
+    # Attendance for this student from this teacher
+    attendance = await db.attendance.find(
+        {"teacher_id": user.user_id, "student_id": student_id}, {"_id": 0}
+    ).sort("date", -1).to_list(200)
+
+    # Classes for this student
+    classes = await db.class_sessions.find(
+        {"teacher_id": user.user_id, "assigned_student_id": student_id}, {"_id": 0}
+    ).sort("date", -1).to_list(50)
+
+    # Check if student has active class (for create-class guard)
+    has_active_class = any(c.get("status") in ["scheduled", "in_progress"] for c in classes)
+
+    return {
+        "attendance": attendance,
+        "classes": classes,
+        "has_active_class": has_active_class
+    }
+
+
+
 @router.get("/teacher/my-proofs")
 async def get_teacher_proofs(request: Request, authorization: Optional[str] = Header(None)):
     """Get all proofs submitted by this teacher"""
