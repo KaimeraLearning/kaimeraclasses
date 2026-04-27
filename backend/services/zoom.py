@@ -8,11 +8,16 @@ import jwt
 
 logger = logging.getLogger(__name__)
 
-ZOOM_ACCOUNT_ID = os.environ.get("ZOOM_ACCOUNT_ID", "")
-ZOOM_CLIENT_ID = os.environ.get("ZOOM_CLIENT_ID", "")
-ZOOM_CLIENT_SECRET = os.environ.get("ZOOM_CLIENT_SECRET", "")
-
 _token_cache = {"token": None, "expires_at": 0}
+
+
+def _get_credentials():
+    """Lazy-load credentials from env (loaded by server.py's load_dotenv)"""
+    return (
+        os.environ.get("ZOOM_ACCOUNT_ID", ""),
+        os.environ.get("ZOOM_CLIENT_ID", ""),
+        os.environ.get("ZOOM_CLIENT_SECRET", "")
+    )
 
 
 def get_zoom_access_token():
@@ -21,10 +26,11 @@ def get_zoom_access_token():
     if _token_cache["token"] and _token_cache["expires_at"] > now:
         return _token_cache["token"]
 
-    if not ZOOM_CLIENT_ID or not ZOOM_CLIENT_SECRET or not ZOOM_ACCOUNT_ID:
-        raise Exception("Zoom credentials not configured")
+    account_id, client_id, client_secret = _get_credentials()
+    if not client_id or not client_secret or not account_id:
+        raise Exception("Zoom credentials not configured. Check ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET in .env")
 
-    credentials = base64.b64encode(f"{ZOOM_CLIENT_ID}:{ZOOM_CLIENT_SECRET}".encode()).decode()
+    credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     resp = requests.post(
         "https://zoom.us/oauth/token",
         headers={
@@ -33,7 +39,7 @@ def get_zoom_access_token():
         },
         data={
             "grant_type": "account_credentials",
-            "account_id": ZOOM_ACCOUNT_ID
+            "account_id": account_id
         },
         timeout=10
     )
@@ -86,15 +92,16 @@ def create_zoom_meeting(topic: str, duration: int = 60, start_time: str = None):
 
 def generate_zoom_sdk_signature(meeting_number: int, role: int):
     """Generate JWT signature for Zoom Meeting SDK (role: 0=participant, 1=host)"""
-    if not ZOOM_CLIENT_ID or not ZOOM_CLIENT_SECRET:
+    _, client_id, client_secret = _get_credentials()
+    if not client_id or not client_secret:
         raise Exception("Zoom SDK credentials not configured")
 
     iat = int(time.time())
     exp = iat + 60 * 60 * 2
 
     payload = {
-        "sdkKey": ZOOM_CLIENT_ID,
-        "appKey": ZOOM_CLIENT_ID,
+        "sdkKey": client_id,
+        "appKey": client_id,
         "mn": meeting_number,
         "role": role,
         "iat": iat,
@@ -102,5 +109,5 @@ def generate_zoom_sdk_signature(meeting_number: int, role: int):
         "tokenExp": exp
     }
 
-    signature = jwt.encode(payload, ZOOM_CLIENT_SECRET, algorithm="HS256")
+    signature = jwt.encode(payload, client_secret, algorithm="HS256")
     return signature
