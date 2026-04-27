@@ -46,11 +46,19 @@ const VideoClass = () => {
 
     const joinZoom = async () => {
       try {
+        // Create a dedicated DOM element outside React's control
+        const zoomRoot = document.createElement('div');
+        zoomRoot.id = 'zoom-sdk-root';
+        zoomRoot.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;';
+        if (zoomContainerRef.current) {
+          zoomContainerRef.current.appendChild(zoomRoot);
+        }
+
         const ZoomMtgEmbedded = (await import('@zoom/meetingsdk/embedded')).default;
         const client = ZoomMtgEmbedded.createClient();
 
         await client.init({
-          zoomAppRoot: zoomContainerRef.current,
+          zoomAppRoot: zoomRoot,
           language: 'en-US',
           patchJsMedia: true,
           leaveOnPageUnload: true
@@ -81,6 +89,9 @@ const VideoClass = () => {
         try { zoomClientRef.current.leaveMeeting(); } catch {}
         zoomClientRef.current = null;
       }
+      // Clean up the zoom root element
+      const existing = document.getElementById('zoom-sdk-root');
+      if (existing) existing.remove();
     };
   }, [classInfo, loading, user, zoomFailed]);
 
