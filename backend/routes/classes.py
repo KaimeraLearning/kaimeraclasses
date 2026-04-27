@@ -1,7 +1,7 @@
 """Class CRUD and lifecycle routes"""
 import os
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, timedelta
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional
 
@@ -291,16 +291,14 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
 
 @router.delete("/classes/delete/{class_id}")
 async def delete_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Teacher deletes a class - refunds student credits if charged"""
+    """Admin deletes a class - refunds student credits if charged"""
     user = await get_current_user(request, authorization)
-    if user.role != "teacher":
-        raise HTTPException(status_code=403, detail="Teacher access only")
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can delete classes")
 
     cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
     if not cls:
         raise HTTPException(status_code=404, detail="Class not found")
-    if cls['teacher_id'] != user.user_id:
-        raise HTTPException(status_code=403, detail="Not your class")
 
     # Refund student credits if class was charged
     refund_amount = cls.get("credits_required", 0)
@@ -321,7 +319,7 @@ async def delete_class(class_id: str, request: Request, authorization: Optional[
 
 @router.post("/classes/start/{class_id}")
 async def start_class(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Teacher starts a class session - opens the video room"""
+    """Teacher starts a class session - only allowed 5 min before start_time, blocked after end_time"""
     user = await get_current_user(request, authorization)
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
@@ -337,6 +335,42 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
     # Block starting if a cancelled session needs reschedule first
     if cls.get("needs_reschedule"):
         raise HTTPException(status_code=400, detail="Cannot start class: A cancelled session needs to be rescheduled first.")
+
+    # Time window check: 5 min before start_time to end_time
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+    class_date = cls.get("date", "")
+    start_time_str = cls.get("start_time", "")
+    end_time_str = cls.get("end_time", "")
+
+    if class_date and start_time_str and end_time_str and class_date <= today_str:
+        try:
+            from datetime import time as dt_time
+            # Parse start and end times
+            start_parts = start_time_str.split(":")
+            end_parts = end_time_str.split(":")
+            start_hour, start_min = int(start_parts[0]), int(start_parts[1]) if len(start_parts) > 1 else 0
+            end_hour, end_min = int(end_parts[0]), int(end_parts[1]) if len(end_parts) > 1 else 0
+
+            # Use IST (UTC+5:30) for time comparison
+            ist_offset = timedelta(hours=5, minutes=30)
+            now_ist = now + ist_offset
+            current_hour = now_ist.hour
+            current_min = now_ist.minute
+            current_total_min = current_hour * 60 + current_min
+            start_total_min = start_hour * 60 + start_min
+            end_total_min = end_hour * 60 + end_min
+
+            # Can start 5 min before start_time
+            if current_total_min < start_total_min - 5:
+                raise HTTPException(status_code=400, detail=f"Class starts at {start_time_str}. You can start 5 minutes before.")
+            # Cannot start after end_time
+            if current_total_min > end_total_min:
+                raise HTTPException(status_code=400, detail=f"Class time has ended ({end_time_str}). The class is auto-cancelled.")
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # If time parsing fails, allow start
 
     # Verify payment for assigned student (skip for demo classes)
     if not cls.get("is_demo") and cls.get("assigned_student_id"):

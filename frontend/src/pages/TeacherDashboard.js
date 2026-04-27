@@ -369,34 +369,67 @@ const TeacherDashboard = () => {
         )}
 
         <div className="space-y-1.5">
-          {cls.status === 'scheduled' && !cls.cancelled_today && !cls.needs_reschedule && (
-            <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8" data-testid={`start-class-${cls.class_id}`}>
-              <Play className="w-3 h-3 mr-1" /> Start Class
-            </Button>
-          )}
-          {isLive && !cls.cancelled_today && (
-            <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8 animate-pulse" data-testid={`rejoin-class-${cls.class_id}`}>
-              <Play className="w-3 h-3 mr-1" /> Rejoin Live
-            </Button>
-          )}
-          {/* Proof button: shows for conducted classes AND today's sessions that ended */}
-          {(section === 'conducted' || section === 'today') && cls.status !== 'cancelled' && !cls.proof_submitted && (
-            <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="w-full rounded-full text-xs h-7" data-testid={`submit-proof-${cls.class_id}`}><Upload className="w-3 h-3 mr-1" /> Submit Today's Proof</Button>
-          )}
-          {(section === 'conducted' || section === 'today') && cls.proof_submitted && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1 text-center text-xs text-emerald-700 font-medium" data-testid={`proof-submitted-${cls.class_id}`}>
-              <CheckCircle className="w-3 h-3 inline mr-1" />Today's Proof Submitted
-              {cls.total_proofs > 0 && cls.duration_days > 1 && <span className="ml-1">({cls.total_proofs}/{cls.duration_days} days)</span>}
-            </div>
-          )}
-          {section !== 'conducted' && cls.status !== 'completed' && cls.status !== 'cancelled' && (
-            <div className="flex gap-1.5">
-              <Button onClick={() => handleTeacherCancelClass(cls.class_id)} disabled={cancellingClassId === cls.class_id} variant="outline" className="flex-1 rounded-full text-xs h-7 border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed" data-testid={`teacher-cancel-${cls.class_id}`}><XCircle className="w-3 h-3 mr-1" /> {cancellingClassId === cls.class_id ? 'Cancelling...' : "Cancel Today's Session"}</Button>
-            </div>
-          )}
-          {section === 'today' && (
-            <Button onClick={() => handleDeleteClass(cls.class_id)} variant="outline" className="w-full border border-red-200 hover:bg-red-50 text-red-600 rounded-full text-xs h-7" data-testid={`delete-class-${cls.class_id}`}>Delete</Button>
-          )}
+          {(() => {
+            // Time-based Start Class button logic
+            const now = new Date();
+            const istOffset = 5.5 * 60 * 60 * 1000;
+            const nowIST = new Date(now.getTime() + istOffset);
+            const currentMin = nowIST.getUTCHours() * 60 + nowIST.getUTCMinutes();
+            const startParts = (cls.start_time || '').split(':');
+            const endParts = (cls.end_time || '').split(':');
+            const startMin = parseInt(startParts[0] || 0) * 60 + parseInt(startParts[1] || 0);
+            const endMin = parseInt(endParts[0] || 0) * 60 + parseInt(endParts[1] || 0);
+            const canStart = currentMin >= startMin - 5 && currentMin <= endMin;
+            const classTimeEnded = currentMin > endMin;
+            const isToday = section === 'today';
+
+            return (
+              <>
+                {/* Start Class - only within time window */}
+                {cls.status === 'scheduled' && !cls.cancelled_today && !cls.needs_reschedule && isToday && (
+                  canStart ? (
+                    <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8" data-testid={`start-class-${cls.class_id}`}>
+                      <Play className="w-3 h-3 mr-1" /> Start Class
+                    </Button>
+                  ) : classTimeEnded ? (
+                    <div className="bg-red-50 rounded-lg p-2 text-center text-xs text-red-700 font-semibold border border-red-200">
+                      Class time ended — auto-cancelled
+                    </div>
+                  ) : (
+                    <Button disabled className="w-full bg-slate-200 text-slate-400 rounded-full font-bold text-sm h-8 cursor-not-allowed" data-testid={`start-class-disabled-${cls.class_id}`}>
+                      <Play className="w-3 h-3 mr-1" /> Starts at {cls.start_time}
+                    </Button>
+                  )
+                )}
+                {/* For upcoming, show faded button */}
+                {cls.status === 'scheduled' && !cls.cancelled_today && !cls.needs_reschedule && !isToday && (
+                  <Button disabled className="w-full bg-slate-200 text-slate-400 rounded-full font-bold text-sm h-8 cursor-not-allowed">
+                    <Play className="w-3 h-3 mr-1" /> Starts {cls.date} at {cls.start_time}
+                  </Button>
+                )}
+                {/* Rejoin live */}
+                {isLive && !cls.cancelled_today && (
+                  <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-sm h-8 animate-pulse" data-testid={`rejoin-class-${cls.class_id}`}>
+                    <Play className="w-3 h-3 mr-1" /> Rejoin Live
+                  </Button>
+                )}
+                {/* Proof button: after class time ends OR class completed */}
+                {(section === 'conducted' || (isToday && (cls.status === 'completed' || classTimeEnded))) && cls.status !== 'cancelled' && !cls.proof_submitted && (
+                  <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className="w-full rounded-full text-xs h-7" data-testid={`submit-proof-${cls.class_id}`}><Upload className="w-3 h-3 mr-1" /> Submit Today's Proof</Button>
+                )}
+                {(section === 'conducted' || section === 'today') && cls.proof_submitted && (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1 text-center text-xs text-emerald-700 font-medium" data-testid={`proof-submitted-${cls.class_id}`}>
+                    <CheckCircle className="w-3 h-3 inline mr-1" />Today's Proof Submitted
+                    {cls.total_proofs > 0 && cls.duration_days > 1 && <span className="ml-1">({cls.total_proofs}/{cls.duration_days} days)</span>}
+                  </div>
+                )}
+                {/* Cancel button: only if class NOT started and time hasn't ended */}
+                {isToday && cls.status === 'scheduled' && !cls.cancelled_today && !cls.needs_reschedule && !isLive && !classTimeEnded && (
+                  <Button onClick={() => handleTeacherCancelClass(cls.class_id)} disabled={cancellingClassId === cls.class_id} variant="outline" className="w-full rounded-full text-xs h-7 border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed" data-testid={`teacher-cancel-${cls.class_id}`}><XCircle className="w-3 h-3 mr-1" /> {cancellingClassId === cls.class_id ? 'Cancelling...' : "Cancel Today's Session"}</Button>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
     );

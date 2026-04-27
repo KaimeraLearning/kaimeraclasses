@@ -101,6 +101,14 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Boost accumulates with each successful completion but total rating CANNOT exceed 5.0
 - Rating formula: avg_feedback + (completions * boost) - (cancellations * deduction) - (transfers * deduction) - (bad_feedbacks * 0.3)
 
+### Time-Based Class Controls & Admin-Only Delete (Feb 2026)
+- Start Class button only active 5 min before class start_time, faded/disabled before that
+- After end_time passes: Start Class disappears, class auto-cancelled, Submit Proof appears
+- Cancel Today's Session only visible before class starts (not after live or after time ends)
+- Delete class: admin-only (teachers cannot delete classes anymore)
+- Proof submission auto-captures meeting duration (calculated from last_started_at to submit time)
+- Meeting duration shown to counsellor in proof review (teacher cannot modify it)
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)

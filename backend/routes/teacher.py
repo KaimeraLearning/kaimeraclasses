@@ -415,12 +415,26 @@ async def submit_class_proof(proof: ClassProofSubmit, request: Request, authoriz
 
     proof_id = f"proof_{uuid.uuid4().hex[:12]}"
     today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+    # Auto-calculate meeting duration from last_started_at
+    meeting_duration_minutes = 0
+    if cls.get("last_started_at"):
+        try:
+            start_time = datetime.fromisoformat(cls["last_started_at"])
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
+            duration = datetime.now(timezone.utc) - start_time
+            meeting_duration_minutes = round(duration.total_seconds() / 60, 1)
+        except Exception:
+            pass
+
     proof_doc = {
         "proof_id": proof_id, "class_id": proof.class_id, "class_title": cls['title'],
         "teacher_id": user.user_id, "teacher_name": user.name,
         "student_id": cls.get('assigned_student_id', ''),
         "feedback_text": proof.feedback_text, "student_performance": proof.student_performance,
         "topics_covered": proof.topics_covered, "screenshot_base64": proof.screenshot_base64,
+        "meeting_duration_minutes": meeting_duration_minutes,
         "status": "pending", "submitted_at": datetime.now(timezone.utc).isoformat(),
         "proof_date": today_str,
         "reviewed_by": None, "reviewed_at": None, "reviewer_notes": None
