@@ -228,11 +228,11 @@ const Login = () => {
             <img 
     src="https://static.wixstatic.com/media/3427af_c1564f2d04d34070be92706f5c62fe6c~mv2.png/v1/fill/w_186,h_194,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Kaimera%20final%20logo.png" 
     alt="Logo" 
-    className="w-12 h-12 object-contain" 
+    className="w-14 h-14 object-contain" 
   />
             <h1 className="text-3xl font-black text-white tracking-tight">Kaimera Learning</h1>
           </div>
-          <p className="text-sky-300 text-sm font-medium">Learning Platform</p>
+          <p className="text-sky-300 text-sm font-medium">Empowering the Next Generation of Speakers</p>
         </div>
 
         <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/20 p-8 shadow-2xl">
@@ -240,7 +240,7 @@ const Login = () => {
           {/* ── Login Mode ── */}
           {mode === 'login' && (
             <>
-              <h2 className="text-xl font-bold text-white mb-6 text-center" data-testid="login-heading">Sign In</h2>
+              <h2 className="text-xl font-bold text-white mb-6 text-center" data-testid="login-heading">Welcome Back</h2>
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <Label className="text-white/80 text-xs mb-1.5 block">Email</Label>

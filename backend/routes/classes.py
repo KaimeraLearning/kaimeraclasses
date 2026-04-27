@@ -364,9 +364,33 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
             # Can start 5 min before start_time
             if current_total_min < start_total_min - 5:
                 raise HTTPException(status_code=400, detail=f"Class starts at {start_time_str}. You can start 5 minutes before.")
-            # Cannot start after end_time
+            # Cannot start after end_time — auto-cancel this session
             if current_total_min > end_total_min:
-                raise HTTPException(status_code=400, detail=f"Class time has ended ({end_time_str}). The class is auto-cancelled.")
+                # Record auto-cancel in session_history
+                session_history = cls.get("session_history", [])
+                today_date = now.strftime("%Y-%m-%d")
+                already_recorded = any(s.get("date") == today_date and s.get("status") == "auto_cancelled" for s in session_history)
+                if not already_recorded:
+                    session_history.append({
+                        "date": today_date,
+                        "status": "auto_cancelled",
+                        "reason": "Teacher did not start class before end time",
+                        "cancelled_at": now.isoformat()
+                    })
+                    # Shift end_date +1 day
+                    end_date = cls.get("end_date", cls.get("date"))
+                    new_end = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+                    await db.class_sessions.update_one(
+                        {"class_id": class_id},
+                        {"$set": {
+                            "session_history": session_history,
+                            "end_date": new_end,
+                            "needs_reschedule": True,
+                            "last_cancelled_by": "auto",
+                            "last_cancelled_at": now.isoformat()
+                        }}
+                    )
+                raise HTTPException(status_code=400, detail=f"Class time has ended ({end_time_str}). Session auto-cancelled. Please reschedule.")
         except HTTPException:
             raise
         except Exception:
@@ -452,15 +476,33 @@ async def end_class(class_id: str, request: Request, authorization: Optional[str
 
     today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     end_date_str = cls.get('end_date', cls['date'])
+    assigned_days = cls.get('duration_days', 1)
+    sessions_conducted = cls.get('sessions_conducted', 0) + 1
 
-    if today_str >= end_date_str:
+    # Record this session in session_history
+    session_record = {
+        "date": today_str,
+        "status": "conducted",
+        "started_at": cls.get("last_started_at"),
+        "ended_at": datetime.now(timezone.utc).isoformat()
+    }
+    session_history = cls.get("session_history", [])
+    session_history.append(session_record)
+
+    # Class completes only when all assigned sessions are successfully conducted
+    if sessions_conducted >= assigned_days:
         new_status = "completed"
     else:
         new_status = "scheduled"
 
     await db.class_sessions.update_one(
         {"class_id": class_id},
-        {"$set": {"status": new_status, "room_id": None, "last_ended_at": datetime.now(timezone.utc).isoformat()}}
+        {"$set": {
+            "status": new_status, "room_id": None,
+            "last_ended_at": datetime.now(timezone.utc).isoformat(),
+            "sessions_conducted": sessions_conducted,
+            "session_history": session_history
+        }}
     )
 
     # If this is a demo class and it's completed, mark the demo_request as completed

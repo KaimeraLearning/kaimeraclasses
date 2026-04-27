@@ -525,6 +525,98 @@ async def admin_teacher_ratings(request: Request, authorization: Optional[str] =
     return teachers
 
 
+@router.get("/admin/teacher-classes/{teacher_id}")
+async def admin_teacher_classes(teacher_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin/Counsellor views all classes for a teacher with full session timeline"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counsellor access only")
+
+    teacher = await db.users.find_one({"user_id": teacher_id, "role": "teacher"}, {"_id": 0, "password_hash": 0})
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    # Get all classes for this teacher
+    classes = await db.class_sessions.find(
+        {"teacher_id": teacher_id}, {"_id": 0}
+    ).sort("date", -1).to_list(500)
+
+    # Enrich each class with attendance and proof data
+    for cls in classes:
+        class_id = cls["class_id"]
+        student_id = cls.get("assigned_student_id", "")
+
+        # Get attendance for this class
+        attendance = await db.attendance.find(
+            {"class_id": class_id}, {"_id": 0, "date": 1, "status": 1, "student_name": 1, "reason": 1, "off_day_marking": 1}
+        ).sort("date", 1).to_list(100)
+        cls["attendance_records"] = attendance
+
+        # Get proofs for this class
+        proofs = await db.class_proofs.find(
+            {"class_id": class_id}, {"_id": 0, "proof_id": 1, "proof_date": 1, "status": 1, "admin_status": 1, "meeting_duration_minutes": 1, "submitted_at": 1}
+        ).sort("proof_date", 1).to_list(50)
+        cls["proof_records"] = proofs
+
+        # Summary stats
+        session_history = cls.get("session_history", [])
+        cls["total_sessions_conducted"] = sum(1 for s in session_history if s.get("status") == "conducted")
+        cls["total_sessions_cancelled"] = sum(1 for s in session_history if "cancel" in s.get("status", ""))
+        cls["total_sessions_auto_cancelled"] = sum(1 for s in session_history if s.get("status") == "auto_cancelled")
+
+    # Summary for this teacher
+    summary = {
+        "total_classes": len(classes),
+        "completed": sum(1 for c in classes if c.get("status") == "completed"),
+        "scheduled": sum(1 for c in classes if c.get("status") == "scheduled"),
+        "in_progress": sum(1 for c in classes if c.get("status") == "in_progress"),
+        "transferred": sum(1 for c in classes if c.get("status") == "transferred")
+    }
+
+    return {"teacher": teacher, "classes": classes, "summary": summary}
+
+
+@router.get("/admin/class-detail/{class_id}")
+async def admin_class_detail(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin/Counsellor views detailed timeline for a single class"""
+    user = await get_current_user(request, authorization)
+    if user.role not in ["admin", "counsellor"]:
+        raise HTTPException(status_code=403, detail="Admin or Counsellor access only")
+
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    # Full attendance
+    attendance = await db.attendance.find(
+        {"class_id": class_id}, {"_id": 0}
+    ).sort("date", 1).to_list(200)
+
+    # Full proofs
+    proofs = await db.class_proofs.find(
+        {"class_id": class_id}, {"_id": 0, "screenshot_base64": 0}
+    ).sort("proof_date", 1).to_list(50)
+
+    # Assignment info
+    assignment = None
+    if cls.get("assigned_student_id"):
+        assignment = await db.student_teacher_assignments.find_one(
+            {"teacher_id": cls["teacher_id"], "student_id": cls["assigned_student_id"]},
+            {"_id": 0}
+        )
+
+    return {
+        "class": cls,
+        "attendance": attendance,
+        "proofs": proofs,
+        "assignment": assignment,
+        "session_history": cls.get("session_history", []),
+        "sessions_conducted": cls.get("sessions_conducted", 0),
+        "duration_days": cls.get("duration_days", 1)
+    }
+
+
+
 @router.post("/admin/create-student")
 async def admin_create_student(student_data: CreateStudentAccount, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, authorization)

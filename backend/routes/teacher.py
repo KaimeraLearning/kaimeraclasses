@@ -282,6 +282,14 @@ async def teacher_cancel_class(class_id: str, request: Request, authorization: O
         "cancelled_at": datetime.now(timezone.utc).isoformat()
     })
 
+    # Record in session_history
+    session_history = cls.get("session_history", [])
+    session_history.append({
+        "date": today,
+        "status": "cancelled_by_teacher",
+        "cancelled_at": datetime.now(timezone.utc).isoformat()
+    })
+
     # Shift end_date by 1 day to account for cancelled session
     end_date = cls.get("end_date", cls.get("date"))
     new_end = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -296,7 +304,8 @@ async def teacher_cancel_class(class_id: str, request: Request, authorization: O
             "end_date": new_end,
             "needs_reschedule": True,
             "last_cancelled_by": "teacher",
-            "last_cancelled_at": datetime.now(timezone.utc).isoformat()
+            "last_cancelled_at": datetime.now(timezone.utc).isoformat(),
+            "session_history": session_history
         }}
     )
 

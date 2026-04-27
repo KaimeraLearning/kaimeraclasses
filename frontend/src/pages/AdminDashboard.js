@@ -102,6 +102,10 @@ const AdminDashboard = () => {
 
   // Student Edit
   const [editingStudent, setEditingStudent] = useState(false);
+  // Teacher Classes Detail
+  const [teacherClasses, setTeacherClasses] = useState(null);
+  const [showTeacherClassesDialog, setShowTeacherClassesDialog] = useState(false);
+  const [expandedClassId, setExpandedClassId] = useState(null);
   const [editForm, setEditForm] = useState({});
 
   // Learning Plans
@@ -369,6 +373,35 @@ const AdminDashboard = () => {
       }
     } catch {}
   };
+
+  const fetchTeacherClasses = async (teacherId) => {
+    try {
+      const res = await fetch(`${API}/admin/teacher-classes/${teacherId}`, { credentials: 'include' });
+      if (res.ok) {
+        setTeacherClasses(await res.json());
+        setShowTeacherClassesDialog(true);
+        setExpandedClassId(null);
+      }
+    } catch {}
+  };
+
+  const fetchClassDetail = async (classId) => {
+    if (expandedClassId === classId) { setExpandedClassId(null); return; }
+    try {
+      const res = await fetch(`${API}/admin/class-detail/${classId}`, { credentials: 'include' });
+      if (res.ok) {
+        const detail = await res.json();
+        // Merge detail into the classes list
+        setTeacherClasses(prev => {
+          if (!prev) return prev;
+          const updated = prev.classes.map(c => c.class_id === classId ? { ...c, _detail: detail } : c);
+          return { ...prev, classes: updated };
+        });
+        setExpandedClassId(classId);
+      }
+    } catch {}
+  };
+
 
   const handleApproveTeacher = async (teacherId, approved) => {
     try {
@@ -685,6 +718,7 @@ const AdminDashboard = () => {
                             </td>
                             <td className="px-4 py-3 text-right">
                               <div className="flex items-center justify-end gap-1">
+                                {u.role === 'teacher' && <Button onClick={() => fetchTeacherClasses(u.user_id)} variant="ghost" size="sm" className="h-7 px-2 text-sky-500" data-testid={`view-classes-${u.user_id}`} title="View Classes"><Calendar className="w-3.5 h-3.5" /></Button>}
                                 <Button onClick={() => { setCreditUser(u.user_id); setCreditsDialog(true); }} variant="ghost" size="sm" className="h-7 px-2 text-slate-500" data-testid={`credits-${u.user_id}`}><DollarSign className="w-3.5 h-3.5" /></Button>
                                 <Button onClick={() => handleBlock(u.user_id, !u.is_blocked)} variant="ghost" size="sm" className={`h-7 px-2 ${u.is_blocked ? 'text-emerald-500' : 'text-amber-500'}`} data-testid={`block-${u.user_id}`}><Ban className="w-3.5 h-3.5" /></Button>
                                 <Button onClick={() => handleDelete(u.user_id)} variant="ghost" size="sm" className="h-7 px-2 text-red-500" data-testid={`delete-${u.user_id}`}><Trash2 className="w-3.5 h-3.5" /></Button>
@@ -1377,6 +1411,106 @@ const AdminDashboard = () => {
             <Input type="number" step="0.1" value={creditAmount} onChange={e => setCreditAmount(e.target.value)} placeholder="Amount" className="rounded-xl" required data-testid="credit-amount-input" />
             <Button type="submit" className="w-full bg-sky-500 text-white rounded-full py-6 font-bold" data-testid="submit-credits">Adjust</Button>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Teacher Classes Detail Dialog */}
+      <Dialog open={showTeacherClassesDialog} onOpenChange={setShowTeacherClassesDialog}>
+        <DialogContent className="sm:max-w-4xl rounded-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-amber-500" /> {teacherClasses?.teacher?.name}'s Classes
+            </DialogTitle>
+          </DialogHeader>
+          {teacherClasses && (
+            <div className="mt-4 space-y-4">
+              {/* Summary */}
+              <div className="grid grid-cols-4 gap-2">
+                <div className="bg-slate-50 rounded-xl p-3 text-center"><p className="text-2xl font-bold">{teacherClasses.summary.total_classes}</p><p className="text-[10px] text-slate-500">Total</p></div>
+                <div className="bg-emerald-50 rounded-xl p-3 text-center"><p className="text-2xl font-bold text-emerald-700">{teacherClasses.summary.completed}</p><p className="text-[10px] text-slate-500">Completed</p></div>
+                <div className="bg-sky-50 rounded-xl p-3 text-center"><p className="text-2xl font-bold text-sky-700">{teacherClasses.summary.scheduled}</p><p className="text-[10px] text-slate-500">Active</p></div>
+                <div className="bg-amber-50 rounded-xl p-3 text-center"><p className="text-2xl font-bold text-amber-700">{teacherClasses.summary.transferred}</p><p className="text-[10px] text-slate-500">Transferred</p></div>
+              </div>
+
+              {/* Classes list — clickable to expand */}
+              <div className="space-y-2">
+                {teacherClasses.classes.map(cls => (
+                  <div key={cls.class_id} className="border border-slate-200 rounded-xl overflow-hidden">
+                    <button onClick={() => fetchClassDetail(cls.class_id)}
+                      className="w-full p-3 flex items-center justify-between hover:bg-slate-50 transition-colors text-left" data-testid={`class-row-${cls.class_id}`}>
+                      <div className="flex items-center gap-3">
+                        <div className={`w-2 h-8 rounded-full ${cls.status === 'completed' ? 'bg-emerald-400' : cls.status === 'scheduled' ? 'bg-sky-400' : cls.status === 'in_progress' ? 'bg-emerald-500' : cls.status === 'transferred' ? 'bg-amber-400' : 'bg-red-400'}`}></div>
+                        <div>
+                          <p className="font-semibold text-sm text-slate-900">{cls.title}</p>
+                          <p className="text-xs text-slate-500">{cls.date} to {cls.end_date} | {cls.start_time}-{cls.end_time} | {cls.duration_days}d</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-emerald-700 font-semibold">{cls.sessions_conducted || 0}/{cls.duration_days}d done</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${cls.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : cls.status === 'scheduled' ? 'bg-sky-100 text-sky-700' : cls.status === 'transferred' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}`}>{cls.status}</span>
+                        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${expandedClassId === cls.class_id ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+
+                    {/* Expanded detail */}
+                    {expandedClassId === cls.class_id && cls._detail && (
+                      <div className="border-t border-slate-200 p-4 bg-slate-50 space-y-3">
+                        {/* Session Timeline */}
+                        <div>
+                          <p className="text-xs font-bold text-slate-700 mb-1">Session Timeline</p>
+                          {(cls._detail.session_history || []).length > 0 ? (
+                            <div className="space-y-1">
+                              {cls._detail.session_history.map((s, i) => (
+                                <div key={i} className={`flex items-center gap-2 text-xs px-2 py-1 rounded ${s.status === 'conducted' ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                                  <div className={`w-1.5 h-1.5 rounded-full ${s.status === 'conducted' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                                  <span className="font-medium">{s.date}</span>
+                                  <span className={s.status === 'conducted' ? 'text-emerald-700' : 'text-red-700'}>{s.status.replace(/_/g, ' ')}</span>
+                                  {s.reason && <span className="text-slate-500">({s.reason})</span>}
+                                </div>
+                              ))}
+                            </div>
+                          ) : <p className="text-xs text-slate-400">No sessions yet</p>}
+                        </div>
+
+                        {/* Attendance */}
+                        <div>
+                          <p className="text-xs font-bold text-slate-700 mb-1">Attendance ({(cls._detail.attendance || []).length})</p>
+                          {(cls._detail.attendance || []).length > 0 ? (
+                            <div className="grid grid-cols-2 gap-1">
+                              {cls._detail.attendance.map((a, i) => (
+                                <div key={i} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1">
+                                  <span>{a.date} — {a.student_name}</span>
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${a.status === 'present' ? 'bg-emerald-100 text-emerald-700' : a.status === 'absent' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{a.status}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : <p className="text-xs text-slate-400">No records</p>}
+                        </div>
+
+                        {/* Proofs */}
+                        <div>
+                          <p className="text-xs font-bold text-slate-700 mb-1">Proofs ({(cls._detail.proofs || []).length})</p>
+                          {(cls._detail.proofs || []).length > 0 ? (
+                            <div className="space-y-1">
+                              {cls._detail.proofs.map((p, i) => (
+                                <div key={i} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1">
+                                  <div>
+                                    <span className="font-medium">{p.proof_date}</span>
+                                    {p.meeting_duration_minutes > 0 && <span className="text-slate-500 ml-2">({Math.round(p.meeting_duration_minutes)} min)</span>}
+                                  </div>
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.admin_status === 'approved' ? 'bg-emerald-100 text-emerald-700' : p.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{p.admin_status || p.status}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : <p className="text-xs text-slate-400">No proofs</p>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -109,6 +109,15 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Proof submission auto-captures meeting duration (calculated from last_started_at to submit time)
 - Meeting duration shown to counsellor in proof review (teacher cannot modify it)
 
+### Session-Based Completion & Admin/Counsellor Class Detail View (Feb 2026)
+- Classes track sessions_conducted separately — only successful completions count toward the total
+- If student has 3-day class, exactly 3 sessions must be conducted (cancels/reschedules don't count)
+- End date keeps extending until all sessions are done
+- Auto-cancel records in session_history with reason "Teacher did not start before end time"
+- Admin/Counsellor: GET /admin/teacher-classes/{id} — clickable list of all teacher's classes with summary stats
+- Admin/Counsellor: GET /admin/class-detail/{id} — full timeline: session history, attendance, proofs, meeting duration
+- Classes are expandable (not cluttered) — click to see full detail with color-coded timeline
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)
