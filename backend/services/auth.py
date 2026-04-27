@@ -111,3 +111,22 @@ async def seed_admin():
         })
 
         logger.info(f"Admin account seeded: {admin_email}")
+
+
+async def seed_system_pricing():
+    """Seed default system pricing if not configured. Required for class/demo creation."""
+    existing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
+    if existing:
+        return
+    await db.system_pricing.insert_one({
+        "pricing_id": "system_pricing",
+        "demo_price_student": 100.0,
+        "class_price_student": 200.0,
+        "demo_earning_teacher": 50.0,
+        "class_earning_teacher": 100.0,
+        "cancel_rating_deduction": 0.25,
+        "completion_rating_boost": 0.1,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": "system_seed"
+    })
+    logger.info("Default system_pricing seeded")

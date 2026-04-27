@@ -12,7 +12,7 @@ from starlette.middleware.cors import CORSMiddleware
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 
 from database import db, client
-from services.auth import seed_admin
+from services.auth import seed_admin, seed_system_pricing
 from services.helpers import generate_teacher_code, generate_student_code
 from tasks.background import background_cleanup_task, background_preclass_alert_task
 
@@ -87,6 +87,7 @@ app.include_router(attendance_router, prefix="/api")
 @app.on_event("startup")
 async def startup_event():
     await seed_admin()
+    await seed_system_pricing()
     # Create unique indexes for security
     await db.users.create_index("email", unique=True, sparse=True)
     await db.users.create_index("user_id", unique=True)
