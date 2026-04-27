@@ -18,9 +18,13 @@ GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
 
 
 def validate_email(email: str):
-    """Basic email validation"""
-    if not email or '@' not in email or '.' not in email.split('@')[-1]:
+    """Only allow @gmail.com and @kaimeralearning.com email addresses"""
+    if not email or '@' not in email:
         raise HTTPException(status_code=400, detail="Invalid email address")
+    domain = email.lower().split('@')[-1]
+    allowed_domains = ['gmail.com', 'kaimeralearning.com']
+    if domain not in allowed_domains:
+        raise HTTPException(status_code=400, detail="Only @gmail.com and @kaimeralearning.com email addresses are allowed")
 
 
 @router.post("/auth/register")
