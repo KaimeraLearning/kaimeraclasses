@@ -278,6 +278,7 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
             "transaction_id": transaction_id, "user_id": student['user_id'], "type": "class_booking",
             "amount": -total_cost,
             "description": f"Class: {class_data.title} ({class_data.duration_days} days x {price_per_day} credits/day)",
+            "class_id": class_id,
             "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
         })
 
@@ -319,6 +320,7 @@ async def delete_class(class_id: str, request: Request, authorization: Optional[
             "user_id": student_id, "type": "class_delete_refund",
             "amount": refund_amount,
             "description": f"Refund: Class '{cls['title']}' deleted by admin",
+            "class_id": class_id,
             "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
         })
 

@@ -18,6 +18,56 @@ UPLOADS_DIR = Path("/app/backend/uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 
+# ── My transactions (any role) ───────────────────────────────────────────────
+@router.get("/me/transactions")
+async def my_transactions(request: Request, authorization: Optional[str] = Header(None)):
+    """Returns the logged-in user's wallet/credit transaction history (any role).
+    Each transaction is enriched with a `reference_summary` derived from related
+    class / payment / proof so the user can see WHY money moved.
+    """
+    user = await get_current_user(request, authorization)
+    txns = await db.transactions.find(
+        {"user_id": user.user_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+
+    # Collect reference IDs in a single round-trip
+    class_ids = list({t.get("class_id") for t in txns if t.get("class_id")})
+    payment_ids = list({t.get("payment_id") for t in txns if t.get("payment_id")})
+    proof_ids = list({t.get("proof_id") for t in txns if t.get("proof_id")})
+
+    cls_map, pay_map, proof_map = {}, {}, {}
+    if class_ids:
+        for c in await db.class_sessions.find({"class_id": {"$in": class_ids}}, {"_id": 0, "class_id": 1, "title": 1, "date": 1, "subject": 1, "teacher_name": 1}).to_list(500):
+            cls_map[c["class_id"]] = c
+    if payment_ids:
+        for p in await db.payments.find({"payment_id": {"$in": payment_ids}}, {"_id": 0, "payment_id": 1, "receipt_id": 1, "razorpay_payment_id": 1, "amount": 1, "status": 1, "type": 1}).to_list(500):
+            pay_map[p["payment_id"]] = p
+    if proof_ids:
+        for pr in await db.class_proofs.find({"proof_id": {"$in": proof_ids}}, {"_id": 0, "proof_id": 1, "class_title": 1, "proof_date": 1, "class_id": 1}).to_list(500):
+            proof_map[pr["proof_id"]] = pr
+
+    for t in txns:
+        ref = {}
+        if t.get("class_id") and cls_map.get(t["class_id"]):
+            c = cls_map[t["class_id"]]
+            ref["kind"] = "class"
+            ref["label"] = f"{c.get('title','Class')} · {c.get('date','')}"
+            ref["teacher_name"] = c.get("teacher_name")
+        elif t.get("proof_id") and proof_map.get(t["proof_id"]):
+            pr = proof_map[t["proof_id"]]
+            ref["kind"] = "proof"
+            ref["label"] = f"{pr.get('class_title','Class')} · session {pr.get('proof_date','')}"
+            ref["class_id"] = pr.get("class_id")
+        if t.get("payment_id") and pay_map.get(t["payment_id"]):
+            p = pay_map[t["payment_id"]]
+            ref["kind"] = ref.get("kind") or "payment"
+            ref["payment_id"] = p["payment_id"]
+            ref["receipt_id"] = p.get("receipt_id")
+            ref["razorpay_payment_id"] = p.get("razorpay_payment_id")
+        t["reference"] = ref
+    return txns
+
+
 # DIAGNOSTIC HEALTH CHECK — exposes config presence (NOT values) for deploy verification
 @router.get("/health/config")
 async def health_config():

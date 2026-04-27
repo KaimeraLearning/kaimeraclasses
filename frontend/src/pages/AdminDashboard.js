@@ -39,16 +39,38 @@ const DrawerWalletHistory = ({ transactions }) => {
       {filtered.length === 0 ? (
         <p className="text-xs text-slate-400 text-center py-3" data-testid="drawer-wallet-empty">No transactions in selected range</p>
       ) : (
-        <div className="space-y-1 max-h-48 overflow-y-auto">
-          {filtered.map((t, i) => (
-            <div key={t.transaction_id || i} className="bg-slate-50 rounded-lg p-2 flex justify-between items-center text-xs gap-2">
-              <div className="min-w-0">
-                <p className="font-medium text-slate-700 truncate">{t.description}</p>
-                <p className="text-[10px] text-slate-400">{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</p>
+        <div className="space-y-1 max-h-72 overflow-y-auto">
+          {filtered.map((t, i) => {
+            const ref = t.reference || {};
+            return (
+              <div key={t.transaction_id || i} className="bg-slate-50 rounded-lg p-2 text-xs" data-testid={`drawer-txn-${i}`}>
+                <div className="flex justify-between items-center gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-800 truncate">{t.description}</p>
+                    <p className="text-[10px] text-slate-400">{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</p>
+                  </div>
+                  <span className={`font-semibold whitespace-nowrap ${t.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{t.amount > 0 ? '+' : ''}{t.amount}</span>
+                </div>
+                {(ref.class_title || ref.receipt_id || ref.razorpay_payment_id) && (
+                  <div className="mt-1 pt-1 border-t border-slate-200 text-[10px] text-slate-500 space-y-0.5">
+                    {ref.class_title && <p>📚 {ref.class_title}{ref.class_date ? ` · ${ref.class_date}` : ''}</p>}
+                    {ref.receipt_id && <p className="font-mono">Receipt: {ref.receipt_id}</p>}
+                    {ref.razorpay_payment_id && <p className="font-mono">RP: {ref.razorpay_payment_id}</p>}
+                    {ref.payment_id && (
+                      <button
+                        onClick={() => {
+                          const tk = localStorage.getItem('token');
+                          window.open(`${API}/payments/receipt-pdf/${ref.payment_id}?token=${tk}`, '_blank');
+                        }}
+                        className="underline text-sky-600 hover:text-sky-700"
+                        data-testid={`drawer-receipt-${i}`}
+                      >View Receipt PDF</button>
+                    )}
+                  </div>
+                )}
               </div>
-              <span className={`font-semibold whitespace-nowrap ${t.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{t.amount > 0 ? '+' : ''}{t.amount}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -1186,24 +1208,41 @@ const AdminDashboard = () => {
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Role</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Type</th>
                             <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600">Amount</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Description</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Description / Reference</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Date</th>
+                            <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600">Receipt</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {transactions.slice(0, 100).map((txn, i) => (
-                            <tr key={txn.transaction_id || i} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`txn-row-${i}`}>
-                              <td className="px-4 py-3">
-                                <button onClick={() => txn.user_id && handleOpenDrawer(txn.user_id)} className="text-sm font-medium text-slate-900 hover:text-sky-600">{txn.user_name || 'Unknown'}</button>
-                                <p className="text-xs text-slate-400 font-mono">{txn.user_code}</p>
-                              </td>
-                              <td className="px-4 py-3"><RoleBadge role={txn.user_role} /></td>
-                              <td className="px-4 py-3 text-xs text-slate-500">{txn.type}</td>
-                              <td className={`px-4 py-3 text-sm text-right font-bold ${txn.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{txn.amount > 0 ? '+' : ''}{txn.amount}</td>
-                              <td className="px-4 py-3 text-sm text-slate-600 max-w-[200px] truncate">{txn.description}</td>
-                              <td className="px-4 py-3 text-xs text-slate-400">{txn.created_at?.slice(0, 10)}</td>
-                            </tr>
-                          ))}
+                          {transactions.slice(0, 100).map((txn, i) => {
+                            const ref = txn.reference || {};
+                            return (
+                              <tr key={txn.transaction_id || i} className="border-t border-slate-100 hover:bg-slate-50 align-top" data-testid={`txn-row-${i}`}>
+                                <td className="px-4 py-3">
+                                  <button onClick={() => txn.user_id && handleOpenDrawer(txn.user_id)} className="text-sm font-medium text-slate-900 hover:text-sky-600">{txn.user_name || 'Unknown'}</button>
+                                  <p className="text-xs text-slate-400 font-mono">{txn.user_code}</p>
+                                </td>
+                                <td className="px-4 py-3"><RoleBadge role={txn.user_role} /></td>
+                                <td className="px-4 py-3 text-xs text-slate-500">{txn.type}</td>
+                                <td className={`px-4 py-3 text-sm text-right font-bold ${txn.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{txn.amount > 0 ? '+' : ''}{txn.amount}</td>
+                                <td className="px-4 py-3 text-sm text-slate-600 max-w-[260px]">
+                                  <p className="truncate">{txn.description}</p>
+                                  {ref.class_title && <p className="text-[11px] text-slate-500 mt-0.5">📚 {ref.class_title}{ref.class_date ? ` · ${ref.class_date}` : ''}{ref.teacher_name ? ` · ${ref.teacher_name}` : ''}</p>}
+                                  {ref.receipt_id && <p className="text-[10px] font-mono text-slate-400">{ref.receipt_id}</p>}
+                                  {ref.razorpay_payment_id && <p className="text-[10px] font-mono text-slate-400">RP: {ref.razorpay_payment_id}</p>}
+                                </td>
+                                <td className="px-4 py-3 text-xs text-slate-400">{txn.created_at?.slice(0, 10)}</td>
+                                <td className="px-4 py-3 text-center">
+                                  {ref.payment_id ? (
+                                    <Button variant="outline" size="sm" className="rounded-full h-7 px-3" onClick={() => {
+                                      const t = localStorage.getItem('token');
+                                      window.open(`${API}/payments/receipt-pdf/${ref.payment_id}?token=${t}`, '_blank');
+                                    }} data-testid={`txn-receipt-${i}`}><Download className="w-3 h-3" /></Button>
+                                  ) : <span className="text-[11px] text-slate-300">—</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

@@ -115,6 +115,31 @@ async def get_transactions(request: Request, authorization: Optional[str] = Head
         txn["user_role"] = info.get("role", "")
         txn["user_code"] = info.get("student_code") or info.get("teacher_code") or ""
 
+    # Enrich with reference labels (class title + receipt id) for admin ledger UX
+    class_ids = list({t.get("class_id") for t in transactions if t.get("class_id")})
+    payment_ids = list({t.get("payment_id") for t in transactions if t.get("payment_id")})
+    cls_map = {}
+    pay_map = {}
+    if class_ids:
+        for c in await db.class_sessions.find({"class_id": {"$in": class_ids}}, {"_id": 0, "class_id": 1, "title": 1, "date": 1, "teacher_name": 1}).to_list(len(class_ids)):
+            cls_map[c["class_id"]] = c
+    if payment_ids:
+        for p in await db.payments.find({"payment_id": {"$in": payment_ids}}, {"_id": 0, "payment_id": 1, "receipt_id": 1, "razorpay_payment_id": 1, "status": 1}).to_list(len(payment_ids)):
+            pay_map[p["payment_id"]] = p
+    for txn in transactions:
+        ref = {}
+        if txn.get("class_id") and cls_map.get(txn["class_id"]):
+            c = cls_map[txn["class_id"]]
+            ref["class_title"] = c.get("title")
+            ref["class_date"] = c.get("date")
+            ref["teacher_name"] = c.get("teacher_name")
+        if txn.get("payment_id") and pay_map.get(txn["payment_id"]):
+            p = pay_map[txn["payment_id"]]
+            ref["payment_id"] = p["payment_id"]
+            ref["receipt_id"] = p.get("receipt_id")
+            ref["razorpay_payment_id"] = p.get("razorpay_payment_id")
+        txn["reference"] = ref
+
     if view == "daily":
         daily = defaultdict(lambda: {"date": "", "total_revenue": 0, "total_credits_added": 0, "total_deductions": 0, "count": 0})
         for txn in transactions:
@@ -736,6 +761,24 @@ async def admin_get_user_detail(user_id: str, request: Request, authorization: O
         result["assignments"] = await db.student_teacher_assignments.find({"assigned_by": user_id}, {"_id": 0}).to_list(500)
         result["history_logs"] = await db.history_logs.find({"actor_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
     result["transactions"] = await db.transactions.find({"user_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    # Enrich drawer transactions with reference
+    txns = result["transactions"]
+    cls_ids = list({t.get("class_id") for t in txns if t.get("class_id")})
+    pay_ids = list({t.get("payment_id") for t in txns if t.get("payment_id")})
+    cls_m, pay_m = {}, {}
+    if cls_ids:
+        for c in await db.class_sessions.find({"class_id": {"$in": cls_ids}}, {"_id": 0, "class_id": 1, "title": 1, "date": 1, "teacher_name": 1}).to_list(len(cls_ids)):
+            cls_m[c["class_id"]] = c
+    if pay_ids:
+        for p in await db.payments.find({"payment_id": {"$in": pay_ids}}, {"_id": 0, "payment_id": 1, "receipt_id": 1, "razorpay_payment_id": 1}).to_list(len(pay_ids)):
+            pay_m[p["payment_id"]] = p
+    for t in txns:
+        ref = {}
+        if t.get("class_id") and cls_m.get(t["class_id"]):
+            c = cls_m[t["class_id"]]; ref.update({"class_title": c.get("title"), "class_date": c.get("date"), "teacher_name": c.get("teacher_name")})
+        if t.get("payment_id") and pay_m.get(t["payment_id"]):
+            p = pay_m[t["payment_id"]]; ref.update({"payment_id": p["payment_id"], "receipt_id": p.get("receipt_id"), "razorpay_payment_id": p.get("razorpay_payment_id")})
+        t["reference"] = ref
     return result
 
 
@@ -870,7 +913,7 @@ async def admin_approve_proof(data: AdminProofApproval, request: Request, author
             earning = pricing.get('demo_earning_teacher', 0) if cls and cls.get('is_demo') else pricing.get('class_earning_teacher', 0)
             if earning > 0:
                 await db.users.update_one({"user_id": proof['teacher_id']}, {"$inc": {"credits": earning}})
-                await db.transactions.insert_one({"transaction_id": f"txn_{uuid.uuid4().hex[:12]}", "user_id": proof['teacher_id'], "type": "earning", "amount": earning, "description": f"Admin approved: {proof.get('class_title', 'Class')}", "proof_id": data.proof_id, "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()})
+                await db.transactions.insert_one({"transaction_id": f"txn_{uuid.uuid4().hex[:12]}", "user_id": proof['teacher_id'], "type": "earning", "amount": earning, "description": f"Admin approved: {proof.get('class_title', 'Class')}", "proof_id": data.proof_id, "class_id": proof['class_id'], "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()})
                 await db.notifications.insert_one({"notification_id": f"notif_{uuid.uuid4().hex[:12]}", "user_id": proof['teacher_id'], "type": "credit_earned", "title": "Credits Earned!", "message": f"{earning} credits added to your wallet for '{proof.get('class_title', 'Class')}'.", "read": False, "related_id": data.proof_id, "created_at": datetime.now(timezone.utc).isoformat()})
 
             # Check if all classes for this teacher-student assignment are completed with approved proofs

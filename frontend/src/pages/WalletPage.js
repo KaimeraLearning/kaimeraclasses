@@ -20,7 +20,7 @@ const WalletPage = () => {
       const [meRes, payRes, txnRes] = await Promise.all([
         fetch(`${API}/auth/me`, { credentials: 'include' }),
         fetch(`${API}/payments/my-payments`, { credentials: 'include' }),
-        fetch(`${API}/student/my-transactions`, { credentials: 'include' }).catch(() => ({ ok: false }))
+        fetch(`${API}/me/transactions`, { credentials: 'include' }).catch(() => ({ ok: false }))
       ]);
       if (meRes.ok) setUser(await meRes.json());
       if (payRes.ok) setPayments(await payRes.json());
@@ -120,43 +120,61 @@ const WalletPage = () => {
           )}
         </div>
 
-        {/* Credit Transactions */}
-        {transactions.length > 0 && (
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
-              <History className="w-5 h-5 text-violet-500" /> Transaction History
-            </h2>
-            {txnsFilter.FilterBar}
-            {txnsFilter.filtered.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400" data-testid="no-txns-in-range">
-                No transactions in selected range
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden max-h-[60vh] overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 sticky top-0">
-                    <tr>
-                      <th className="text-left p-3 text-xs text-slate-500">Date</th>
-                      <th className="text-left p-3 text-xs text-slate-500">Description</th>
-                      <th className="text-right p-3 text-xs text-slate-500">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {txnsFilter.filtered.map(t => (
-                      <tr key={t.transaction_id} className="border-t border-slate-100">
-                        <td className="p-3 text-xs text-slate-600 whitespace-nowrap">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '-'}</td>
-                        <td className="p-3 text-xs font-medium">{t.description}</td>
-                        <td className={`p-3 text-right text-xs font-bold ${t.amount < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+        {/* Credit Transactions — always shown so empty + filtered states are clear */}
+        <div>
+          <h2 className="text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
+            <History className="w-5 h-5 text-violet-500" /> Transaction History
+          </h2>
+          {transactions.length > 0 && txnsFilter.FilterBar}
+          {transactions.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400" data-testid="no-txns-empty">
+              No transactions yet
+            </div>
+          ) : txnsFilter.filtered.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400" data-testid="no-txns-in-range">
+              No transactions in selected range
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden max-h-[60vh] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 sticky top-0">
+                  <tr>
+                    <th className="text-left p-3 text-xs text-slate-500">Date</th>
+                    <th className="text-left p-3 text-xs text-slate-500">Description / Reference</th>
+                    <th className="text-right p-3 text-xs text-slate-500">Amount</th>
+                    <th className="text-center p-3 text-xs text-slate-500">Receipt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txnsFilter.filtered.map(t => {
+                    const ref = t.reference || {};
+                    return (
+                      <tr key={t.transaction_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`txn-row-${t.transaction_id}`}>
+                        <td className="p-3 text-xs text-slate-600 whitespace-nowrap align-top">{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</td>
+                        <td className="p-3 text-xs align-top">
+                          <p className="font-semibold text-slate-800">{t.description}</p>
+                          {ref.class_title && <p className="text-[11px] text-slate-500 mt-0.5">📚 {ref.class_title}{ref.class_date ? ` · ${ref.class_date}` : ''}{ref.teacher_name ? ` · ${ref.teacher_name}` : ''}</p>}
+                          {ref.receipt_id && <p className="text-[10px] font-mono text-slate-400 mt-0.5">Receipt: {ref.receipt_id}</p>}
+                          {ref.razorpay_payment_id && <p className="text-[10px] font-mono text-slate-400">Razorpay: {ref.razorpay_payment_id}</p>}
+                        </td>
+                        <td className={`p-3 text-right text-xs font-bold align-top ${t.amount < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                           {t.amount < 0 ? '' : '+'}{t.amount}
                         </td>
+                        <td className="p-3 text-center align-top">
+                          {ref.payment_id ? (
+                            <Button variant="outline" size="sm" className="rounded-full h-7 px-3" onClick={() => downloadReceipt(ref.payment_id)} data-testid={`txn-receipt-${t.transaction_id}`}>
+                              <Download className="w-3 h-3" />
+                            </Button>
+                          ) : <span className="text-[11px] text-slate-300">—</span>}
+                        </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

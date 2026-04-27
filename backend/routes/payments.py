@@ -216,6 +216,8 @@ async def pay_from_wallet(request: Request, authorization: Optional[str] = Heade
         "user_id": user.user_id, "type": "assignment_payment",
         "amount": -amount,
         "description": f"Assignment payment (wallet): {assignment.get('learning_plan_name', 'Standard')} with {assignment.get('teacher_name')}",
+        "assignment_id": assignment_id,
+        "payment_id": payment_id,
         "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
     })
 
@@ -473,6 +475,7 @@ async def verify_recharge(request: Request, authorization: Optional[str] = Heade
             "type": "recharge",
             "amount": credits_to_add,
             "description": f"Recharged {credits_to_add} credits via Razorpay",
+            "payment_id": payment_id,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
 
