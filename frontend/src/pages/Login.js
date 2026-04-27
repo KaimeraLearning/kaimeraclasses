@@ -133,14 +133,16 @@ const Login = () => {
 
   const handleSendOtp = async () => {
     if (!form.email) { toast.error('Enter your email first'); return; }
-    if (!form.email.toLowerCase().endsWith('@gmail.com')) { toast.error('Only @gmail.com addresses are allowed'); return; }
+    const domain = form.email.toLowerCase().split('@').pop();
+    if (!['gmail.com', 'kaimeralearning.com'].includes(domain)) { toast.error('Only @gmail.com and @kaimeralearning.com addresses are allowed'); return; }
     setLoading(true);
     try {
       const res = await fetch(`${API}/auth/send-otp`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.email })
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email.trim().toLowerCase() })
       });
-      const data = await res.json();
+      let data;
+      try { data = await res.json(); } catch { throw new Error('Failed to send OTP. Please try again.'); }
       if (!res.ok) throw new Error(data.detail || 'Failed to send OTP');
       toast.success(data.message);
       setMode('otp');

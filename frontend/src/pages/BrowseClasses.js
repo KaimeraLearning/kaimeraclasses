@@ -7,7 +7,7 @@ import { GraduationCap, ArrowLeft, CreditCard, Users, Check, IndianRupee, Loader
 import { getApiError, API } from '../utils/api';
 
 const CREDIT_PACKAGES = [
-  { id: 'pack_2000', credits: 2, price: 2000, label: '2,000' },
+  { id: 'pack_2000', credits: 2000, price: 2000, label: '2,000' },
   { id: 'pack_5000', credits: 5000, price: 5000, label: '5,000', popular: true },
   { id: 'pack_10000', credits: 10000, price: 10000, label: '10,000' },
 ];
@@ -20,6 +20,7 @@ const BrowseClasses = () => {
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [customAmount, setCustomAmount] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -169,20 +170,34 @@ const BrowseClasses = () => {
               <div key={pkg.id} className={`relative bg-white rounded-2xl border-2 p-6 transition-all cursor-pointer ${
                 selectedPackage?.id === pkg.id ? 'border-sky-500 shadow-lg' : 'border-slate-200 hover:border-sky-300'
               } ${pkg.popular ? 'ring-2 ring-amber-400' : ''}`}
-                onClick={() => setSelectedPackage(pkg)} data-testid={`credit-package-${pkg.id}`}>
+                onClick={() => { setSelectedPackage(pkg); setCustomAmount(''); }} data-testid={`credit-package-${pkg.id}`}>
                 {pkg.popular && <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 px-3 py-1 rounded-full text-xs font-bold">POPULAR</div>}
                 <div className="text-center">
                   <p className="text-3xl font-bold text-slate-900 mb-1">{pkg.label}</p>
                   <p className="text-sm text-slate-600 mb-3">Credits</p>
                   <p className="text-2xl font-bold text-sky-600 flex items-center justify-center"><IndianRupee className="w-5 h-5" />{pkg.price.toLocaleString()}</p>
                 </div>
-                {selectedPackage?.id === pkg.id && <div className="absolute top-3 right-3"><div className="bg-sky-500 rounded-full p-1"><Check className="w-4 h-4 text-white" /></div></div>}
+                {selectedPackage?.id === pkg.id && !customAmount && <div className="absolute top-3 right-3"><div className="bg-sky-500 rounded-full p-1"><Check className="w-4 h-4 text-white" /></div></div>}
               </div>
             ))}
           </div>
-          <Button onClick={() => selectedPackage && handlePurchaseCredits(selectedPackage)} disabled={!selectedPackage || isProcessing}
+          {/* Custom amount */}
+          <div className="mt-4 bg-slate-50 rounded-2xl p-4 border border-slate-200">
+            <p className="text-sm font-semibold text-slate-700 mb-2">Or enter custom amount</p>
+            <div className="flex gap-2">
+              <div className="flex items-center border-2 border-slate-200 rounded-xl px-3 flex-1 focus-within:border-sky-400">
+                <IndianRupee className="w-4 h-4 text-slate-400" />
+                <input type="number" min="1" value={customAmount} onChange={e => { setCustomAmount(e.target.value); setSelectedPackage(null); }}
+                  placeholder="e.g. 500" className="w-full py-2 px-2 outline-none text-lg font-bold" data-testid="custom-amount-input" />
+              </div>
+            </div>
+          </div>
+          <Button onClick={() => {
+            const pkg = customAmount ? { id: 'custom', credits: parseInt(customAmount), price: parseInt(customAmount), label: customAmount } : selectedPackage;
+            if (pkg && pkg.price > 0) handlePurchaseCredits(pkg);
+          }} disabled={(!selectedPackage && !customAmount) || isProcessing}
             className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold text-lg mt-4" data-testid="proceed-to-payment-button">
-            {isProcessing ? <><Loader2 className="w-5 h-5 animate-spin mr-2" /> Processing...</> : 'Proceed to Payment'}
+            {isProcessing ? <><Loader2 className="w-5 h-5 animate-spin mr-2" /> Processing...</> : `Pay ${customAmount ? `₹${customAmount}` : selectedPackage ? `₹${selectedPackage.price.toLocaleString()}` : ''}`}
           </Button>
         </DialogContent>
       </Dialog>
