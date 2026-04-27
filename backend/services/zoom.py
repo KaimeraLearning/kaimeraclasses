@@ -12,11 +12,19 @@ _token_cache = {"token": None, "expires_at": 0}
 
 
 def _get_credentials():
-    """Lazy-load credentials from env (loaded by server.py's load_dotenv)"""
+    """Lazy-load Server-to-Server OAuth credentials for meeting creation"""
     return (
         os.environ.get("ZOOM_ACCOUNT_ID", ""),
         os.environ.get("ZOOM_CLIENT_ID", ""),
         os.environ.get("ZOOM_CLIENT_SECRET", "")
+    )
+
+
+def _get_sdk_credentials():
+    """Lazy-load Meeting SDK credentials for embedded view"""
+    return (
+        os.environ.get("ZOOM_SDK_KEY", ""),
+        os.environ.get("ZOOM_SDK_SECRET", "")
     )
 
 
@@ -92,16 +100,16 @@ def create_zoom_meeting(topic: str, duration: int = 60, start_time: str = None):
 
 def generate_zoom_sdk_signature(meeting_number: int, role: int):
     """Generate JWT signature for Zoom Meeting SDK (role: 0=participant, 1=host)"""
-    _, client_id, client_secret = _get_credentials()
-    if not client_id or not client_secret:
-        raise Exception("Zoom SDK credentials not configured")
+    sdk_key, sdk_secret = _get_sdk_credentials()
+    if not sdk_key or not sdk_secret:
+        raise Exception("Zoom Meeting SDK credentials not configured (ZOOM_SDK_KEY, ZOOM_SDK_SECRET)")
 
     iat = int(time.time())
     exp = iat + 60 * 60 * 2
 
     payload = {
-        "sdkKey": client_id,
-        "appKey": client_id,
+        "sdkKey": sdk_key,
+        "appKey": sdk_key,
         "mn": meeting_number,
         "role": role,
         "iat": iat,
@@ -109,5 +117,5 @@ def generate_zoom_sdk_signature(meeting_number: int, role: int):
         "tokenExp": exp
     }
 
-    signature = jwt.encode(payload, client_secret, algorithm="HS256")
+    signature = jwt.encode(payload, sdk_secret, algorithm="HS256")
     return signature

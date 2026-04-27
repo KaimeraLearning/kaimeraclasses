@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
@@ -8,11 +8,14 @@ import { getApiError, API } from '../utils/api';
 const VideoClass = () => {
   const { classId } = useParams();
   const navigate = useNavigate();
+  const zoomContainerRef = useRef(null);
+  const zoomClientRef = useRef(null);
   const [user, setUser] = useState(null);
   const [classInfo, setClassInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isTeacher, setIsTeacher] = useState(false);
-  const [zoomOpened, setZoomOpened] = useState(false);
+  const [zoomReady, setZoomReady] = useState(false);
+  const [zoomFailed, setZoomFailed] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -36,18 +39,57 @@ const VideoClass = () => {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Join Zoom embedded when class is in progress
+  useEffect(() => {
+    if (!classInfo || loading || !classInfo.zoom_meeting_id || classInfo.status !== 'in_progress') return;
+    if (zoomClientRef.current || zoomFailed) return;
+
+    const joinZoom = async () => {
+      try {
+        const ZoomMtgEmbedded = (await import('@zoom/meetingsdk/embedded')).default;
+        const client = ZoomMtgEmbedded.createClient();
+
+        await client.init({
+          zoomAppRoot: zoomContainerRef.current,
+          language: 'en-US',
+          patchJsMedia: true,
+          leaveOnPageUnload: true
+        });
+
+        await client.join({
+          signature: classInfo.zoom_signature,
+          sdkKey: classInfo.zoom_sdk_key,
+          meetingNumber: classInfo.zoom_meeting_id,
+          password: classInfo.zoom_password || '',
+          userName: user?.name || 'Participant',
+          userEmail: user?.email || ''
+        });
+
+        zoomClientRef.current = client;
+        setZoomReady(true);
+        toast.success('Connected to video class!');
+      } catch (err) {
+        console.error('Zoom SDK error:', err);
+        setZoomFailed(true);
+      }
+    };
+
+    joinZoom();
+
+    return () => {
+      if (zoomClientRef.current) {
+        try { zoomClientRef.current.leaveMeeting(); } catch {}
+        zoomClientRef.current = null;
+      }
+    };
+  }, [classInfo, loading, user, zoomFailed]);
+
   const handleStartClass = async () => {
     try {
       const res = await fetch(`${API}/classes/start/${classId}`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
-      const data = await res.json();
-      toast.success('Class started! Zoom meeting created.');
+      toast.success('Class started!');
       fetchData();
-      // Auto-open Zoom
-      if (data.zoom_join_url) {
-        window.open(data.zoom_join_url, '_blank');
-        setZoomOpened(true);
-      }
     } catch (error) { toast.error(error.message); }
   };
 
@@ -56,8 +98,11 @@ const VideoClass = () => {
     try {
       const res = await fetch(`${API}/classes/end/${classId}`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
-      const data = await res.json();
-      toast.success(data.message);
+      if (zoomClientRef.current) {
+        try { zoomClientRef.current.leaveMeeting(); } catch {}
+        zoomClientRef.current = null;
+      }
+      toast.success('Class ended');
       navigate('/teacher-dashboard');
     } catch (error) { toast.error(error.message); }
   };
@@ -90,13 +135,21 @@ const VideoClass = () => {
     }
   };
 
+  const handleLeave = () => {
+    if (zoomClientRef.current) {
+      try { zoomClientRef.current.leaveMeeting(); } catch {}
+      zoomClientRef.current = null;
+    }
+    navigate(isTeacher ? '/teacher-dashboard' : '/student-dashboard');
+  };
+
   if (loading) return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center">
       <Loader2 className="w-16 h-16 animate-spin text-sky-400" />
     </div>
   );
 
-  // Student: class not in progress
+  // Student: waiting for teacher
   if (!isTeacher && classInfo?.status !== 'in_progress') {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
@@ -105,7 +158,7 @@ const VideoClass = () => {
           <h2 className="text-2xl font-bold mb-3">{classInfo?.title}</h2>
           <p className="text-white/70 mb-2">by {classInfo?.teacher_name}</p>
           <p className="text-amber-400 font-semibold mb-6">Waiting for teacher to start...</p>
-          <Button onClick={() => navigate('/student-dashboard')} variant="outline" className="rounded-full border-white/30 text-white hover:bg-white/10" data-testid="back-to-dashboard">
+          <Button onClick={() => navigate('/student-dashboard')} variant="outline" className="rounded-full border-white/30 text-white hover:bg-white/10">
             <ArrowLeft className="w-4 h-4 mr-2" /> Back
           </Button>
         </div>
@@ -113,7 +166,7 @@ const VideoClass = () => {
     );
   }
 
-  // Teacher: class not started
+  // Teacher: start class
   if (isTeacher && classInfo?.status !== 'in_progress') {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
@@ -131,13 +184,14 @@ const VideoClass = () => {
     );
   }
 
-  // Class in progress
+  // Class in progress — show embedded Zoom or fallback
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col">
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700">
+    <div className="h-screen bg-slate-900 flex flex-col">
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700 z-10">
         <div className="flex items-center gap-3">
           <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-          <span className="text-white font-semibold">{classInfo?.title}</span>
+          <span className="text-white font-semibold text-sm">{classInfo?.title}</span>
           <span className="text-slate-400 text-xs">LIVE</span>
         </div>
         <div className="flex items-center gap-2">
@@ -146,47 +200,51 @@ const VideoClass = () => {
               <Camera className="w-4 h-4 mr-2" /> Screenshot
             </Button>
           )}
-          {isTeacher && (
+          {isTeacher ? (
             <Button onClick={handleEndClass} className="bg-red-600 hover:bg-red-700 text-white rounded-full px-4 text-sm" data-testid="end-class-button">
               <PhoneOff className="w-4 h-4 mr-2" /> End Class
             </Button>
-          )}
-          {!isTeacher && (
-            <Button onClick={() => navigate('/student-dashboard')} className="bg-red-600 hover:bg-red-700 text-white rounded-full px-4 text-sm" data-testid="leave-class-button">
+          ) : (
+            <Button onClick={handleLeave} className="bg-red-600 hover:bg-red-700 text-white rounded-full px-4 text-sm" data-testid="leave-class-button">
               <PhoneOff className="w-4 h-4 mr-2" /> Leave
             </Button>
           )}
         </div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-12 border border-white/20 text-center text-white max-w-lg w-full">
-          <div className="w-20 h-20 bg-sky-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <ExternalLink className="w-10 h-10 text-sky-400" />
-          </div>
-          <h2 className="text-2xl font-bold mb-3">Zoom Meeting Active</h2>
-          <p className="text-white/70 mb-6">Your class is running on Zoom. Click below to join or rejoin the meeting.</p>
-
-          {classInfo?.zoom_join_url && (
-            <Button onClick={() => { window.open(classInfo.zoom_join_url, '_blank'); setZoomOpened(true); }}
-              className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold text-lg mb-4" data-testid="join-zoom-btn">
-              <ExternalLink className="w-5 h-5 mr-2" /> {zoomOpened ? 'Rejoin Zoom Meeting' : 'Join Zoom Meeting'}
-            </Button>
-          )}
-
-          {zoomOpened && (
-            <p className="text-emerald-400 text-sm font-semibold">Zoom opened in a new tab. Keep this page open to end the class when done.</p>
-          )}
-
-          {isTeacher && (
-            <div className="mt-6 pt-4 border-t border-white/10">
-              <p className="text-white/50 text-xs mb-2">Take a screenshot of the Zoom call for proof</p>
-              <Button onClick={handleTakeScreenshot} variant="outline" className="rounded-full border-white/20 text-white hover:bg-white/10 text-sm">
-                <Camera className="w-4 h-4 mr-2" /> Capture Screenshot
-              </Button>
+      {/* Zoom container or fallback */}
+      <div ref={zoomContainerRef} className="flex-1 relative" id="zoom-container" data-testid="zoom-container">
+        {!zoomReady && !zoomFailed && (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center text-white">
+              <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-sky-400" />
+              <p>Connecting to Zoom...</p>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {zoomFailed && (
+          <div className="flex items-center justify-center h-full">
+            <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-12 border border-white/20 text-center text-white max-w-lg">
+              <ExternalLink className="w-16 h-16 text-sky-400 mx-auto mb-4" />
+              <h2 className="text-xl font-bold mb-3">Open Zoom Meeting</h2>
+              <p className="text-white/70 mb-6">Embedded view unavailable. Join via Zoom app instead.</p>
+              {classInfo?.zoom_join_url && (
+                <Button onClick={() => window.open(classInfo.zoom_join_url, '_blank')}
+                  className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-full py-6 font-bold text-lg" data-testid="join-zoom-btn">
+                  <ExternalLink className="w-5 h-5 mr-2" /> Open Zoom Meeting
+                </Button>
+              )}
+              {isTeacher && (
+                <div className="mt-4 pt-4 border-t border-white/10">
+                  <Button onClick={handleTakeScreenshot} variant="outline" className="rounded-full border-white/20 text-white hover:bg-white/10 text-sm">
+                    <Camera className="w-4 h-4 mr-2" /> Capture Screenshot for Proof
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

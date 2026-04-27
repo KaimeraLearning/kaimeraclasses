@@ -473,7 +473,7 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
         "zoom_join_url": zoom_data["join_url"],
         "zoom_password": zoom_data["password"],
         "zoom_signature": host_signature,
-        "zoom_sdk_key": os.environ.get("ZOOM_CLIENT_ID", "")
+        "zoom_sdk_key": os.environ.get("ZOOM_SDK_KEY", "")
     }
 
 
@@ -554,7 +554,7 @@ async def get_class_status(class_id: str, request: Request, authorization: Optio
     # Determine role for Zoom signature
     zoom_meeting = cls.get("zoom_meeting", {})
     zoom_signature = ""
-    zoom_sdk_key = os.environ.get("ZOOM_CLIENT_ID", "")
+    zoom_sdk_key = os.environ.get("ZOOM_SDK_KEY", "")
     if zoom_meeting.get("id") and cls['status'] == 'in_progress':
         role = 1 if user.role == "teacher" and cls['teacher_id'] == user.user_id else 0
         zoom_signature = generate_zoom_sdk_signature(zoom_meeting["id"], role)
