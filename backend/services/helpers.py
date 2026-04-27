@@ -12,8 +12,13 @@ from database import db
 
 logger = logging.getLogger(__name__)
 
-resend.api_key = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
+
+def _get_resend_config():
+    """Lazy-load Resend config after load_dotenv()"""
+    api_key = os.environ.get('RESEND_API_KEY', '')
+    if api_key:
+        resend.api_key = api_key
+    return os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
 
 
 async def generate_teacher_code():
@@ -41,8 +46,9 @@ async def generate_student_code():
 async def send_email(to_email: str, subject: str, html_content: str):
     """Send email via Resend (non-blocking)"""
     try:
+        sender = _get_resend_config()
         params = {
-            "from": SENDER_EMAIL,
+            "from": sender,
             "to": [to_email],
             "subject": subject,
             "html": html_content

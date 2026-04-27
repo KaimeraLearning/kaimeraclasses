@@ -727,7 +727,7 @@ async def get_teacher_schedule(request: Request, authorization: Optional[str] = 
         raise HTTPException(status_code=403, detail="Teacher access only")
 
     classes = await db.class_sessions.find(
-        {"teacher_id": user.user_id, "status": {"$in": ["scheduled", "in_progress"]}}, {"_id": 0}
+        {"teacher_id": user.user_id, "status": {"$in": ["scheduled", "in_progress", "completed"]}}, {"_id": 0}
     ).sort("date", 1).to_list(500)
     return classes
 

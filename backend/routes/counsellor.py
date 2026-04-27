@@ -24,8 +24,31 @@ async def counsellor_dashboard(request: Request, authorization: Optional[str] = 
     ).to_list(1000)
     rejected_assignments = await db.student_teacher_assignments.find({"status": "rejected"}, {"_id": 0}).to_list(1000)
 
+    # Students with paid assignments have moved past demo — not available for reassignment
+    paid_assignment_student_ids = set()
+    for a in active_assignments:
+        if a.get("payment_status") == "paid":
+            paid_assignment_student_ids.add(a["student_id"])
+
     assigned_student_ids = set([a['student_id'] for a in active_assignments])
-    unassigned_students = [s for s in all_students if s['user_id'] not in assigned_student_ids]
+
+    # Unassigned = not in any active assignment AND not already paid (past demo stage)
+    unassigned_students = []
+    for s in all_students:
+        if s['user_id'] in assigned_student_ids or s['user_id'] in paid_assignment_student_ids:
+            continue
+        # Check demo count — max 3 demos, then disappear from reassignment
+        demo_count = await db.demo_requests.count_documents({"student_id": s["user_id"]})
+        if demo_count >= 3:
+            # Check if any of those demos led to a paid assignment (success)
+            has_paid = await db.student_teacher_assignments.find_one(
+                {"student_id": s["user_id"], "payment_status": "paid"}, {"_id": 0, "assignment_id": 1}
+            )
+            if not has_paid:
+                # 3 demos, none converted — hide from reassignment
+                continue
+        s["demo_count"] = demo_count
+        unassigned_students.append(s)
 
     for student in unassigned_students:
         demo = await db.demo_requests.find_one(

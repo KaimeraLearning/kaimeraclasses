@@ -49,7 +49,7 @@ const WalletPage = () => {
             </Button>
             <h1 className="text-xl font-bold text-slate-900">Wallet & Receipts</h1>
           </div>
-          <Button onClick={() => navigate('/browse-classes')} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full font-bold" data-testid="recharge-btn">
+          <Button onClick={() => navigate('/browse-classes')} className={`bg-sky-500 hover:bg-sky-600 text-white rounded-full font-bold ${user?.role === 'teacher' ? 'hidden' : ''}`} data-testid="recharge-btn">
             <IndianRupee className="w-4 h-4 mr-1" /> Recharge
           </Button>
         </div>

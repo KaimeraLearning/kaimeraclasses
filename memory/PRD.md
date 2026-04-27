@@ -126,6 +126,14 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Admin delete class: notifies teacher when admin deletes their class
 - Teacher student detail endpoint: GET /teacher/student-detail/{id} returns per-student classes, attendance, has_active_class flag
 
+### Demo Limits, OTP Fix, Calendar, Wallet (Feb 2026)
+- Demo reassignment capped at 3 attempts — after 3 demos without conversion, student disappears from reassignment area
+- Students who paid for class assignment disappear from demo reassignment (demo successful)
+- After all classes finished, student can book demo again for new classes
+- OTP fix: Resend API key was not loading (same lazy-load issue as Zoom) — now loads at runtime
+- Teacher schedule calendar: includes completed classes, excludes finished/cancelled
+- Recharge button hidden on teacher wallet (teachers earn, not recharge)
+
 ### Auth & Environment
 - MongoDB Atlas connection (configurable via .env)
 - Google OAuth (on-demand GIS script, no iframe pre-loading)
