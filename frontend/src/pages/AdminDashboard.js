@@ -57,7 +57,21 @@ const DrawerWalletHistory = ({ transactions }) => {
 
 // Admin proofs panel: groups by teacher+student, supports date filter, side-by-side compare with previous proof.
 const AdminProofsPanel = ({ proofs, onApprove }) => {
-  const { filtered, FilterBar } = useDateRangeFilter(proofs, 'submitted_at');
+  const [teacherFilter, setTeacherFilter] = useState('all');
+  const teacherOptions = useMemo(() => {
+    const map = new Map();
+    for (const p of proofs) {
+      if (p.teacher_id && !map.has(p.teacher_id)) {
+        map.set(p.teacher_id, p.teacher_details?.name || p.teacher_name || p.teacher_id);
+      }
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [proofs]);
+  const proofsForFilter = useMemo(() => (
+    teacherFilter === 'all' ? proofs : proofs.filter(p => p.teacher_id === teacherFilter)
+  ), [proofs, teacherFilter]);
+  const { filtered, FilterBar } = useDateRangeFilter(proofsForFilter, 'submitted_at');
   const [open, setOpen] = useState({});
   const [selected, setSelected] = useState(null);
   const [history, setHistory] = useState({ current: [], archived: [] });
@@ -102,6 +116,32 @@ const AdminProofsPanel = ({ proofs, onApprove }) => {
   return (
     <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
       {FilterBar}
+      <div className="flex flex-wrap items-center gap-2 mb-4" data-testid="admin-teacher-filter-bar">
+        <span className="text-xs font-semibold text-slate-600">Teacher:</span>
+        <button
+          type="button"
+          onClick={() => setTeacherFilter('all')}
+          data-testid="admin-teacher-filter-all"
+          className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
+            teacherFilter === 'all' ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          All Teachers ({teacherOptions.length})
+        </button>
+        {teacherOptions.map(t => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTeacherFilter(t.id)}
+            data-testid={`admin-teacher-filter-${t.id}`}
+            className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
+              teacherFilter === t.id ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            {t.name}
+          </button>
+        ))}
+      </div>
       {groups.length === 0 ? (
         <div className="text-center py-12"><Shield className="w-12 h-12 text-slate-300 mx-auto mb-3" /><p className="text-slate-500">No proofs in selected range</p></div>
       ) : (

@@ -22,6 +22,7 @@ const CounsellorProofs = () => {
   const [showDetailDialog, setShowDetailDialog] = useState(false);
   const [reviewerNotes, setReviewerNotes] = useState('');
   const [viewMode, setViewMode] = useState('pending');
+  const [teacherFilter, setTeacherFilter] = useState('all');
   const [history, setHistory] = useState({ current: [], archived: [] });
   const [historyLoading, setHistoryLoading] = useState(false);
   const [expanded, setExpanded] = useState({});  // assignment_key -> bool
@@ -77,7 +78,24 @@ const CounsellorProofs = () => {
   };
 
   const sourceProofs = viewMode === 'pending' ? pendingProofs : allProofs;
-  const { filtered, FilterBar } = useDateRangeFilter(sourceProofs, 'submitted_at');
+
+  // Build unique teacher list from raw proofs (so selector shows all teachers regardless of date range)
+  const teacherOptions = useMemo(() => {
+    const map = new Map();
+    for (const p of sourceProofs) {
+      if (p.teacher_id && !map.has(p.teacher_id)) {
+        map.set(p.teacher_id, p.teacher_name || p.teacher_id);
+      }
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [sourceProofs]);
+
+  const teacherFilteredProofs = useMemo(() => (
+    teacherFilter === 'all' ? sourceProofs : sourceProofs.filter(p => p.teacher_id === teacherFilter)
+  ), [sourceProofs, teacherFilter]);
+
+  const { filtered, FilterBar } = useDateRangeFilter(teacherFilteredProofs, 'submitted_at');
 
   // Group by assignment_key = teacher_id + "_" + student_id
   const groups = useMemo(() => {
@@ -156,6 +174,34 @@ const CounsellorProofs = () => {
         </div>
 
         {FilterBar}
+
+        {/* Teacher selector */}
+        <div className="flex flex-wrap items-center gap-2 mb-4" data-testid="teacher-filter-bar">
+          <span className="text-xs font-semibold text-slate-600">Teacher:</span>
+          <button
+            type="button"
+            onClick={() => setTeacherFilter('all')}
+            data-testid="teacher-filter-all"
+            className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
+              teacherFilter === 'all' ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            All Teachers ({teacherOptions.length})
+          </button>
+          {teacherOptions.map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTeacherFilter(t.id)}
+              data-testid={`teacher-filter-${t.id}`}
+              className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
+                teacherFilter === t.id ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
 
         {groups.length === 0 ? (
           <div className="bg-white rounded-3xl p-12 border-2 border-slate-100 text-center" data-testid="proofs-empty">
