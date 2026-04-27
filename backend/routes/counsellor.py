@@ -24,7 +24,7 @@ async def counsellor_dashboard(request: Request, authorization: Optional[str] = 
     ).to_list(1000)
     rejected_assignments = await db.student_teacher_assignments.find({"status": "rejected"}, {"_id": 0}).to_list(1000)
 
-    # Students with paid assignments have moved past demo — not available for reassignment
+    # Students with paid assignments have moved past demo
     paid_assignment_student_ids = set()
     for a in active_assignments:
         if a.get("payment_status") == "paid":
@@ -32,20 +32,35 @@ async def counsellor_dashboard(request: Request, authorization: Optional[str] = 
 
     assigned_student_ids = set([a['student_id'] for a in active_assignments])
 
-    # Unassigned = not in any active assignment AND not already paid (past demo stage)
+    # Students marked as "finished" — completely cleared from counsellor dashboard
+    # They only come back if they book a NEW demo after being finished
+    finished_assignments = await db.student_teacher_assignments.find(
+        {"status": "finished"}, {"_id": 0, "student_id": 1, "finished_at": 1}
+    ).to_list(1000)
+    finished_student_ids = set()
+    for fa in finished_assignments:
+        sid = fa["student_id"]
+        # Check if student booked a NEW demo AFTER being finished
+        new_demo = await db.demo_requests.find_one(
+            {"student_id": sid, "created_at": {"$gt": fa.get("finished_at", "")}},
+            {"_id": 0, "demo_id": 1}
+        )
+        if not new_demo:
+            finished_student_ids.add(sid)
+
+    # Unassigned = not active, not paid, not finished (unless new demo booked)
     unassigned_students = []
     for s in all_students:
-        if s['user_id'] in assigned_student_ids or s['user_id'] in paid_assignment_student_ids:
+        sid = s['user_id']
+        if sid in assigned_student_ids or sid in paid_assignment_student_ids or sid in finished_student_ids:
             continue
-        # Check demo count — max 3 demos, then disappear from reassignment
-        demo_count = await db.demo_requests.count_documents({"student_id": s["user_id"]})
+        # Check demo count — max 3 demos, then disappear
+        demo_count = await db.demo_requests.count_documents({"student_id": sid})
         if demo_count >= 3:
-            # Check if any of those demos led to a paid assignment (success)
             has_paid = await db.student_teacher_assignments.find_one(
-                {"student_id": s["user_id"], "payment_status": "paid"}, {"_id": 0, "assignment_id": 1}
+                {"student_id": sid, "payment_status": "paid"}, {"_id": 0, "assignment_id": 1}
             )
             if not has_paid:
-                # 3 demos, none converted — hide from reassignment
                 continue
         s["demo_count"] = demo_count
         unassigned_students.append(s)
@@ -62,9 +77,12 @@ async def counsellor_dashboard(request: Request, authorization: Optional[str] = 
 
     teachers = await db.users.find({"role": "teacher", "is_approved": True}, {"_id": 0, "password_hash": 0}).to_list(1000)
 
+    # Filter all_students: exclude finished students (unless they booked new demo)
+    visible_students = [s for s in all_students if s['user_id'] not in finished_student_ids]
+
     return {
         "unassigned_students": unassigned_students,
-        "all_students": all_students,
+        "all_students": visible_students,
         "teachers": teachers,
         "active_assignments": active_assignments,
         "rejected_assignments": rejected_assignments

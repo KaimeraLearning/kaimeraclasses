@@ -228,8 +228,16 @@ async def student_enrollment_status(request: Request, authorization: Optional[st
 
     is_enrolled = bool(approved)
 
+    # Check if student was previously finished (all classes done, marked by counsellor)
+    finished = await db.student_teacher_assignments.find_one(
+        {"student_id": user.user_id, "status": "finished"},
+        {"_id": 0, "assignment_id": 1}
+    )
+    is_finished = bool(finished) and not is_enrolled
+
     return {
         "is_enrolled": is_enrolled,
+        "is_finished": is_finished,
         "has_approved_teacher": bool(approved),
         "active_class_count": len(active_classes),
         "demo_completed": demo_completed,

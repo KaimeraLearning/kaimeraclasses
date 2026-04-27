@@ -247,15 +247,17 @@ const StudentDashboard = () => {
             <Lock className="w-16 h-16 text-amber-500 mx-auto mb-4" />
             <h2 className="text-2xl font-bold text-slate-900 mb-2">Welcome, {user?.name}!</h2>
             <p className="text-slate-600 mb-4">
-              {!demoCompleted
-                ? "You're not enrolled yet. Book a free demo to get started!"
-                : hasTeacher
-                  ? "Your teacher enrollment is being processed. Hang tight!"
-                  : "Your demo is complete! A counselor will assign you to a teacher soon."}
+              {enrollment?.is_finished
+                ? "Your previous classes are complete! Want to learn more? Book a new demo."
+                : !demoCompleted
+                  ? "You're not enrolled yet. Book a free demo to get started!"
+                  : hasTeacher
+                    ? "Your teacher enrollment is being processed. Hang tight!"
+                    : "Your demo is complete! A counselor will assign you to a teacher soon."}
             </p>
             <div className="flex flex-wrap gap-3 justify-center">
-              {!demoCompleted && (
-                <Button onClick={() => navigate('/book-demo')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-8 py-6 font-bold text-lg" data-testid="book-demo-button">Book a Free Demo</Button>
+              {(!demoCompleted || enrollment?.is_finished) && (
+                <Button onClick={() => navigate('/book-demo')} className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full px-8 py-6 font-bold text-lg" data-testid="book-demo-button">{enrollment?.is_finished ? 'Book New Demo' : 'Book a Free Demo'}</Button>
               )}
               <Button onClick={() => setShowProfileDialog(true)} variant="outline" className="rounded-full px-6 py-6" data-testid="edit-profile-button"><User className="w-4 h-4 mr-2" /> My Profile</Button>
               <Button onClick={() => navigate('/wallet')} variant="outline" className="rounded-full px-6 py-6" data-testid="wallet-button"><CreditCard className="w-4 h-4 mr-2" /> Wallet</Button>
