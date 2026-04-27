@@ -45,12 +45,15 @@ async def generate_student_code():
 
 
 async def send_email(to_email: str, subject: str, html_content: str):
-    """Send email via Gmail SMTP with TLS"""
+    """Send email via Gmail SMTP with TLS. Returns dict on success, dict with error on failure."""
     try:
         config = _get_email_config()
         if not config["password"]:
-            logger.error("Gmail App Password not configured")
-            return None
+            logger.error("Gmail App Password not configured (GMAIL_APP_PASSWORD env var missing)")
+            return {"error": "GMAIL_APP_PASSWORD not configured on server"}
+        if not config["email"]:
+            logger.error("SENDER_EMAIL not configured")
+            return {"error": "SENDER_EMAIL not configured on server"}
 
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -64,7 +67,7 @@ async def send_email(to_email: str, subject: str, html_content: str):
         msg.attach(MIMEText(plain_text, "plain"))
 
         def _send():
-            with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
                 server.ehlo()
                 server.starttls()
                 server.ehlo()
@@ -73,12 +76,21 @@ async def send_email(to_email: str, subject: str, html_content: str):
                 logger.info(f"SMTP sendmail result for {to_email}: {result}")
                 return result
 
-        result = await asyncio.to_thread(_send)
+        await asyncio.to_thread(_send)
         logger.info(f"Email sent to {to_email} via Gmail SMTP (TLS/587)")
         return {"id": f"gmail_{uuid.uuid4().hex[:8]}"}
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(f"Gmail SMTP auth failed for {config.get('email')}: {e}")
+        return {"error": f"Gmail rejected credentials: {str(e)[:200]}"}
+    except smtplib.SMTPException as e:
+        logger.error(f"Gmail SMTP error: {e}")
+        return {"error": f"SMTP error: {str(e)[:200]}"}
+    except (TimeoutError, OSError) as e:
+        logger.error(f"Network error reaching Gmail SMTP: {e}")
+        return {"error": f"Cannot reach smtp.gmail.com:587 — port may be blocked. {str(e)[:150]}"}
     except Exception as e:
         logger.error(f"Email send failed to {to_email}: {e}")
-        return None
+        return {"error": str(e)[:200]}
 
 
 async def generate_otp(email: str) -> str:

@@ -54,6 +54,11 @@ const VideoClass = () => {
           zoomContainerRef.current.appendChild(zoomRoot);
         }
 
+        // Wait one frame so the container has measured dimensions
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        const rootWidth = zoomRoot.clientWidth || window.innerWidth;
+        const rootHeight = zoomRoot.clientHeight || (window.innerHeight - 64);
+
         const ZoomMtgEmbedded = (await import('@zoom/meetingsdk/embedded')).default;
         const client = ZoomMtgEmbedded.createClient();
 
@@ -61,7 +66,17 @@ const VideoClass = () => {
           zoomAppRoot: zoomRoot,
           language: 'en-US',
           patchJsMedia: true,
-          leaveOnPageUnload: true
+          leaveOnPageUnload: true,
+          customize: {
+            video: {
+              isResizable: false,
+              viewSizes: {
+                default: { width: rootWidth, height: rootHeight },
+                ribbon: { width: 300, height: rootHeight }
+              }
+            },
+            toolbar: { buttons: [] }
+          }
         });
 
         await client.join({
@@ -73,7 +88,30 @@ const VideoClass = () => {
           userEmail: user?.email || ''
         });
 
+        // Force-resize after join in case Zoom rendered before layout settled
+        try {
+          const ms = client.getMeetingClient && client.getMeetingClient();
+          if (ms && ms.getMediaStream) {
+            const stream = ms.getMediaStream();
+            if (stream && stream.resizeVideoCanvas) {
+              stream.resizeVideoCanvas({ width: zoomRoot.clientWidth, height: zoomRoot.clientHeight });
+            }
+          }
+        } catch {}
+
+        // Window resize handler keeps the SDK matched to container
+        const onResize = () => {
+          try {
+            const ms = client.getMeetingClient && client.getMeetingClient();
+            const stream = ms && ms.getMediaStream && ms.getMediaStream();
+            if (stream && stream.resizeVideoCanvas && zoomRoot) {
+              stream.resizeVideoCanvas({ width: zoomRoot.clientWidth, height: zoomRoot.clientHeight });
+            }
+          } catch {}
+        };
+        window.addEventListener('resize', onResize);
         zoomClientRef.current = client;
+        zoomClientRef.current._onResize = onResize;
         setZoomReady(true);
         toast.success('Connected to video class!');
       } catch (err) {
@@ -86,6 +124,9 @@ const VideoClass = () => {
 
     return () => {
       if (zoomClientRef.current) {
+        if (zoomClientRef.current._onResize) {
+          window.removeEventListener('resize', zoomClientRef.current._onResize);
+        }
         try { zoomClientRef.current.leaveMeeting(); } catch {}
         zoomClientRef.current = null;
       }

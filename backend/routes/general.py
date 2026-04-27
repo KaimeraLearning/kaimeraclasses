@@ -1,5 +1,7 @@
 """General routes: notifications, complaints, wallet, history, search, filter, renewal, learning kit"""
+import os
 import uuid
+import socket
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Header, Form, UploadFile, File
@@ -14,6 +16,47 @@ router = APIRouter()
 
 UPLOADS_DIR = Path("/app/backend/uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
+
+
+# DIAGNOSTIC HEALTH CHECK — exposes config presence (NOT values) for deploy verification
+@router.get("/health/config")
+async def health_config():
+    """Returns which critical env vars are loaded. Safe to expose: shows only presence + length, never values."""
+    def status(key):
+        v = os.environ.get(key, '')
+        return {"set": bool(v), "length": len(v) if v else 0}
+
+    # Test Gmail SMTP reachability (port 587 outbound)
+    smtp_reachable = False
+    smtp_error = None
+    try:
+        s = socket.create_connection(("smtp.gmail.com", 587), timeout=5)
+        s.close()
+        smtp_reachable = True
+    except Exception as e:
+        smtp_error = str(e)[:120]
+
+    # Check system_pricing presence
+    pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0, "pricing_id": 1})
+
+    return {
+        "env": {
+            "MONGO_URL": status("MONGO_URL"),
+            "DB_NAME": status("DB_NAME"),
+            "SENDER_EMAIL": {**status("SENDER_EMAIL"), "value": os.environ.get("SENDER_EMAIL", "")},
+            "GMAIL_APP_PASSWORD": status("GMAIL_APP_PASSWORD"),
+            "ZOOM_ACCOUNT_ID": status("ZOOM_ACCOUNT_ID"),
+            "ZOOM_CLIENT_ID": status("ZOOM_CLIENT_ID"),
+            "ZOOM_CLIENT_SECRET": status("ZOOM_CLIENT_SECRET"),
+            "ZOOM_SDK_KEY": status("ZOOM_SDK_KEY"),
+            "ZOOM_SDK_SECRET": status("ZOOM_SDK_SECRET"),
+            "GOOGLE_CLIENT_ID": status("GOOGLE_CLIENT_ID"),
+        },
+        "smtp_587_reachable": smtp_reachable,
+        "smtp_error": smtp_error,
+        "system_pricing_seeded": pricing is not None,
+        "db_name_runtime": db.name,
+    }
 
 
 # NOTIFICATIONS

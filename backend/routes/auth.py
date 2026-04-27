@@ -120,8 +120,9 @@ async def send_otp(request: Request):
     """
 
     result = await send_email(email, "Kaimera Learning - Verify Your Email", html_content)
-    if not result:
-        raise HTTPException(status_code=500, detail="Failed to send OTP email. Please try again.")
+    if not result or result.get("error"):
+        err_msg = (result or {}).get("error", "unknown error")
+        raise HTTPException(status_code=500, detail=f"Failed to send OTP email: {err_msg}")
 
     return {"message": "OTP sent to your email. Please check your inbox."}
 
