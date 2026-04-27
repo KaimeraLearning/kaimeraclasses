@@ -45,7 +45,7 @@ async def generate_student_code():
 
 
 async def send_email(to_email: str, subject: str, html_content: str):
-    """Send email via Gmail SMTP"""
+    """Send email via Gmail SMTP with TLS"""
     try:
         config = _get_email_config()
         if not config["password"]:
@@ -56,15 +56,25 @@ async def send_email(to_email: str, subject: str, html_content: str):
         msg["Subject"] = subject
         msg["From"] = f"Kaimera Learning <{config['email']}>"
         msg["To"] = to_email
+        msg["Reply-To"] = config["email"]
         msg.attach(MIMEText(html_content, "html"))
+        # Also add plain text version for better deliverability
+        import re
+        plain_text = re.sub(r'<[^>]+>', '', html_content).strip()
+        msg.attach(MIMEText(plain_text, "plain"))
 
         def _send():
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            with smtplib.SMTP("smtp.gmail.com", 587) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
                 server.login(config["email"], config["password"])
-                server.sendmail(config["email"], to_email, msg.as_string())
+                result = server.sendmail(config["email"], to_email, msg.as_string())
+                logger.info(f"SMTP sendmail result for {to_email}: {result}")
+                return result
 
-        await asyncio.to_thread(_send)
-        logger.info(f"Email sent to {to_email} via Gmail SMTP")
+        result = await asyncio.to_thread(_send)
+        logger.info(f"Email sent to {to_email} via Gmail SMTP (TLS/587)")
         return {"id": f"gmail_{uuid.uuid4().hex[:8]}"}
     except Exception as e:
         logger.error(f"Email send failed to {to_email}: {e}")
