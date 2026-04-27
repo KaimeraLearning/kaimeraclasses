@@ -7,11 +7,12 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - **Frontend**: React + Shadcn/UI + Tailwind CSS
 - **Backend**: FastAPI (modular routes)
 - **Database**: MongoDB Atlas (`mongodb+srv://...@cluster0.oxrrozs.mongodb.net/`) — use local MongoDB if Atlas IP not whitelisted
-- **Video**: Jitsi Meet API
-- **Auth**: Cookie-based sessions + Google OAuth (manual GIS script, on-demand)
+- **Video**: Zoom Meeting SDK (Component View, embedded)
+- **Auth**: Cookie-based sessions + Google OAuth (manual GIS script, on-demand). Self-signup OTP flow REMOVED — replaced with Book-a-Free-Demo dialog (Apr 2026).
 - **Payments**: Razorpay (on-demand script loading, no npm package)
-- **Email**: Resend (OTP verification)
+- **Email**: Gmail SMTP (smtplib STARTTLS port 587) — used for admin/teacher OTP verification, demo notifications
 - **PDF**: fpdf2 (receipt generation)
+- **Diagnostics**: `/api/health/config` returns runtime env presence + SMTP reachability + system_pricing seeded — useful after deploys
 
 ## Code Structure
 ```

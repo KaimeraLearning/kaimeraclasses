@@ -83,3 +83,47 @@ code {
         border-bottom-color: inherit;
     }
 }
+
+/* === Zoom Meeting SDK Component View — force iframe-style embed === */
+#zoom-container {
+  position: relative;
+  overflow: hidden;
+}
+#zoom-sdk-root,
+#zoom-sdk-root .zmwebsdk-MuiPaper-root,
+#zoom-sdk-root .react-draggable {
+  width: 100% !important;
+  height: 100% !important;
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  transform: none !important;
+  border-radius: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+/* Disable Zoom Component View dragging behaviour entirely */
+#zoom-sdk-root .react-draggable,
+#zoom-sdk-root .react-draggable-dragging {
+  cursor: default !important;
+  pointer-events: auto !important;
+}
+#zoom-sdk-root .react-draggable .zmwebsdk-MuiPaper-rounded {
+  border-radius: 0 !important;
+}
+/* Hide minimize/maximize/close window-chrome controls */
+#zoom-sdk-root [aria-label="minimize"],
+#zoom-sdk-root [aria-label="maximize"],
+#zoom-sdk-root [aria-label="popout"],
+#zoom-sdk-root .zmwebsdk-MuiIconButton-root[title="Minimize"],
+#zoom-sdk-root .zmwebsdk-MuiIconButton-root[title="Maximize"] {
+  display: none !important;
+}
+/* Make sure Zoom canvas/video fills the SDK div */
+#zoom-sdk-root canvas,
+#zoom-sdk-root video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}

@@ -3,19 +3,25 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { Textarea } from '../components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { GraduationCap, Mail, Lock, User, Phone, MapPin, BookOpen, ArrowLeft, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
+import { Mail, Lock, User, Phone, BookOpen, Calendar, Clock, MessageSquare, Loader2, Sparkles } from 'lucide-react';
 
 import { API, getApiError } from '../utils/api';
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
 const Login = () => {
   const navigate = useNavigate();
-  const [mode, setMode] = useState('login'); // login, register, otp, verify-account
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ email: '', password: '', name: '', phone: '', institute: '', goal: '', preferred_time_slot: '', state: '', city: '', country: '', grade: '' });
-  const [otp, setOtp] = useState('');
-  const [verifyEmail, setVerifyEmail] = useState('');
+  const [form, setForm] = useState({ email: '', password: '' });
+
+  const [demoOpen, setDemoOpen] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [demo, setDemo] = useState({
+    name: '', email: '', phone: '', age: '', institute: '',
+    preferred_date: '', preferred_time_slot: '', message: ''
+  });
 
   const redirectByRole = (role) => {
     const routes = { admin: '/admin-dashboard', teacher: '/teacher-dashboard', student: '/student-dashboard', counsellor: '/counsellor-dashboard' };
@@ -31,26 +37,8 @@ const Login = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.email, password: form.password })
       });
-      let data;
-      try {
-        data = await res.json();
-      } catch {
-        if (res.status === 401) throw new Error('Invalid email or password');
-        if (res.status === 403) throw new Error('Account suspended or not verified');
-        if (res.status === 429) throw new Error('Too many login attempts. Please wait and try again.');
-        throw new Error(`Login failed. Please try again.`);
-      }
-      if (!res.ok) {
-        throw new Error(data.detail || 'Invalid email or password');
-      }
-
-      if (data.needs_verification) {
-        setVerifyEmail(data.email);
-        setMode('verify-account');
-        toast.info('Account not verified. Enter OTP.');
-        return;
-      }
-
+      if (!res.ok) throw new Error(await getApiError(res));
+      const data = await res.json();
       localStorage.setItem('token', data.session_token);
       localStorage.setItem('user', JSON.stringify(data.user));
       toast.success(`Welcome back, ${data.user.name}!`);
@@ -69,20 +57,6 @@ const Login = () => {
     }
     setLoading(true);
 
-    // Load GIS script on demand
-    const loadAndInit = () => {
-      if (window.google?.accounts?.id) {
-        initGoogle();
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://accounts.google.com/gsi/client';
-      script.async = true;
-      script.onload = initGoogle;
-      script.onerror = () => { toast.error('Failed to load Google Sign-In'); setLoading(false); };
-      document.head.appendChild(script);
-    };
-
     const initGoogle = () => {
       try {
         window.google.accounts.id.initialize({
@@ -94,9 +68,8 @@ const Login = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ credential: response.credential })
               });
-              let data;
-              try { data = await res.json(); } catch { throw new Error('Google login failed. Please try again.'); }
-              if (!res.ok) throw new Error(data.detail || 'Google login failed');
+              if (!res.ok) throw new Error(await getApiError(res));
+              const data = await res.json();
               localStorage.setItem('token', data.session_token);
               localStorage.setItem('user', JSON.stringify(data.user));
               toast.success(`Welcome, ${data.user.name}!`);
@@ -110,7 +83,6 @@ const Login = () => {
         });
         window.google.accounts.id.prompt((notification) => {
           if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-            // Fallback: render button in a hidden container, then click it
             const container = document.getElementById('google-btn-container');
             if (container) {
               container.innerHTML = '';
@@ -123,108 +95,58 @@ const Login = () => {
             setLoading(false);
           }
         });
-      } catch (err) {
+      } catch {
         toast.error('Google Sign-In initialization failed');
         setLoading(false);
       }
     };
 
-    loadAndInit();
+    if (window.google?.accounts?.id) {
+      initGoogle();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = initGoogle;
+    script.onerror = () => { toast.error('Failed to load Google Sign-In'); setLoading(false); };
+    document.head.appendChild(script);
   }, [navigate]);
 
-  const handleSendOtp = async () => {
-    if (!form.email) { toast.error('Enter your email first'); return; }
-    const domain = form.email.toLowerCase().split('@').pop();
-    if (!['gmail.com', 'kaimeralearning.com'].includes(domain)) { toast.error('Only @gmail.com and @kaimeralearning.com addresses are allowed'); return; }
-    setLoading(true);
-    try {
-      const res = await fetch(`${API}/auth/send-otp`, {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.email.trim().toLowerCase() })
-      });
-      let data;
-      try { data = await res.json(); } catch { throw new Error('Failed to send OTP. Please try again.'); }
-      if (!res.ok) throw new Error(data.detail || 'Failed to send OTP');
-      toast.success(data.message);
-      setMode('otp');
-    } catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
-  };
-
-  const handleVerifyOtp = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API}/auth/verify-otp`, {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.email, otp })
-      });
-      let data;
-      try { data = await res.json(); } catch { throw new Error('Verification failed. Please try again.'); }
-      if (!res.ok) throw new Error(data.detail || 'OTP verification failed');
-      toast.success('Email verified! Complete your registration.');
-      setMode('register-details');
-    } catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
-  };
-
-  const handleRegister = async (e) => {
+  const handleBookDemo = async (e) => {
     e.preventDefault();
-    if (!form.name || !form.password) { toast.error('Name and password are required'); return; }
-    if (form.password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
-    setLoading(true);
+    if (!demo.name || !demo.email || !demo.phone || !demo.preferred_date || !demo.preferred_time_slot) {
+      toast.error('Please fill name, email, phone, preferred date and time');
+      return;
+    }
+    setDemoLoading(true);
     try {
-      const res = await fetch(`${API}/auth/register`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, role: 'student' })
+      const payload = {
+        name: demo.name.trim(),
+        email: demo.email.trim().toLowerCase(),
+        phone: demo.phone.trim(),
+        age: demo.age ? parseInt(demo.age, 10) : null,
+        institute: demo.institute || null,
+        preferred_date: demo.preferred_date,
+        preferred_time_slot: demo.preferred_time_slot,
+        message: demo.message || null
+      };
+      const res = await fetch(`${API}/demo/request`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
-      let data;
-      try { data = await res.json(); } catch { throw new Error('Registration failed. Please try again.'); }
-      if (!res.ok) throw new Error(data.detail || 'Registration failed');
-
-      localStorage.setItem('token', data.session_token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      toast.success(data.message || 'Account created!');
-      redirectByRole(data.user.role);
-    } catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
+      if (!res.ok) throw new Error(await getApiError(res));
+      toast.success('Demo booked! Our team will contact you shortly.');
+      setDemoOpen(false);
+      setDemo({ name: '', email: '', phone: '', age: '', institute: '', preferred_date: '', preferred_time_slot: '', message: '' });
+    } catch (err) {
+      toast.error(err.message || 'Failed to book demo. Please try again.');
+    } finally {
+      setDemoLoading(false);
+    }
   };
 
-  const handleVerifyAccount = async () => {
-    if (!otp) { toast.error('Enter OTP'); return; }
-    setLoading(true);
-    try {
-      const res = await fetch(`${API}/auth/verify-account`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: verifyEmail, otp })
-      });
-      let data;
-      try { data = await res.json(); } catch { throw new Error('Verification failed. Please try again.'); }
-      if (!res.ok) throw new Error(data.detail || 'Verification failed');
-
-      localStorage.setItem('token', data.session_token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      toast.success(data.message || 'Account verified!');
-      redirectByRole(data.user.role);
-    } catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
-  };
-
-  const handleResendVerification = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API}/auth/resend-verification-otp`, {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: verifyEmail })
-      });
-      let data;
-      try { data = await res.json(); } catch { throw new Error('Failed to resend. Please try again.'); }
-      if (!res.ok) throw new Error(data.detail || 'Failed');
-      toast.success(data.message);
-    } catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
-  };
+  const today = new Date().toISOString().split('T')[0];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-sky-900 flex items-center justify-center p-4">
@@ -232,11 +154,11 @@ const Login = () => {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3 mb-3">
-            <img 
-    src="https://static.wixstatic.com/media/3427af_c1564f2d04d34070be92706f5c62fe6c~mv2.png/v1/fill/w_186,h_194,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Kaimera%20final%20logo.png" 
-    alt="Logo" 
-    className="w-14 h-14 object-contain" 
-  />
+            <img
+              src="https://static.wixstatic.com/media/3427af_c1564f2d04d34070be92706f5c62fe6c~mv2.png/v1/fill/w_186,h_194,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Kaimera%20final%20logo.png"
+              alt="Logo"
+              className="w-14 h-14 object-contain"
+            />
             <h1 className="text-3xl font-black text-white tracking-tight">Kaimera Learning</h1>
           </div>
           <p className="text-sky-300 text-sm font-medium">Empowering the Next Generation of Speakers</p>
@@ -244,166 +166,145 @@ const Login = () => {
 
         <div className="bg-white/10 backdrop-blur-xl rounded-3xl border border-white/20 p-8 shadow-2xl">
 
-          {/* ── Login Mode ── */}
-          {mode === 'login' && (
-            <>
-              <h2 className="text-xl font-bold text-white mb-6 text-center" data-testid="login-heading">Welcome Back</h2>
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                  <Label className="text-white/80 text-xs mb-1.5 block">Email</Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} type="email" placeholder="your@gmail.com" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="login-email" />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-white/80 text-xs mb-1.5 block">Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <Input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} type="password" placeholder="Enter password" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="login-password" />
-                  </div>
-                </div>
-                <Button type="submit" disabled={loading} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-xl font-bold h-11" data-testid="login-submit">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sign In'}
-                </Button>
-              </form>
+          {/* Book a Free Demo — primary CTA for new students */}
+          <div className="mb-6 bg-gradient-to-r from-emerald-500/20 to-sky-500/20 border border-emerald-400/30 rounded-2xl p-4 text-center">
+            <p className="text-emerald-200 text-xs font-semibold mb-2 flex items-center justify-center gap-1">
+              <Sparkles className="w-3.5 h-3.5" /> NEW HERE?
+            </p>
+            <Button
+              onClick={() => setDemoOpen(true)}
+              className="w-full bg-gradient-to-r from-emerald-500 to-sky-500 hover:from-emerald-600 hover:to-sky-600 text-white rounded-xl font-bold h-11"
+              data-testid="open-book-demo-btn"
+            >
+              Book a Free Demo
+            </Button>
+            <p className="text-white/60 text-[11px] mt-2">No account needed — we'll reach out!</p>
+          </div>
 
-              {/* Google Login */}
-              <div className="my-5 flex items-center gap-3">
-                <div className="flex-1 h-px bg-white/20" />
-                <span className="text-white/50 text-xs">or</span>
-                <div className="flex-1 h-px bg-white/20" />
+          <div className="my-5 flex items-center gap-3">
+            <div className="flex-1 h-px bg-white/20" />
+            <span className="text-white/50 text-xs">existing user</span>
+            <div className="flex-1 h-px bg-white/20" />
+          </div>
+
+          <h2 className="text-lg font-bold text-white mb-4 text-center" data-testid="login-heading">Sign In</h2>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <Label className="text-white/80 text-xs mb-1.5 block">Email</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} type="email" placeholder="your@gmail.com" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="login-email" />
               </div>
-              <div id="google-btn-container" style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }} />
-              {GOOGLE_CLIENT_ID && (
-                <Button type="button" onClick={handleGoogleLogin} disabled={loading} variant="outline"
-                  className="w-full rounded-xl h-11 bg-white/5 border-white/20 text-white hover:bg-white/10 font-semibold" data-testid="google-login-btn">
-                  <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                  Continue with Google
-                </Button>
-              )}
-
-              <p className="text-center text-white/60 text-xs mt-6">
-                New student?{' '}
-                <button onClick={() => setMode('register')} className="text-sky-400 hover:text-sky-300 font-semibold" data-testid="register-link">Create Account</button>
-              </p>
-            </>
-          )}
-
-          {/* ── Register Step 1: Email + OTP ── */}
-          {mode === 'register' && (
-            <>
-              <button onClick={() => setMode('login')} className="text-white/60 hover:text-white text-xs flex items-center gap-1 mb-4"><ArrowLeft className="w-3 h-3" /> Back to Login</button>
-              <h2 className="text-xl font-bold text-white mb-2 text-center">Create Student Account</h2>
-              <p className="text-white/50 text-xs text-center mb-6">Step 1: Verify your email</p>
-              <div className="space-y-4">
-                <div>
-                  <Label className="text-white/80 text-xs mb-1.5 block">Email (@gmail.com only)</Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <Input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} type="email" placeholder="your@gmail.com" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="register-email" />
-                  </div>
-                </div>
-                <Button onClick={handleSendOtp} disabled={loading} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-xl font-bold h-11" data-testid="send-otp-btn">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4 mr-2" /> Send Verification OTP</>}
-                </Button>
+            </div>
+            <div>
+              <Label className="text-white/80 text-xs mb-1.5 block">Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} type="password" placeholder="Enter password" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="login-password" />
               </div>
-            </>
-          )}
+            </div>
+            <Button type="submit" disabled={loading} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-xl font-bold h-11" data-testid="login-submit">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sign In'}
+            </Button>
+          </form>
 
-          {/* ── Register Step 2: Enter OTP ── */}
-          {mode === 'otp' && (
-            <>
-              <button onClick={() => setMode('register')} className="text-white/60 hover:text-white text-xs flex items-center gap-1 mb-4"><ArrowLeft className="w-3 h-3" /> Back</button>
-              <h2 className="text-xl font-bold text-white mb-2 text-center">Verify Email</h2>
-              <p className="text-white/50 text-xs text-center mb-6">OTP sent to {form.email}</p>
-              <div className="space-y-4">
-                <Input value={otp} onChange={e => setOtp(e.target.value)} placeholder="Enter 6-digit OTP" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl text-center text-2xl tracking-[0.5em] font-bold" maxLength={6} data-testid="otp-input" />
-                <Button onClick={handleVerifyOtp} disabled={loading} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold h-11" data-testid="verify-otp-btn">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ArrowRight className="w-4 h-4 mr-2" /> Verify & Continue</>}
-                </Button>
-              </div>
-            </>
+          {/* Google Login */}
+          <div className="my-5 flex items-center gap-3">
+            <div className="flex-1 h-px bg-white/20" />
+            <span className="text-white/50 text-xs">or</span>
+            <div className="flex-1 h-px bg-white/20" />
+          </div>
+          <div id="google-btn-container" style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }} />
+          {GOOGLE_CLIENT_ID && (
+            <Button type="button" onClick={handleGoogleLogin} disabled={loading} variant="outline"
+              className="w-full rounded-xl h-11 bg-white/5 border-white/20 text-white hover:bg-white/10 font-semibold" data-testid="google-login-btn">
+              <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+              Continue with Google
+            </Button>
           )}
-
-          {/* ── Register Step 3: Profile Details ── */}
-          {mode === 'register-details' && (
-            <>
-              <button onClick={() => setMode('register')} className="text-white/60 hover:text-white text-xs flex items-center gap-1 mb-4"><ArrowLeft className="w-3 h-3" /> Back</button>
-              <h2 className="text-xl font-bold text-white mb-2 text-center">Complete Your Profile</h2>
-              <p className="text-white/50 text-xs text-center mb-6">{form.email} (verified)</p>
-              <form onSubmit={handleRegister} className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
-                <div>
-                  <Label className="text-white/80 text-xs mb-1 block">Full Name *</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Full name" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="register-name" />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-white/80 text-xs mb-1 block">Password *</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <Input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} type="password" placeholder="Min 6 characters" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" required data-testid="register-password" />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-white/80 text-xs mb-1 block">Phone</Label>
-                  <div className="relative">
-                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="Phone number" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="register-phone" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label className="text-white/80 text-xs mb-1 block">City</Label>
-                    <Input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} placeholder="City" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl text-sm" />
-                  </div>
-                  <div>
-                    <Label className="text-white/80 text-xs mb-1 block">State</Label>
-                    <Input value={form.state} onChange={e => setForm({ ...form, state: e.target.value })} placeholder="State" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl text-sm" />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-white/80 text-xs mb-1 block">Institute</Label>
-                  <div className="relative">
-                    <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <Input value={form.institute} onChange={e => setForm({ ...form, institute: e.target.value })} placeholder="School/College" className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-white/80 text-xs mb-1 block">Grade/Year</Label>
-                  <Input value={form.grade} onChange={e => setForm({ ...form, grade: e.target.value })} placeholder="e.g. Grade 10, Year 2" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl" />
-                </div>
-                <Button type="submit" disabled={loading} className="w-full bg-sky-500 hover:bg-sky-600 text-white rounded-xl font-bold h-11 mt-2" data-testid="register-submit">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Account'}
-                </Button>
-              </form>
-            </>
-          )}
-
-          {/* ── Account Verification (for manually created users) ── */}
-          {mode === 'verify-account' && (
-            <>
-              <button onClick={() => { setMode('login'); setOtp(''); }} className="text-white/60 hover:text-white text-xs flex items-center gap-1 mb-4"><ArrowLeft className="w-3 h-3" /> Back to Login</button>
-              <h2 className="text-xl font-bold text-white mb-2 text-center">Verify Your Account</h2>
-              <p className="text-white/50 text-xs text-center mb-6">Enter the OTP sent to <span className="text-sky-400">{verifyEmail}</span></p>
-              <div className="space-y-4">
-                <Input value={otp} onChange={e => setOtp(e.target.value)} placeholder="Enter 6-digit OTP" className="bg-white/10 border-white/20 text-white placeholder:text-white/40 rounded-xl text-center text-2xl tracking-[0.5em] font-bold" maxLength={6} data-testid="verify-account-otp" />
-                <Button onClick={handleVerifyAccount} disabled={loading} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold h-11" data-testid="verify-account-btn">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4 mr-2" /> Verify & Sign In</>}
-                </Button>
-                <Button onClick={handleResendVerification} variant="ghost" disabled={loading} className="w-full text-white/60 hover:text-white text-xs" data-testid="resend-otp-btn">
-                  Resend OTP
-                </Button>
-              </div>
-            </>
-          )}
-
         </div>
 
         <p className="text-center text-white/30 text-xs mt-6">Kaimera Learning &copy; {new Date().getFullYear()}</p>
       </div>
+
+      {/* Book a Free Demo Dialog */}
+      <Dialog open={demoOpen} onOpenChange={setDemoOpen}>
+        <DialogContent className="max-w-md bg-slate-900 text-white border-white/10 max-h-[90vh] overflow-y-auto" data-testid="book-demo-dialog">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-emerald-400" /> Book Your Free Demo
+            </DialogTitle>
+            <DialogDescription className="text-white/60 text-sm">
+              Fill the form — our counsellor will assign a teacher and contact you on phone/email shortly.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleBookDemo} className="space-y-3 mt-2">
+            <div>
+              <Label className="text-white/80 text-xs mb-1 block">Full Name *</Label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input value={demo.name} onChange={e => setDemo({ ...demo, name: e.target.value })} placeholder="Student's name" required className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="demo-name" />
+              </div>
+            </div>
+            <div>
+              <Label className="text-white/80 text-xs mb-1 block">Email *</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input value={demo.email} onChange={e => setDemo({ ...demo, email: e.target.value })} type="email" placeholder="email@gmail.com" required className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="demo-email" />
+              </div>
+            </div>
+            <div>
+              <Label className="text-white/80 text-xs mb-1 block">Phone (with country code) *</Label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input value={demo.phone} onChange={e => setDemo({ ...demo, phone: e.target.value })} placeholder="+91 9XXXXXXXXX" required className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="demo-phone" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-white/80 text-xs mb-1 block">Age</Label>
+                <Input type="number" min="3" max="80" value={demo.age} onChange={e => setDemo({ ...demo, age: e.target.value })} placeholder="14" className="bg-white/5 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="demo-age" />
+              </div>
+              <div>
+                <Label className="text-white/80 text-xs mb-1 block">School / College</Label>
+                <div className="relative">
+                  <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Input value={demo.institute} onChange={e => setDemo({ ...demo, institute: e.target.value })} placeholder="Institute" className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="demo-institute" />
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-white/80 text-xs mb-1 block">Preferred Date *</Label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Input type="date" min={today} value={demo.preferred_date} onChange={e => setDemo({ ...demo, preferred_date: e.target.value })} required className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="demo-date" />
+                </div>
+              </div>
+              <div>
+                <Label className="text-white/80 text-xs mb-1 block">Preferred Time *</Label>
+                <div className="relative">
+                  <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Input type="time" value={demo.preferred_time_slot} onChange={e => setDemo({ ...demo, preferred_time_slot: e.target.value })} required className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="demo-time" />
+                </div>
+              </div>
+            </div>
+            <div>
+              <Label className="text-white/80 text-xs mb-1 block">Message (optional)</Label>
+              <div className="relative">
+                <MessageSquare className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                <Textarea value={demo.message} onChange={e => setDemo({ ...demo, message: e.target.value })} placeholder="What does the student want to learn?" rows={3} className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/40 rounded-xl" data-testid="demo-message" />
+              </div>
+            </div>
+            <Button type="submit" disabled={demoLoading} className="w-full bg-gradient-to-r from-emerald-500 to-sky-500 hover:from-emerald-600 hover:to-sky-600 text-white rounded-xl font-bold h-11 mt-2" data-testid="submit-book-demo">
+              {demoLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Sparkles className="w-4 h-4 mr-2" /> Submit & Get a Call</>}
+            </Button>
+            <p className="text-white/40 text-[11px] text-center">By submitting, you agree to be contacted by our team.</p>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
