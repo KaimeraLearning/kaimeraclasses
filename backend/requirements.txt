@@ -5,6 +5,8 @@ annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio>=4.8,<5
 attrs>=23,<25
+anyio>=4.8.0,<5
+attrs==26.1.0
 bcrypt==4.1.3
 black==24.10.0
 boto3==1.42.84
@@ -13,6 +15,7 @@ certifi>=2024,<2026
 cffi==2.0.0
 charset-normalizer==3.4.7
 click>=8.0,<9
+click>=8.0.0,<9
 cryptography==46.0.6
 defusedxml==0.7.1
 distro==1.9.0
