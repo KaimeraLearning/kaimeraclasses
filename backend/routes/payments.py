@@ -378,17 +378,34 @@ RECHARGE_PACKAGES = {
 
 @router.post("/payments/recharge")
 async def create_recharge_order(request: Request, authorization: Optional[str] = Header(None)):
-    """Create Razorpay order for credit recharge"""
+    """Create Razorpay order for credit recharge.
+    Accepts EITHER:
+      - package_id: one of RECHARGE_PACKAGES keys (uses fixed credits/amount mapping), OR
+      - custom_amount: any positive integer rupees (1:1 credits-to-rupee).
+    """
     user = await get_current_user(request, authorization)
 
     body = await request.json()
     package_id = body.get("package_id")
+    custom_amount = body.get("custom_amount") or body.get("amount")
 
-    if package_id not in RECHARGE_PACKAGES:
-        raise HTTPException(status_code=400, detail="Invalid package")
+    if package_id and package_id in RECHARGE_PACKAGES:
+        pkg = RECHARGE_PACKAGES[package_id]
+        amount = float(pkg["amount"])
+        credits = int(pkg["credits"])
+    else:
+        # Custom amount path — package_id may be 'custom' or anything; we use custom_amount.
+        try:
+            amount = float(custom_amount) if custom_amount is not None else 0.0
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid amount")
+        if amount < 1:
+            raise HTTPException(status_code=400, detail="Minimum recharge amount is ₹1")
+        if amount > 1_000_000:
+            raise HTTPException(status_code=400, detail="Maximum recharge is ₹10,00,000 per transaction")
+        credits = int(amount)  # 1:1 credits per rupee
 
-    pkg = RECHARGE_PACKAGES[package_id]
-    amount_paise = int(pkg["amount"] * 100)
+    amount_paise = int(amount * 100)
     receipt_id = f"rch_{uuid.uuid4().hex[:12]}"
 
     try:
@@ -401,7 +418,7 @@ async def create_recharge_order(request: Request, authorization: Optional[str] =
                 "type": "recharge",
                 "student_id": user.user_id,
                 "student_name": user.name,
-                "credits": pkg["credits"]
+                "credits": credits
             }
         })
     except Exception as e:
@@ -415,8 +432,8 @@ async def create_recharge_order(request: Request, authorization: Optional[str] =
         "student_id": user.user_id,
         "student_name": user.name,
         "student_email": user.email,
-        "amount": pkg["amount"],
-        "credits": pkg["credits"],
+        "amount": amount,
+        "credits": credits,
         "amount_paise": amount_paise,
         "currency": "INR",
         "receipt_id": receipt_id,
@@ -475,6 +492,7 @@ async def verify_recharge(request: Request, authorization: Optional[str] = Heade
 
     if result.modified_count > 0:
         credits_to_add = payment.get("credits", 0)
+        recharge_payment_id = payment.get("payment_id")
         await db.users.update_one(
             {"user_id": user.user_id},
             {"$inc": {"credits": credits_to_add}}
@@ -486,7 +504,7 @@ async def verify_recharge(request: Request, authorization: Optional[str] = Heade
             "type": "recharge",
             "amount": credits_to_add,
             "description": f"Recharged {credits_to_add} credits via Razorpay",
-            "payment_id": payment_id,
+            "payment_id": recharge_payment_id,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
         # Mirror: platform received the rupee inflow via Razorpay
@@ -494,7 +512,7 @@ async def verify_recharge(request: Request, authorization: Optional[str] = Heade
             amount=credits_to_add,
             description=f"Wallet recharge received via Razorpay from {user.name} (+{credits_to_add} credits)",
             txn_type="recharge_received",
-            payment_id=payment_id,
+            payment_id=recharge_payment_id,
             counterparty_user_id=user.user_id
         )
 
