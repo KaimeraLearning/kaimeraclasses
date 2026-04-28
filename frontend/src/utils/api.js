@@ -1,5 +1,12 @@
-/** API base path — always relative so it works on any deployed domain */
-export const API = "/api";
+/**
+ * API base path.
+ * - If REACT_APP_BACKEND_URL is set at build time, requests go to that absolute backend domain
+ *   (e.g. https://api.kaimeraworkspace.com/api/...).
+ * - Otherwise falls back to a relative `/api` path (works when frontend and backend share a host
+ *   behind a reverse proxy / ingress).
+ */
+const _BASE = (process.env.REACT_APP_BACKEND_URL || '').replace(/\/+$/, '');
+export const API = _BASE ? `${_BASE}/api` : '/api';
 
 /**
  * Parse API error response and return a user-friendly error message.
