@@ -84,6 +84,13 @@ async def health_config():
         v = os.environ.get(key, '')
         return {"set": bool(v), "length": len(v) if v else 0}
 
+    def status_either(*keys):
+        for k in keys:
+            v = os.environ.get(k, '')
+            if v:
+                return {"set": True, "length": len(v), "key_used": k}
+        return {"set": False, "length": 0, "key_used": None}
+
     # Test Gmail SMTP reachability (port 587 outbound)
     smtp_reachable = False
     smtp_error = None
@@ -101,8 +108,8 @@ async def health_config():
         "env": {
             "MONGO_URL": status("MONGO_URL"),
             "DB_NAME": status("DB_NAME"),
-            "SENDER_EMAIL": {**status("SENDER_EMAIL"), "value": os.environ.get("SENDER_EMAIL", "")},
-            "GMAIL_APP_PASSWORD": status("GMAIL_APP_PASSWORD"),
+            "SENDER_EMAIL": {**status_either("SENDER_EMAIL", "EMAIL_USER"), "value": os.environ.get("SENDER_EMAIL") or os.environ.get("EMAIL_USER", "")},
+            "GMAIL_APP_PASSWORD": status_either("GMAIL_APP_PASSWORD", "EMAIL_PASS"),
             "ZOOM_ACCOUNT_ID": status("ZOOM_ACCOUNT_ID"),
             "ZOOM_CLIENT_ID": status("ZOOM_CLIENT_ID"),
             "ZOOM_CLIENT_SECRET": status("ZOOM_CLIENT_SECRET"),
