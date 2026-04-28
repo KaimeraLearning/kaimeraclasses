@@ -52,10 +52,14 @@ const BrowseClasses = () => {
   const handlePurchaseCredits = async (pkg) => {
     setIsProcessing(true);
     try {
+      const isCustom = !pkg.id || pkg.id === 'custom';
+      const payload = isCustom
+        ? { custom_amount: pkg.price }
+        : { package_id: pkg.id };
       const res = await fetch(`${API}/payments/recharge`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ package_id: pkg.id })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
