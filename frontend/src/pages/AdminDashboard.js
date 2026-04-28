@@ -9,7 +9,8 @@ import { toast } from 'sonner';
 import {
   GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap,
   History, Search, Shield, Award, Filter, BookOpen, KeyRound, Users, Trash2, Plus,
-  Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil, IndianRupee, Download
+  Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil, IndianRupee, Download,
+  Mail, CheckCircle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { getApiError, API } from '../utils/api';
@@ -82,6 +83,128 @@ const DrawerWalletHistory = ({ transactions }) => {
     </div>
   );
 };
+
+// Live-editable Email Config — admin can update SMTP without redeploy.
+const EmailConfigPanel = () => {
+  const [config, setConfig] = useState(null);
+  const [senderEmail, setSenderEmail] = useState('');
+  const [appPassword, setAppPassword] = useState('');
+  const [testTo, setTestTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  const fetchConfig = async () => {
+    try {
+      const r = await fetch(`${API}/admin/email-config`, { credentials: 'include' });
+      if (r.ok) {
+        const d = await r.json();
+        setConfig(d);
+        if (!senderEmail) setSenderEmail(d.active_sender_email || '');
+        if (!testTo) setTestTo(d.active_sender_email || '');
+      }
+    } catch {}
+  };
+
+  useEffect(() => { fetchConfig(); }, []);
+
+  const save = async () => {
+    if (!senderEmail && !appPassword) {
+      toast.error('Enter at least sender email or app password'); return;
+    }
+    setBusy(true);
+    try {
+      const r = await fetch(`${API}/admin/email-config`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sender_email: senderEmail, app_password: appPassword })
+      });
+      if (!r.ok) throw new Error(await getApiError(r));
+      toast.success('Email config saved');
+      setAppPassword('');
+      fetchConfig();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const sendTest = async () => {
+    if (!testTo) { toast.error('Enter a recipient'); return; }
+    setBusy(true); setTestResult(null);
+    try {
+      const r = await fetch(`${API}/admin/email-test`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: testTo })
+      });
+      const d = await r.json();
+      setTestResult(d);
+      if (d.ok) toast.success(d.message); else toast.error(d.error || 'Test failed');
+    } catch (e) { toast.error(e.message); setTestResult({ ok: false, error: e.message }); }
+    setBusy(false);
+  };
+
+  const clearOverride = async () => {
+    if (!window.confirm('Remove DB override and fall back to .env values?')) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`${API}/admin/email-config`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear_db: true })
+      });
+      if (!r.ok) throw new Error(await getApiError(r));
+      toast.success('DB override cleared');
+      setAppPassword('');
+      fetchConfig();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="bg-white rounded-3xl border-2 border-slate-100 p-6" data-testid="email-config-panel">
+      <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+        <Mail className="w-5 h-5 text-rose-500" /> Email (Gmail SMTP) Config
+      </h3>
+      {config && (
+        <div className="bg-slate-50 rounded-xl p-3 text-xs space-y-1 mb-3" data-testid="email-config-status">
+          <p>Active sender: <strong className="text-slate-800">{config.active_sender_email || '(unset)'}</strong></p>
+          <p>Password: {config.password_set ? <span className="text-emerald-700 font-mono">{config.password_masked} ({config.password_length} chars)</span> : <span className="text-red-600">NOT SET</span>}</p>
+          <p>Source: <span className={config.source === 'database' ? 'text-violet-700' : 'text-slate-600'}>{config.source}</span></p>
+        </div>
+      )}
+      <div className="space-y-3">
+        <div>
+          <Label>Sender Email</Label>
+          <Input value={senderEmail} onChange={e => setSenderEmail(e.target.value)} placeholder="info@kaimeralearning.com" className="rounded-xl" data-testid="email-config-sender" />
+        </div>
+        <div>
+          <Label>Gmail App Password (16 chars, no spaces)</Label>
+          <Input type="password" value={appPassword} onChange={e => setAppPassword(e.target.value)} placeholder="Leave empty to keep current" className="rounded-xl font-mono" data-testid="email-config-password" />
+          <p className="text-[11px] text-slate-400 mt-1">Generated at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="underline text-sky-600">myaccount.google.com/apppasswords</a> — spaces auto-removed when saved.</p>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={save} disabled={busy} className="bg-rose-500 hover:bg-rose-600 text-white rounded-full flex-1" data-testid="email-config-save"><CheckCircle className="w-4 h-4 mr-2" /> Save</Button>
+          {config?.source === 'database' && (
+            <Button onClick={clearOverride} disabled={busy} variant="outline" className="rounded-full text-xs" data-testid="email-config-clear">Use .env</Button>
+          )}
+        </div>
+        <div className="border-t border-slate-100 pt-3 space-y-2">
+          <Label>Send Test Email To</Label>
+          <div className="flex gap-2">
+            <Input value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="your@email.com" className="rounded-xl flex-1" data-testid="email-test-to" />
+            <Button onClick={sendTest} disabled={busy} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full" data-testid="email-test-btn"><Mail className="w-4 h-4 mr-2" /> Test</Button>
+          </div>
+          {testResult && (
+            <div className={`rounded-xl p-3 text-sm ${testResult.ok ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'}`} data-testid="email-test-result">
+              <p className="font-semibold">{testResult.ok ? '✓ Sent successfully' : '✗ Failed'}</p>
+              <p className="text-xs mt-1 break-words">{testResult.message || testResult.error}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 
 // Admin proofs panel: groups by teacher+student, supports date filter, side-by-side compare with previous proof.
 const AdminProofsPanel = ({ proofs, onApprove }) => {
@@ -1001,6 +1124,7 @@ const AdminDashboard = () => {
               {/* ── Credentials & Access ── */}
               <TabsContent value="credentials">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <EmailConfigPanel />
                   <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
                     <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><KeyRound className="w-5 h-5 text-amber-500" /> Reset Password</h3>
                     <div className="space-y-3">

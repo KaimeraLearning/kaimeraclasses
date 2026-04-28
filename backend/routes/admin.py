@@ -16,7 +16,7 @@ from models.schemas import (
     LearningPlan
 )
 from services.auth import get_current_user, hash_password
-from services.helpers import generate_teacher_code, generate_student_code, send_email, generate_otp, insert_admin_mirror_txn, notify_event, generate_temp_password
+from services.helpers import generate_teacher_code, generate_student_code, send_email, generate_otp, insert_admin_mirror_txn, notify_event, generate_temp_password, invalidate_email_config_cache, _get_email_config
 
 router = APIRouter()
 
@@ -1291,3 +1291,83 @@ async def admin_update_bank_details(user_id: str, request: Request, authorizatio
     if updates:
         await db.users.update_one({"user_id": user_id}, {"$set": updates})
     return {"message": "Bank details updated", "updated_fields": list(updates.keys())}
+
+
+# ─── Email Config (live editable from Admin UI, no restart needed) ───────────
+@router.get("/admin/email-config")
+async def get_email_config(request: Request, authorization: Optional[str] = Header(None)):
+    """Returns the active email config. Password is masked."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    cfg = await _get_email_config()
+    pwd = cfg.get("password") or ""
+    db_doc = await db.system_config.find_one({"config_id": "email"}, {"_id": 0})
+    return {
+        "active_sender_email": cfg.get("email"),
+        "password_set": bool(pwd),
+        "password_length": len(pwd),
+        "password_masked": (pwd[:2] + "•" * max(0, len(pwd) - 4) + pwd[-2:]) if len(pwd) > 4 else "",
+        "source": "database" if db_doc else "env",
+        "db_override": {
+            "sender_email": (db_doc or {}).get("sender_email"),
+            "has_app_password": bool((db_doc or {}).get("app_password")),
+            "updated_at": (db_doc or {}).get("updated_at"),
+            "updated_by": (db_doc or {}).get("updated_by"),
+        }
+    }
+
+
+@router.post("/admin/email-config")
+async def update_email_config(request: Request, authorization: Optional[str] = Header(None)):
+    """Update sender email and/or app password. Takes effect within 30s (cache TTL).
+    Pass clear_db=true to remove the DB override and fall back to .env values.
+    """
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    body = await request.json()
+    if body.get("clear_db"):
+        await db.system_config.delete_one({"config_id": "email"})
+        invalidate_email_config_cache()
+        return {"message": "Database override cleared. Falling back to .env values."}
+
+    sender_email = (body.get("sender_email") or "").strip()
+    app_password = (body.get("app_password") or "").replace(" ", "")  # strip whitespace from pasted app passwords
+    if not sender_email and not app_password:
+        raise HTTPException(status_code=400, detail="Provide sender_email and/or app_password")
+    if app_password and len(app_password) < 12:
+        raise HTTPException(status_code=400, detail="App password should be at least 12 chars (Gmail App Passwords are 16)")
+
+    update = {"updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": user.user_id}
+    if sender_email:
+        update["sender_email"] = sender_email
+    if app_password:
+        update["app_password"] = app_password
+    await db.system_config.update_one({"config_id": "email"}, {"$set": {"config_id": "email", **update}}, upsert=True)
+    invalidate_email_config_cache()
+    return {"message": "Email config saved. Test it now to verify.", "saved_fields": [k for k in update if k not in ("updated_at", "updated_by")]}
+
+
+@router.post("/admin/email-test")
+async def test_email_config(request: Request, authorization: Optional[str] = Header(None)):
+    """Send a test email using the current active config. Returns the actual SMTP error (if any) so admin can debug."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    body = await request.json()
+    to = (body.get("to") or user.email or "").strip()
+    if not to:
+        raise HTTPException(status_code=400, detail="Provide a 'to' email address")
+
+    invalidate_email_config_cache()  # always re-read latest config for the test
+    html = f"""<div style='font-family:Arial;padding:24px;background:#f8fafc;border-radius:12px;'>
+        <h2 style='color:#0ea5e9;margin:0 0 8px;'>Kaimera Email Test</h2>
+        <p>If you can read this, your Gmail SMTP config is working correctly. ✅</p>
+        <p style='color:#64748b;font-size:12px;'>Triggered by: {user.email}<br/>At: {datetime.now(timezone.utc).isoformat()}</p>
+    </div>"""
+    result = await send_email(to, "Kaimera Email Test", html)
+    if not result or (isinstance(result, dict) and result.get("error")):
+        err = (result or {}).get("error", "unknown error")
+        return {"ok": False, "error": err, "to": to}
+    return {"ok": True, "message": f"Test email queued for {to}. Check the inbox in a few seconds.", "to": to}
