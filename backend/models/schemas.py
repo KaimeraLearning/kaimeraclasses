@@ -165,7 +165,7 @@ class SystemPricing(BaseModel):
 
 class CreateTeacherAccount(BaseModel):
     email: EmailStr
-    password: str
+    password: Optional[str] = None  # Ignored — backend auto-generates and emails directly
     name: str
 
 
@@ -238,7 +238,7 @@ class ComplaintResolve(BaseModel):
 
 class CreateStudentAccount(BaseModel):
     email: EmailStr
-    password: str
+    password: Optional[str] = None  # Ignored — backend auto-generates and emails directly
     name: str
     institute: Optional[str] = None
     goal: Optional[str] = None
