@@ -14,12 +14,39 @@ from database import db
 logger = logging.getLogger(__name__)
 
 
-def _get_email_config():
-    """Lazy-load Gmail SMTP config"""
-    return {
-        "email": os.environ.get('SENDER_EMAIL', 'info@kaimeralearning.com'),
-        "password": os.environ.get('GMAIL_APP_PASSWORD', '')
+_EMAIL_CONFIG_CACHE = {"value": None, "stamp": 0}
+
+
+async def _get_email_config():
+    """Returns active Gmail SMTP config.
+    Priority: DB-stored (system_config) > .env. Cached for 30s so most calls are sub-ms.
+    Admin can override values from /api/admin/email-config without restarting the backend.
+    """
+    import time
+    now = time.time()
+    if _EMAIL_CONFIG_CACHE["value"] and now - _EMAIL_CONFIG_CACHE["stamp"] < 30:
+        return _EMAIL_CONFIG_CACHE["value"]
+    cfg = {
+        "email": os.environ.get('SENDER_EMAIL') or os.environ.get('EMAIL_USER') or 'info@kaimeralearning.com',
+        "password": os.environ.get('GMAIL_APP_PASSWORD') or os.environ.get('EMAIL_PASS') or ''
     }
+    try:
+        doc = await db.system_config.find_one({"config_id": "email"}, {"_id": 0})
+        if doc:
+            if doc.get("sender_email"):
+                cfg["email"] = doc["sender_email"]
+            if doc.get("app_password"):
+                cfg["password"] = doc["app_password"]
+    except Exception:
+        pass
+    _EMAIL_CONFIG_CACHE["value"] = cfg
+    _EMAIL_CONFIG_CACHE["stamp"] = now
+    return cfg
+
+
+def invalidate_email_config_cache():
+    _EMAIL_CONFIG_CACHE["value"] = None
+    _EMAIL_CONFIG_CACHE["stamp"] = 0
 
 
 # Cache for the primary admin user_id so we don't hit Mongo on every transaction.
@@ -89,7 +116,7 @@ async def generate_student_code():
 async def send_email(to_email: str, subject: str, html_content: str):
     """Send email via Gmail SMTP with TLS. Returns dict on success, dict with error on failure."""
     try:
-        config = _get_email_config()
+        config = await _get_email_config()
         if not config["password"]:
             logger.error("Gmail App Password not configured (GMAIL_APP_PASSWORD env var missing)")
             return {"error": "GMAIL_APP_PASSWORD not configured on server"}
