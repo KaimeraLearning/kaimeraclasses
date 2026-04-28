@@ -469,17 +469,17 @@ const AdminDashboard = () => {
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
-    if (!createForm.name || !createForm.email || !createForm.password) { toast.error('Name, email and password required'); return; }
+    if (!createForm.name || !createForm.email) { toast.error('Name and email required'); return; }
     try {
-      const body = { ...createForm, role: createRole };
+      const body = { ...createForm, role: createRole, password: 'auto' };
       const res = await fetch(`${API}/admin/create-user`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
       if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
-      toast.success(data.message);
-      setCredsResult(data.credentials);
+      toast.success(data.message || 'User created. Credentials emailed to user.');
+      setCredsResult({ created: true });  // show "credentials emailed" banner only — never password
       setCreateForm({ name: '', email: '', password: '', phone: '', institute: '', goal: '', preferred_time_slot: '', state: '', city: '', country: '', grade: '' });
       fetchAll();
     } catch (err) { toast.error(err.message); }
@@ -853,14 +853,9 @@ const AdminDashboard = () => {
                     {credsResult ? (
                       <div className="space-y-4">
                         <div className="bg-emerald-50 rounded-2xl p-6 border-2 border-emerald-200">
-                          <h4 className="text-lg font-bold text-emerald-800 mb-3">Account Created!</h4>
-                          <div className="bg-white rounded-xl p-4 font-mono text-sm space-y-1">
-                            <p><strong>Email:</strong> {credsResult.email}</p>
-                            <p><strong>Password:</strong> {credsResult.password}</p>
-                            {credsResult.code && <p><strong>ID:</strong> {credsResult.code}</p>}
-                          </div>
+                          <h4 className="text-lg font-bold text-emerald-800 mb-3">Account Created — Credentials Emailed</h4>
+                          <p className="text-sm text-emerald-700 mb-3">A secure password has been emailed directly to the user. The admin never sees it.</p>
                           <div className="flex gap-2 mt-4">
-                            <Button onClick={() => { navigator.clipboard.writeText(`Email: ${credsResult.email}\nPassword: ${credsResult.password}${credsResult.code ? `\nID: ${credsResult.code}` : ''}`); toast.success('Copied!'); }} className="bg-emerald-500 text-white rounded-full" data-testid="copy-creds-btn"><Copy className="w-4 h-4 mr-1" /> Copy</Button>
                             <Button onClick={() => setCredsResult(null)} variant="outline" className="rounded-full">Create Another</Button>
                           </div>
                         </div>
@@ -883,7 +878,9 @@ const AdminDashboard = () => {
                         <div className="grid grid-cols-2 gap-3">
                           <div><Label>Name *</Label><Input value={createForm.name} onChange={e => setCreateForm({...createForm, name: e.target.value})} className="rounded-xl" required data-testid="create-name" /></div>
                           <div><Label>Email *</Label><Input type="email" value={createForm.email} onChange={e => setCreateForm({...createForm, email: e.target.value})} className="rounded-xl" required data-testid="create-email" /></div>
-                          <div><Label>Password *</Label><Input value={createForm.password} onChange={e => setCreateForm({...createForm, password: e.target.value})} className="rounded-xl" required data-testid="create-password" /></div>
+                          <div className="col-span-2 bg-sky-50 border border-sky-200 rounded-xl p-3 text-xs text-sky-800" data-testid="auto-password-hint">
+                            🔒 A secure password will be auto-generated and emailed directly to the user. You will not see it.
+                          </div>
                           <div><Label>Phone</Label><Input value={createForm.phone} onChange={e => setCreateForm({...createForm, phone: e.target.value})} className="rounded-xl" data-testid="create-phone" /></div>
                         </div>
                         {/* Student-specific Fields */}

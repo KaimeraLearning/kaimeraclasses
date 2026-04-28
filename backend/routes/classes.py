@@ -8,7 +8,7 @@ from typing import Optional
 from database import db
 from models.schemas import ClassSessionCreate, BookingRequest
 from services.auth import get_current_user
-from services.helpers import insert_admin_mirror_txn
+from services.helpers import insert_admin_mirror_txn, notify_event
 
 router = APIRouter()
 
@@ -478,6 +478,15 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
             "message": f"'{cls['title']}' has started. Join now!",
             "read": False, "related_id": class_id, "created_at": datetime.now(timezone.utc).isoformat()
         })
+        # Email the student that their class has started
+        await notify_event(
+            student.get('email'),
+            f"Class started: {cls['title']}",
+            "Your class has started",
+            f"Teacher <b>{cls.get('teacher_name','')}</b> has just started <b>{cls['title']}</b>. Join now from your dashboard.",
+            cta_label="Join Class",
+            cta_url=f"https://edu.kaimeralearning.com/video-class/{class_id}"
+        )
 
     return {
         "message": "Class started",

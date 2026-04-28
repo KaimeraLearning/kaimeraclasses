@@ -16,7 +16,7 @@ from models.schemas import (
     LearningPlan
 )
 from services.auth import get_current_user, hash_password
-from services.helpers import generate_teacher_code, generate_student_code, send_email, generate_otp, insert_admin_mirror_txn
+from services.helpers import generate_teacher_code, generate_student_code, send_email, generate_otp, insert_admin_mirror_txn, notify_event, generate_temp_password
 
 router = APIRouter()
 
@@ -296,6 +296,26 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         "assigned_days": final_assigned_days
     }
     await db.student_teacher_assignments.insert_one(assignment_doc)
+
+    # Email notifications: student gets "your teacher is X", teacher gets "new class request"
+    plan_label = learning_plan['name'] if learning_plan else 'standard plan'
+    days_label = f"{final_assigned_days} sessions" if final_assigned_days else 'sessions'
+    await notify_event(
+        student.get('email'),
+        f"You've been assigned to {teacher['name']}",
+        f"Welcome to your learning journey, {student.get('name','')}!",
+        f"Our counselor has assigned <b>{teacher['name']}</b> as your teacher for the <b>{plan_label}</b> ({days_label}). You'll receive class invitations soon.",
+        cta_label="Open Dashboard",
+        cta_url="https://edu.kaimeralearning.com/student-dashboard"
+    )
+    await notify_event(
+        teacher.get('email'),
+        f"New Class Request — Student {student['name']}",
+        "You have a new class request",
+        f"<b>{student['name']}</b> has been assigned to you for the <b>{plan_label}</b> ({days_label}). Please review and accept within 24 hours from your teacher dashboard.",
+        cta_label="Review Request",
+        cta_url="https://edu.kaimeralearning.com/teacher-dashboard"
+    )
     return {"message": "Student assigned to teacher. Teacher has 24 hours to approve.", "assignment_id": assignment_id}
 
 
@@ -357,7 +377,9 @@ async def create_teacher_account(teacher_data: CreateTeacherAccount, request: Re
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user_id = f"user_{uuid.uuid4().hex[:12]}"
-    password_hash_val = hash_password(teacher_data.password)
+    # Auto-generate secure password — admin never sees it; sent only to user's email
+    auto_password = generate_temp_password()
+    password_hash_val = hash_password(auto_password)
     teacher_code = await generate_teacher_code()
 
     teacher_doc = {
@@ -370,19 +392,25 @@ async def create_teacher_account(teacher_data: CreateTeacherAccount, request: Re
     }
     await db.users.insert_one(teacher_doc)
 
-    # Send verification OTP
-    otp = await generate_otp(teacher_data.email)
-    html = f"""<div style="font-family: Arial; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 16px;">
-        <h2 style="color: #0ea5e9;">Welcome to Kaimera Learning!</h2>
-        <p>Your teacher account has been created. Please verify your email to activate your account.</p>
-        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
-            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0f172a;">{otp}</span>
-        </div>
-        <p style="color: #94a3b8; font-size: 14px;">This code expires in 10 minutes.</p>
+    # Send credentials directly to teacher (admin never sees password)
+    creds_html = f"""<div style="background:white;border:2px solid #e2e8f0;border-radius:12px;padding:20px;margin:16px 0;">
+        <p style="margin:0 0 8px;color:#475569;font-size:14px;">Login Email:</p>
+        <p style="margin:0 0 16px;font-weight:bold;color:#0f172a;font-size:16px;">{teacher_data.email}</p>
+        <p style="margin:0 0 8px;color:#475569;font-size:14px;">Temporary Password:</p>
+        <p style="margin:0 0 8px;font-family:monospace;background:#f1f5f9;padding:10px;border-radius:6px;font-size:18px;letter-spacing:1px;">{auto_password}</p>
+        <p style="margin:8px 0 0;color:#dc2626;font-size:12px;">Please change this password after your first login.</p>
     </div>"""
-    await send_email(teacher_data.email, "Kaimera Learning - Verify Your Account", html)
+    await notify_event(
+        teacher_data.email,
+        "Welcome to Kaimera Learning — Teacher Account Credentials",
+        "Your Teacher Account is Ready",
+        f"Hi {teacher_data.name}, your teacher account on Kaimera Learning has been created by the admin.",
+        body_html=creds_html,
+        cta_label="Sign In Now",
+        cta_url="https://edu.kaimeralearning.com/login"
+    )
 
-    return {"message": "Teacher account created. Verification OTP sent to their email.", "user_id": user_id, "email": teacher_data.email, "teacher_code": teacher_code}
+    return {"message": "Teacher account created. Credentials emailed directly to the teacher.", "user_id": user_id, "email": teacher_data.email, "teacher_code": teacher_code}
 
 
 @router.post("/admin/create-counsellor")
@@ -397,7 +425,8 @@ async def create_counsellor_account(counsellor_data: CreateTeacherAccount, reque
 
     user_id = f"user_{uuid.uuid4().hex[:12]}"
     counselor_id = f"KLC-{uuid.uuid4().hex[:6].upper()}"
-    password_hash_val = hash_password(counsellor_data.password)
+    auto_password = generate_temp_password()
+    password_hash_val = hash_password(auto_password)
     counsellor_doc = {
         "user_id": user_id, "email": counsellor_data.email, "name": counsellor_data.name,
         "role": "counsellor", "credits": 0.0, "picture": None,
@@ -407,19 +436,24 @@ async def create_counsellor_account(counsellor_data: CreateTeacherAccount, reque
     }
     await db.users.insert_one(counsellor_doc)
 
-    # Send verification OTP
-    otp = await generate_otp(counsellor_data.email)
-    html = f"""<div style="font-family: Arial; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 16px;">
-        <h2 style="color: #0ea5e9;">Welcome to Kaimera Learning!</h2>
-        <p>Your counselor account has been created. Please verify your email to activate your account.</p>
-        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
-            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0f172a;">{otp}</span>
-        </div>
-        <p style="color: #94a3b8; font-size: 14px;">This code expires in 10 minutes.</p>
+    creds_html = f"""<div style="background:white;border:2px solid #e2e8f0;border-radius:12px;padding:20px;margin:16px 0;">
+        <p style="margin:0 0 8px;color:#475569;font-size:14px;">Login Email:</p>
+        <p style="margin:0 0 16px;font-weight:bold;color:#0f172a;font-size:16px;">{counsellor_data.email}</p>
+        <p style="margin:0 0 8px;color:#475569;font-size:14px;">Temporary Password:</p>
+        <p style="margin:0 0 8px;font-family:monospace;background:#f1f5f9;padding:10px;border-radius:6px;font-size:18px;letter-spacing:1px;">{auto_password}</p>
+        <p style="margin:8px 0 0;color:#dc2626;font-size:12px;">Please change this password after your first login.</p>
     </div>"""
-    await send_email(counsellor_data.email, "Kaimera Learning - Verify Your Account", html)
+    await notify_event(
+        counsellor_data.email,
+        "Welcome to Kaimera Learning — Counselor Account Credentials",
+        "Your Counselor Account is Ready",
+        f"Hi {counsellor_data.name}, your counselor account has been created by the admin.",
+        body_html=creds_html,
+        cta_label="Sign In Now",
+        cta_url="https://edu.kaimeralearning.com/login"
+    )
 
-    return {"message": "Counselor account created. Verification OTP sent to their email.", "user_id": user_id, "email": counsellor_data.email, "counselor_id": counselor_id}
+    return {"message": "Counselor account created. Credentials emailed directly to the counselor.", "user_id": user_id, "email": counsellor_data.email, "counselor_id": counselor_id}
 
 
 @router.post("/admin/create-user")
@@ -452,7 +486,9 @@ async def admin_create_user(request: Request, authorization: Optional[str] = Hea
             raise HTTPException(status_code=400, detail=f"Phone number already registered with {phone_exists['email']}")
 
     user_id = f"user_{uuid.uuid4().hex[:12]}"
-    password_hash_val = hash_password(password)
+    # Auto-generate password — admin's input is ignored; never returned in JSON
+    auto_password = generate_temp_password()
+    password_hash_val = hash_password(auto_password)
     user_code = None
 
     base_doc = {
@@ -472,19 +508,24 @@ async def admin_create_user(request: Request, authorization: Optional[str] = Hea
 
     await db.users.insert_one(base_doc)
 
-    # Send verification OTP
-    otp = await generate_otp(email)
-    html = f"""<div style="font-family: Arial; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 16px;">
-        <h2 style="color: #0ea5e9;">Welcome to Kaimera Learning!</h2>
-        <p>Your {role} account has been created. Verify your email to get started.</p>
-        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
-            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0f172a;">{otp}</span>
-        </div>
-        <p style="color: #94a3b8; font-size: 14px;">This code expires in 10 minutes.</p>
+    creds_html = f"""<div style="background:white;border:2px solid #e2e8f0;border-radius:12px;padding:20px;margin:16px 0;">
+        <p style="margin:0 0 8px;color:#475569;font-size:14px;">Login Email:</p>
+        <p style="margin:0 0 16px;font-weight:bold;color:#0f172a;font-size:16px;">{email}</p>
+        <p style="margin:0 0 8px;color:#475569;font-size:14px;">Temporary Password:</p>
+        <p style="margin:0 0 8px;font-family:monospace;background:#f1f5f9;padding:10px;border-radius:6px;font-size:18px;letter-spacing:1px;">{auto_password}</p>
+        <p style="margin:8px 0 0;color:#dc2626;font-size:12px;">Please change this password after your first login.</p>
     </div>"""
-    await send_email(email, "Kaimera Learning - Verify Your Account", html)
+    await notify_event(
+        email,
+        f"Welcome to Kaimera Learning — {role.capitalize()} Account Credentials",
+        f"Your {role.capitalize()} Account is Ready",
+        f"Hi {name}, your {role} account on Kaimera Learning has been created.",
+        body_html=creds_html,
+        cta_label="Sign In Now",
+        cta_url="https://edu.kaimeralearning.com/login"
+    )
 
-    return {"message": f"{role.capitalize()} account created. Verification OTP sent.", "user_id": user_id, "email": email, "user_code": user_code, "credentials": {"email": email, "password": password, "code": user_code}}
+    return {"message": f"{role.capitalize()} account created. Credentials emailed directly to the user.", "user_id": user_id, "email": email, "user_code": user_code}
 
 
 @router.post("/admin/set-pricing")
@@ -681,7 +722,8 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
             raise HTTPException(status_code=400, detail=f"Phone number already registered with {phone_exists['email']}")
 
     user_id = f"user_{uuid.uuid4().hex[:12]}"
-    password_hash_val = hash_password(student_data.password)
+    auto_password = generate_temp_password()
+    password_hash_val = hash_password(auto_password)
     student_code = await generate_student_code()
 
     student_doc = {
@@ -697,19 +739,24 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
     }
     await db.users.insert_one(student_doc)
 
-    # Send verification OTP
-    otp = await generate_otp(student_data.email)
-    html = f"""<div style="font-family: Arial; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 16px;">
-        <h2 style="color: #0ea5e9;">Welcome to Kaimera Learning!</h2>
-        <p>Your student account has been created. Verify your email to get started.</p>
-        <div style="background: white; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0;">
-            <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #0f172a;">{otp}</span>
-        </div>
-        <p style="color: #94a3b8; font-size: 14px;">This code expires in 10 minutes.</p>
+    creds_html = f"""<div style="background:white;border:2px solid #e2e8f0;border-radius:12px;padding:20px;margin:16px 0;">
+        <p style="margin:0 0 8px;color:#475569;font-size:14px;">Login Email:</p>
+        <p style="margin:0 0 16px;font-weight:bold;color:#0f172a;font-size:16px;">{student_data.email}</p>
+        <p style="margin:0 0 8px;color:#475569;font-size:14px;">Temporary Password:</p>
+        <p style="margin:0 0 8px;font-family:monospace;background:#f1f5f9;padding:10px;border-radius:6px;font-size:18px;letter-spacing:1px;">{auto_password}</p>
+        <p style="margin:8px 0 0;color:#dc2626;font-size:12px;">Please change this password after your first login.</p>
     </div>"""
-    await send_email(student_data.email, "Kaimera Learning - Verify Your Account", html)
+    await notify_event(
+        student_data.email,
+        "Welcome to Kaimera Learning — Student Account Credentials",
+        "Your Student Account is Ready",
+        f"Hi {student_data.name}, your student account on Kaimera Learning has been created.",
+        body_html=creds_html,
+        cta_label="Sign In Now",
+        cta_url="https://edu.kaimeralearning.com/login"
+    )
 
-    return {"message": "Student account created. Verification OTP sent.", "user_id": user_id, "email": student_data.email, "name": student_data.name, "student_code": student_code, "credentials": {"email": student_data.email, "password": student_data.password}}
+    return {"message": "Student account created. Credentials emailed directly to the student.", "user_id": user_id, "email": student_data.email, "name": student_data.name, "student_code": student_code}
 
 
 @router.post("/admin/reset-password")
@@ -721,8 +768,6 @@ async def admin_reset_password(request: Request, authorization: Optional[str] = 
     target_email = body.get("email")
     target_user_id = body.get("user_id")
     new_password = body.get("new_password")
-    if not new_password:
-        raise HTTPException(status_code=400, detail="new_password required")
     if not target_email and not target_user_id:
         raise HTTPException(status_code=400, detail="email or user_id required")
 
@@ -731,11 +776,29 @@ async def admin_reset_password(request: Request, authorization: Optional[str] = 
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # If admin didn't provide a password, auto-generate one (preferred — admin never sees it)
+    if not new_password:
+        new_password = generate_temp_password()
     password_hash_val = hash_password(new_password)
     await db.users.update_one({"user_id": target["user_id"]}, {"$set": {"password_hash": password_hash_val}})
     # Invalidate all existing sessions for this user
     await db.user_sessions.delete_many({"user_id": target["user_id"]})
-    return {"message": f"Password reset for {target['name']} ({target['email']}). All sessions invalidated.", "role": target["role"], "email": target["email"], "user_id": target["user_id"]}
+
+    creds_html = f"""<div style="background:white;border:2px solid #e2e8f0;border-radius:12px;padding:20px;margin:16px 0;">
+        <p style="margin:0 0 8px;color:#475569;font-size:14px;">New Temporary Password:</p>
+        <p style="margin:0 0 8px;font-family:monospace;background:#f1f5f9;padding:10px;border-radius:6px;font-size:18px;letter-spacing:1px;">{new_password}</p>
+        <p style="margin:8px 0 0;color:#dc2626;font-size:12px;">All existing sessions have been signed out. Please change this password after sign-in.</p>
+    </div>"""
+    await notify_event(
+        target["email"],
+        "Kaimera Learning — Password Reset by Admin",
+        "Your Password Was Reset",
+        f"Hi {target.get('name','')}, an administrator has reset your account password.",
+        body_html=creds_html,
+        cta_label="Sign In Now",
+        cta_url="https://edu.kaimeralearning.com/login"
+    )
+    return {"message": f"Password reset for {target['name']} ({target['email']}). New password emailed directly. All sessions invalidated.", "role": target["role"], "email": target["email"], "user_id": target["user_id"]}
 
 
 @router.get("/admin/search-users-for-reset")

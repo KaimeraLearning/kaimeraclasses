@@ -147,3 +147,47 @@ async def generate_otp(email: str) -> str:
         "verified": False
     })
     return otp
+
+
+# ─── Notification email helpers ───────────────────────────────────────────────
+import secrets as _secrets
+import string as _string
+
+
+def _wrap_email_html(title: str, intro: str, body_html: str = "", cta_label: str = "", cta_url: str = "") -> str:
+    """Standard branded wrapper for transactional emails."""
+    cta_block = ""
+    if cta_label and cta_url:
+        cta_block = f'<div style="text-align:center;margin:24px 0;"><a href="{cta_url}" style="display:inline-block;padding:12px 28px;background:#0ea5e9;color:#fff;border-radius:24px;text-decoration:none;font-weight:bold;">{cta_label}</a></div>'
+    return f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#f8fafc;border-radius:16px;">
+        <h2 style="color:#0ea5e9;margin:0 0 8px;">{title}</h2>
+        <p style="color:#475569;margin:0 0 16px;">{intro}</p>
+        {body_html}
+        {cta_block}
+        <p style="color:#94a3b8;font-size:12px;margin-top:24px;">Kaimera Learning · This is an automated email · Please do not reply.</p>
+    </div>"""
+
+
+async def notify_event(to_email: str, subject: str, title: str, intro: str,
+                       body_html: str = "", cta_label: str = "", cta_url: str = ""):
+    """Best-effort transactional email. Failures are logged but never raise (so
+    they don't break primary flows like demo accept, class start, etc.)."""
+    if not to_email:
+        return
+    try:
+        html = _wrap_email_html(title, intro, body_html, cta_label, cta_url)
+        result = await send_email(to_email, subject, html)
+        if not result or (isinstance(result, dict) and result.get("error")):
+            logger.warning(f"notify_event failed for {to_email}: {result}")
+    except Exception as e:
+        logger.warning(f"notify_event exception for {to_email}: {e}")
+
+
+def generate_temp_password(length: int = 12) -> str:
+    """Generates a cryptographically secure random password with mixed character classes."""
+    alphabet = _string.ascii_letters + _string.digits
+    # ensure mixed: at least 1 uppercase, 1 lowercase, 1 digit
+    while True:
+        pwd = ''.join(_secrets.choice(alphabet) for _ in range(length))
+        if (any(c.islower() for c in pwd) and any(c.isupper() for c in pwd) and any(c.isdigit() for c in pwd)):
+            return pwd

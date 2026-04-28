@@ -12,7 +12,7 @@ from models.schemas import (
     ClassProofSubmit, TeacherFeedbackToStudent, TeacherDemoFeedback
 )
 from services.auth import get_current_user
-from services.helpers import send_email
+from services.helpers import send_email, notify_event
 from services.rating import recalc_teacher_rating, record_rating_event
 
 router = APIRouter()
@@ -251,6 +251,31 @@ async def approve_student_assignment(
             "read": False,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
+
+        # Email student that teacher accepted
+        await notify_event(
+            assignment.get("student_email"),
+            f"Your teacher {user.name} accepted your assignment",
+            "Great news!",
+            f"<b>{user.name}</b> has accepted your assignment for <b>{assignment.get('learning_plan_name','your plan')}</b>. You can now schedule classes from your dashboard.",
+            cta_label="Open Student Dashboard",
+            cta_url="https://edu.kaimeralearning.com/student-dashboard"
+        )
+
+        # Email the counselor who initiated the assignment (and any admins) that teacher accepted
+        try:
+            assigner = await db.users.find_one({"user_id": assignment.get("assigned_by")}, {"_id": 0, "email": 1, "role": 1, "name": 1})
+            if assigner and assigner.get("email"):
+                await notify_event(
+                    assigner["email"],
+                    f"Teacher {user.name} accepted assignment for {assignment.get('student_name','')}",
+                    "Assignment Accepted",
+                    f"Teacher <b>{user.name}</b> has accepted the assignment you created for <b>{assignment.get('student_name','')}</b>. The class is now ready to be scheduled.",
+                    cta_label="Open Counselor Dashboard",
+                    cta_url="https://edu.kaimeralearning.com/counsellor-dashboard"
+                )
+        except Exception:
+            pass
 
         action = "approved"
 

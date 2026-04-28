@@ -7,7 +7,7 @@ from typing import Optional
 from database import db
 from models.schemas import DemoRequestCreate, DemoAssign, DemoFeedbackCreate
 from services.auth import get_current_user, hash_password
-from services.helpers import send_email
+from services.helpers import send_email, notify_event
 
 router = APIRouter()
 
@@ -205,7 +205,34 @@ async def accept_demo(demo_id: str, request: Request, authorization: Optional[st
 
     result = {"message": f"Demo accepted! Class created for {demo['preferred_date']} at {demo.get('preferred_time_slot', '')}", "class_id": class_id, "student_id": student_id}
     if temp_password:
-        result["student_credentials"] = {"email": demo["email"], "temp_password": temp_password}
+        # Send credentials directly to student email (don't return password to teacher publicly)
+        creds_html = f"""<div style="background:white;border:2px solid #e2e8f0;border-radius:12px;padding:20px;margin:16px 0;">
+            <p style="margin:0 0 8px;color:#475569;font-size:14px;">Login Email:</p>
+            <p style="margin:0 0 16px;font-weight:bold;color:#0f172a;font-size:16px;">{demo['email']}</p>
+            <p style="margin:0 0 8px;color:#475569;font-size:14px;">Temporary Password:</p>
+            <p style="margin:0 0 8px;font-family:monospace;background:#f1f5f9;padding:10px;border-radius:6px;font-size:18px;letter-spacing:1px;">{temp_password}</p>
+        </div>"""
+        await notify_event(
+            demo['email'],
+            f"Your Demo with {user.name} is Confirmed",
+            "Welcome to Kaimera Learning!",
+            f"Hi {demo['name']}, teacher <b>{user.name}</b> has accepted your demo request. Your demo class is scheduled for <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>. Use the credentials below to log in:",
+            body_html=creds_html,
+            cta_label="Sign In Now",
+            cta_url="https://edu.kaimeralearning.com/login"
+        )
+        # Don't expose password back to teacher anymore
+        result["student_credentials_emailed"] = True
+    else:
+        # Existing student — just notify them about teacher accepting demo
+        await notify_event(
+            demo['email'],
+            f"Your demo with {user.name} is confirmed",
+            "Demo Confirmed",
+            f"Hi {demo['name']}, teacher <b>{user.name}</b> has accepted your demo request. Your demo class is scheduled for <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>.",
+            cta_label="Open Dashboard",
+            cta_url="https://edu.kaimeralearning.com/student-dashboard"
+        )
     return result
 
 
@@ -258,6 +285,43 @@ async def assign_demo_to_teacher(data: DemoAssign, request: Request, authorizati
         "details": f"{user.name} assigned demo for {demo['name']} to {teacher['name']}",
         "created_at": datetime.now(timezone.utc).isoformat()
     })
+
+    # Email teacher: new demo assigned
+    await notify_event(
+        teacher.get("email"),
+        f"New Demo Session Assigned — {demo['name']}",
+        "Demo Session Assigned",
+        f"Counselor <b>{user.name}</b> has assigned a demo session with <b>{demo['name']}</b> to you on <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>.",
+        cta_label="View Teacher Dashboard",
+        cta_url="https://edu.kaimeralearning.com/teacher-dashboard"
+    )
+
+    # Email student: confirm demo + send credentials if newly created
+    if temp_password:
+        creds_html = f"""<div style="background:white;border:2px solid #e2e8f0;border-radius:12px;padding:20px;margin:16px 0;">
+            <p style="margin:0 0 8px;color:#475569;font-size:14px;">Login Email:</p>
+            <p style="margin:0 0 16px;font-weight:bold;color:#0f172a;font-size:16px;">{demo['email']}</p>
+            <p style="margin:0 0 8px;color:#475569;font-size:14px;">Temporary Password:</p>
+            <p style="margin:0 0 8px;font-family:monospace;background:#f1f5f9;padding:10px;border-radius:6px;font-size:18px;letter-spacing:1px;">{temp_password}</p>
+        </div>"""
+        await notify_event(
+            demo['email'],
+            f"Your Demo with {teacher['name']} is Scheduled",
+            "Welcome to Kaimera Learning!",
+            f"Hi {demo['name']}, our counselor has assigned <b>{teacher['name']}</b> for your demo session on <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>. Use the credentials below to log in:",
+            body_html=creds_html,
+            cta_label="Sign In Now",
+            cta_url="https://edu.kaimeralearning.com/login"
+        )
+    else:
+        await notify_event(
+            demo['email'],
+            f"Your demo with {teacher['name']} is scheduled",
+            "Demo Scheduled",
+            f"Hi {demo['name']}, our counselor has assigned <b>{teacher['name']}</b> as your demo teacher for <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>.",
+            cta_label="Open Dashboard",
+            cta_url="https://edu.kaimeralearning.com/student-dashboard"
+        )
 
     return {"message": f"Demo assigned to {teacher['name']} and class created"}
 
