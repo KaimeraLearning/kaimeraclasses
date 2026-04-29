@@ -119,6 +119,12 @@ const Login = () => {
       toast.error('Please fill name, email, phone, preferred date and time');
       return;
     }
+    // Block past date+time before bothering the server
+    const scheduled = new Date(`${demo.preferred_date}T${demo.preferred_time_slot}:00`);
+    if (Number.isNaN(scheduled.getTime()) || scheduled <= new Date()) {
+      toast.error('Please pick a future date and time. Past slots are not allowed.');
+      return;
+    }
     setDemoLoading(true);
     try {
       const payload = {

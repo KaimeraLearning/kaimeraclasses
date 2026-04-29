@@ -61,6 +61,13 @@ const BookDemo = () => {
       toast.error('Please enter a valid phone number');
       return;
     }
+    if (form.preferred_date && form.preferred_time_slot) {
+      const scheduled = new Date(`${form.preferred_date}T${form.preferred_time_slot}:00`);
+      if (Number.isNaN(scheduled.getTime()) || scheduled <= new Date()) {
+        toast.error('Please pick a future date and time. Past slots are not allowed.');
+        return;
+      }
+    }
     setIsLoading(true);
     try {
       const payload = {

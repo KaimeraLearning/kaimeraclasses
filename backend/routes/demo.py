@@ -66,11 +66,18 @@ async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str
     await db.class_sessions.insert_one(insert_class)
 
     if demo_price > 0:
+        if (student.get("credits", 0) if student else 0) < demo_price:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Action Failed: Insufficient balance in {demo['name']}'s account. Required: {demo_price} credits, Available: {student.get('credits', 0) if student else 0} credits."
+            )
         await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": -demo_price}})
         await db.transactions.insert_one({
             "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
-            "user_id": student_id, "type": "demo_booking", "amount": demo_price,
+            "user_id": student_id, "type": "demo_booking", "amount": -demo_price,
             "description": f"Demo class with {teacher_name}",
+            "class_id": class_id,
+            "counterparty_user_id": teacher_user_id,
             "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
         })
 
@@ -82,27 +89,11 @@ async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str
         "read": False, "related_id": class_id, "created_at": datetime.now(timezone.utc).isoformat()
     })
 
-    await send_email(
-        demo["email"],
-        "Your Demo Session is Confirmed! - Kaimera Learning",
-        f"""<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-        <div style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6);padding:30px;border-radius:16px;color:#fff;text-align:center;">
-            <h1 style="margin:0;font-size:24px;">Demo Confirmed!</h1>
-        </div>
-        <div style="padding:20px;background:#f8fafc;border-radius:0 0 16px 16px;">
-            <p>Hi <strong>{demo['name']}</strong>,</p>
-            <p>Great news! Your demo session has been accepted by <strong>{teacher_name}</strong>.</p>
-            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-                <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Date</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:bold;">{demo['preferred_date']}</td></tr>
-                <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Time</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:bold;">{preferred_time}</td></tr>
-                <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Teacher</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:bold;">{teacher_name}</td></tr>
-            </table>
-            {f'<p style="background:#fef3c7;padding:12px;border-radius:8px;">Your login: <strong>{demo["email"]}</strong> / <strong>{temp_password}</strong></p>' if temp_password else ''}
-            <p style="color:#64748b;font-size:14px;">Log in to your dashboard to join the class when it\'s time.</p>
-        </div>
-        <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:16px;">Kaimera Learning</p>
-        </div>"""
-    )
+    # NOTE: We intentionally do NOT send a hardcoded email here. The caller
+    # (`accept_demo` / `assign_demo_to_teacher`) sends the styled, admin-editable
+    # email via `notify_event(event_key=...)` using the templates the admin can
+    # customize from the dashboard. Sending one here would result in duplicate
+    # emails to the student.
 
     return class_id, student_id, temp_password
 
@@ -110,13 +101,24 @@ async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str
 @router.post("/demo/request")
 async def create_demo_request(demo_data: DemoRequestCreate):
     """Public endpoint - anyone can request a demo (no auth required)"""
+    # Date+time must be in the future
+    try:
+        slot = (demo_data.preferred_time_slot or "10:00").strip()
+        scheduled = datetime.fromisoformat(f"{demo_data.preferred_date}T{slot}:00")
+        if scheduled.tzinfo is None:
+            scheduled = scheduled.replace(tzinfo=timezone.utc)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date or time format")
+    if scheduled <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Demo can only be booked for a future date and time. Past or current slots are not allowed.")
+
     existing_demos = await db.demo_requests.count_documents({"email": demo_data.email})
-    max_demos = 3
+    max_demos = 2
     extra = await db.demo_extras.find_one({"email": demo_data.email}, {"_id": 0})
     if extra:
         max_demos += extra.get("extra_count", 0)
     if existing_demos >= max_demos:
-        raise HTTPException(status_code=400, detail=f"Maximum {max_demos} demo requests reached for this email. Contact admin for an additional chance.")
+        raise HTTPException(status_code=400, detail=f"Demo limit exceeded. You have already booked {existing_demos} demo(s) — the maximum allowed for this email is {max_demos}. Contact admin for an additional chance.")
 
     demo_id = f"demo_{uuid.uuid4().hex[:12]}"
     existing_user = await db.users.find_one({"email": demo_data.email}, {"_id": 0})

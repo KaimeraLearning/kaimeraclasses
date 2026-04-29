@@ -27,8 +27,21 @@ const DemoFeedback = () => {
 
       if (demosRes.ok) {
         const allDemos = await demosRes.json();
-        // Show demos that are accepted (class completed) but no feedback yet
-        const completedDemos = allDemos.filter(d => d.status === 'accepted' && !d.feedback_id);
+        // Show demos where:
+        //  - teacher accepted it (status='accepted')
+        //  - student hasn't submitted feedback yet
+        //  - the class date+time has actually passed (don't show upcoming classes!)
+        const now = new Date();
+        const completedDemos = allDemos.filter(d => {
+          if (d.status !== 'accepted' || d.feedback_id) return false;
+          if (!d.preferred_date) return false;
+          const slot = d.preferred_time_slot || '10:00';
+          // Treat the demo as a 1-hour session — only ask for feedback after it ends
+          const start = new Date(`${d.preferred_date}T${slot}:00`);
+          if (Number.isNaN(start.getTime())) return false;
+          const endApprox = new Date(start.getTime() + 60 * 60 * 1000);
+          return now >= endApprox;
+        });
         setDemos(completedDemos);
 
         // Get unique teacher names for selection

@@ -1,3 +1,4 @@
+import { Country, State, City } from "country-state-city";
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -16,6 +17,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { getApiError, API , apiFetch} from '../utils/api';
 import { useDateRangeFilter } from '../components/DateRangeFilter';
 import EmailTemplateManager from '../components/EmailTemplateManager';
+import { txDirection, txDisplayAmount, txAmountClass } from '../utils/transactions';
 
 // ─── Reusable Sub-Components ───
 
@@ -44,6 +46,7 @@ const DrawerWalletHistory = ({ transactions }) => {
         <div className="space-y-1 max-h-72 overflow-y-auto">
           {filtered.map((t, i) => {
             const ref = t.reference || {};
+            const isOut = txDirection(t) === 'outflow';
             return (
               <div key={t.transaction_id || i} className="bg-slate-50 rounded-lg p-2 text-xs" data-testid={`drawer-txn-${i}`}>
                 <div className="flex justify-between items-center gap-2">
@@ -51,13 +54,13 @@ const DrawerWalletHistory = ({ transactions }) => {
                     <p className="font-medium text-slate-800 truncate">{t.description}</p>
                     <p className="text-[10px] text-slate-400">{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</p>
                   </div>
-                  <span className={`font-semibold whitespace-nowrap ${t.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{t.amount > 0 ? '+' : ''}{t.amount}</span>
+                  <span className={`font-semibold whitespace-nowrap ${txAmountClass(t)}`}>{txDisplayAmount(t)}</span>
                 </div>
                 {(ref.class_title || ref.receipt_id || ref.razorpay_payment_id || ref.counterparty_name) && (
                   <div className="mt-1 pt-1 border-t border-slate-200 text-[10px] text-slate-500 space-y-0.5">
                     {ref.counterparty_name && (
-                      <p className={t.amount < 0 ? 'text-red-500' : 'text-emerald-600'}>
-                        {t.amount < 0 ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
+                      <p className={isOut ? 'text-red-500' : 'text-emerald-600'}>
+                        {isOut ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
                         {ref.counterparty_role && <span className="text-slate-400"> ({ref.counterparty_role})</span>}
                       </p>
                     )}
@@ -417,6 +420,9 @@ const AdminDashboard = () => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mainTab, setMainTab] = useState('users');
+  const [countries, setCountries] = useState([]);
+  const [states, setStates] = useState([]);
+  const [cities, setCities] = useState([]);
 
   // Data stores
   const [allUsers, setAllUsers] = useState([]);
@@ -442,7 +448,7 @@ const AdminDashboard = () => {
 
   // Transactions
   const [txnSearch, setTxnSearch] = useState('');
-  const [txnRoleFilter, setTxnRoleFilter] = useState('all');
+  const [txnRoleFilter, setTxnRoleFilter] = useState('admin_own');
   const [txnDateFrom, setTxnDateFrom] = useState('');
   const [txnDateTo, setTxnDateTo] = useState('');
   const [txnView, setTxnView] = useState('daily');
@@ -512,14 +518,35 @@ const AdminDashboard = () => {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+  setCountries(Country.getAllCountries());
+  }, []);
+
+  useEffect(() => {
+  if (createForm.country) {
+    const st = State.getStatesOfCountry(createForm.country);
+    setStates(st);
+    setCities([]);
+    setCreateForm(prev => ({ ...prev, state: "", city: "" }));
+  }
+  }, [createForm.country]);
+
+  useEffect(() => {
+  if (createForm.state) {
+    const ct = City.getCitiesOfState(createForm.country, createForm.state);
+    setCities(ct);
+    setCreateForm(prev => ({ ...prev, city: "" }));
+  }
+  }, [createForm.state]);
+
   const fetchAll = async () => {
     try {
       const [userRes, usersRes, classesRes, txnRes, dailyRes, complaintsRes, proofsRes, tmplRes, trackRes] = await Promise.all([
         apiFetch(`${API}/auth/me`, { credentials: 'include' }),
         apiFetch(`${API}/admin/all-users`, { credentials: 'include' }),
         apiFetch(`${API}/admin/classes`, { credentials: 'include' }),
-        apiFetch(`${API}/admin/transactions`, { credentials: 'include' }),
-        apiFetch(`${API}/admin/transactions?view=daily`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/transactions?role=all`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/transactions?view=daily&role=all`, { credentials: 'include' }),
         apiFetch(`${API}/admin/complaints`, { credentials: 'include' }),
         apiFetch(`${API}/admin/approved-proofs`, { credentials: 'include' }),
         apiFetch(`${API}/admin/badge-templates`, { credentials: 'include' }),
@@ -751,7 +778,8 @@ const AdminDashboard = () => {
 
   const handleFilterTransactions = async () => {
     const params = new URLSearchParams();
-    if (txnRoleFilter !== 'all') params.set('role', txnRoleFilter);
+    // 'admin_own' = no role param (server defaults to admin's own transactions)
+    if (txnRoleFilter && txnRoleFilter !== 'admin_own') params.set('role', txnRoleFilter);
     if (txnDateFrom) params.set('date_from', txnDateFrom);
     if (txnDateTo) params.set('date_to', txnDateTo);
     if (txnSearch) params.set('search', txnSearch);
@@ -1017,9 +1045,10 @@ const AdminDashboard = () => {
                               </select>
                             </div>
                             <div><Label>Institute</Label><Input value={createForm.institute} onChange={e => setCreateForm({...createForm, institute: e.target.value})} className="rounded-xl" data-testid="create-institute" /></div>
-                            <div><Label>State</Label><Input value={createForm.state} onChange={e => setCreateForm({...createForm, state: e.target.value})} className="rounded-xl" data-testid="create-state" /></div>
-                            <div><Label>City</Label><Input value={createForm.city} onChange={e => setCreateForm({...createForm, city: e.target.value})} className="rounded-xl" data-testid="create-city" /></div>
-                            <div><Label>Country</Label><Input value={createForm.country} onChange={e => setCreateForm({...createForm, country: e.target.value})} className="rounded-xl" data-testid="create-country" /></div>
+                            <select value={createForm.country} onChange={(e)=>setCreateForm({...createForm,country:e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2">
+                            <option value="">Select Country</option>{countries.map(c=><option key={c.isoCode} value={c.isoCode}>{c.name}</option>)}</select>
+                            <select value={createForm.state} onChange={(e)=>setCreateForm({...createForm,state:e.target.value})} disabled={!createForm.country} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2"><option value="">Select State</option>{states.map(s=><option key={s.isoCode} value={s.isoCode}>{s.name}</option>)}</select>
+                            <select value={createForm.city} onChange={(e)=>setCreateForm({...createForm,city:e.target.value})} disabled={!createForm.state} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2"><option value="">Select City</option>{cities.map((c,i)=><option key={i} value={c.name}>{c.name}</option>)}</select>
                             <div><Label>Goal</Label><Input value={createForm.goal} onChange={e => setCreateForm({...createForm, goal: e.target.value})} className="rounded-xl" data-testid="create-goal" /></div>
                           </div>
                         )}
@@ -1289,8 +1318,14 @@ const AdminDashboard = () => {
                       </div>
                     </div>
                     <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
-                      {['all', 'student', 'teacher', 'counsellor'].map(r => (
-                        <button key={r} onClick={() => setTxnRoleFilter(r)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${txnRoleFilter === r ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`} data-testid={`txn-filter-${r}`}>{r === 'all' ? 'All' : r.charAt(0).toUpperCase() + r.slice(1)}</button>
+                      {[
+                        { v: 'admin_own', label: 'My Wallet' },
+                        { v: 'all', label: 'All Users' },
+                        { v: 'student', label: 'Student' },
+                        { v: 'teacher', label: 'Teacher' },
+                        { v: 'counsellor', label: 'Counsellor' },
+                      ].map(r => (
+                        <button key={r.v} onClick={() => setTxnRoleFilter(r.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${txnRoleFilter === r.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`} data-testid={`txn-filter-${r.v}`}>{r.label}</button>
                       ))}
                     </div>
                     <Input type="date" value={txnDateFrom} onChange={e => setTxnDateFrom(e.target.value)} className="rounded-xl w-36" data-testid="txn-date-from" />
@@ -1355,12 +1390,12 @@ const AdminDashboard = () => {
                                 </td>
                                 <td className="px-4 py-3"><RoleBadge role={txn.user_role} /></td>
                                 <td className="px-4 py-3 text-xs text-slate-500">{txn.type}</td>
-                                <td className={`px-4 py-3 text-sm text-right font-bold ${txn.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{txn.amount > 0 ? '+' : ''}{txn.amount}</td>
+                                <td className={`px-4 py-3 text-sm text-right font-bold ${txAmountClass(txn)}`}>{txDisplayAmount(txn)}</td>
                                 <td className="px-4 py-3 text-sm text-slate-600 max-w-[260px]">
                                   <p className="truncate">{txn.description}</p>
                                   {ref.counterparty_name && (
-                                    <p className={`text-[11px] mt-0.5 ${txn.amount < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                                      {txn.amount < 0 ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
+                                    <p className={`text-[11px] mt-0.5 ${txDirection(txn) === 'outflow' ? 'text-red-500' : 'text-emerald-600'}`}>
+                                      {txDirection(txn) === 'outflow' ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
                                       {ref.counterparty_role && <span className="text-slate-400"> ({ref.counterparty_role})</span>}
                                     </p>
                                   )}

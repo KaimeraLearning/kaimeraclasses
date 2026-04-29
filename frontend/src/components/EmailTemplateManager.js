@@ -215,13 +215,17 @@ export default function EmailTemplateManager() {
   const previewLogoUrl = previewLogo ? mediaUrls[previewLogo.media_id] : '';
   // Logo precedence: inline-uploaded image (cid: in real email) > logoUrl (public URL).
   const effectiveLogoSrc = previewLogoUrl || logoUrl || '';
-  const previewHtml = `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#f8fafc;border-radius:16px;">
-    ${effectiveLogoSrc ? `<div style="text-align:center;margin:0 0 16px;"><img src="${effectiveLogoSrc}" alt="Logo" style="max-width:160px;max-height:80px;"/></div>` : ''}
-    <h2 style="color:#0ea5e9;margin:0 0 8px;">${sampleFill(title)}</h2>
-    <p style="color:#475569;margin:0 0 16px;">${sampleFill(intro)}</p>
-    ${sampleFill(bodyHtml)}
-    ${(ctaLabel && ctaUrl) ? `<div style="text-align:center;margin:24px 0;"><a href="${ctaUrl}" style="display:inline-block;padding:12px 28px;background:#0ea5e9;color:#fff;border-radius:24px;text-decoration:none;font-weight:bold;">${sampleFill(ctaLabel)}</a></div>` : ''}
-    <p style="color:#94a3b8;font-size:12px;margin-top:24px;">Kaimera Learning · This is an automated email · Please do not reply.</p>
+  const previewHtml = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#ffffff;">
+    <div style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6);padding:30px 24px;border-radius:16px 16px 0 0;color:#fff;text-align:center;">
+      ${effectiveLogoSrc ? `<div style="text-align:center;margin:0 0 12px;"><img src="${effectiveLogoSrc}" alt="Logo" style="max-width:160px;max-height:80px;background:#fff;padding:6px 12px;border-radius:8px;"/></div>` : ''}
+      <h1 style="margin:0;font-size:24px;font-weight:700;">${sampleFill(title)}</h1>
+    </div>
+    <div style="padding:24px;background:#f8fafc;border-radius:0 0 16px 16px;border:1px solid #e2e8f0;border-top:0;">
+      <p style="color:#334155;font-size:15px;line-height:1.6;margin:0 0 12px;">${sampleFill(intro)}</p>
+      ${sampleFill(bodyHtml)}
+      ${(ctaLabel && ctaUrl) ? `<div style="text-align:center;margin:24px 0;"><a href="${ctaUrl}" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#0ea5e9,#8b5cf6);color:#fff;border-radius:24px;text-decoration:none;font-weight:bold;font-size:14px;">${sampleFill(ctaLabel)}</a></div>` : ''}
+    </div>
+    <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:20px;">Kaimera Learning · This is an automated email · Please do not reply.</p>
   </div>`;
 
   const imageMedia = media.filter(m => m.kind === 'image');
