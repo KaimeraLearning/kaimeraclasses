@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { ArrowLeft, User, Save, Upload, FileText, Lock, Star, Camera } from 'lucide-react';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 
 export default function TeacherProfile() {
   const navigate = useNavigate();
@@ -20,7 +20,7 @@ export default function TeacherProfile() {
 
   const fetchProfile = async () => {
     try {
-      const res = await fetch(`${API}/teacher/profile`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/teacher/profile`, { credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
       setProfile(data);
@@ -39,7 +39,7 @@ export default function TeacherProfile() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API}/teacher/update-full-profile`, {
+      const res = await apiFetch(`${API}/teacher/update-full-profile`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
@@ -68,7 +68,7 @@ export default function TeacherProfile() {
     const reader = new FileReader();
     reader.onload = async () => {
       try {
-        const res = await fetch(`${API}/teacher/upload-resume`, {
+        const res = await apiFetch(`${API}/teacher/upload-resume`, {
           method: 'POST', credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ resume_base64: reader.result, resume_name: file.name })

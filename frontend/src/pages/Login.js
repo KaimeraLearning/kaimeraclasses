@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { toast } from 'sonner';
 import { Mail, Lock, User, Phone, BookOpen, Calendar, Clock, MessageSquare, Loader2, Sparkles } from 'lucide-react';
 
-import { API, getApiError } from '../utils/api';
+import { API, getApiError , apiFetch} from '../utils/api';
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
 const Login = () => {
@@ -32,7 +32,7 @@ const Login = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch(`${API}/auth/login`, {
+      const res = await apiFetch(`${API}/auth/login`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.email, password: form.password })
@@ -63,7 +63,7 @@ const Login = () => {
           client_id: GOOGLE_CLIENT_ID,
           callback: async (response) => {
             try {
-              const res = await fetch(`${API}/auth/google`, {
+              const res = await apiFetch(`${API}/auth/google`, {
                 method: 'POST', credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ credential: response.credential })
@@ -131,7 +131,7 @@ const Login = () => {
         preferred_time_slot: demo.preferred_time_slot,
         message: demo.message || null
       };
-      const res = await fetch(`${API}/demo/request`, {
+      const res = await apiFetch(`${API}/demo/request`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });

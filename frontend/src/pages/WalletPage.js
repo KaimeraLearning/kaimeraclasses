@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { ArrowLeft, IndianRupee, Download, CreditCard, History, FileText, CheckCircle, Clock, Loader2 } from 'lucide-react';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { useDateRangeFilter } from '../components/DateRangeFilter';
 
 const WalletPage = () => {
@@ -18,9 +18,9 @@ const WalletPage = () => {
   const fetchData = async () => {
     try {
       const [meRes, payRes, txnRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/payments/my-payments`, { credentials: 'include' }),
-        fetch(`${API}/me/transactions`, { credentials: 'include' }).catch(() => ({ ok: false }))
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/payments/my-payments`, { credentials: 'include' }),
+        apiFetch(`${API}/me/transactions`, { credentials: 'include' }).catch(() => ({ ok: false }))
       ]);
       if (meRes.ok) setUser(await meRes.json());
       if (payRes.ok) setPayments(await payRes.json());

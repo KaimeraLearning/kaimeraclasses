@@ -1,4 +1,4 @@
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -33,8 +33,8 @@ const CounsellorProofs = () => {
   async function fetchProofs() {
     try {
       const [pendingRes, allRes] = await Promise.all([
-        fetch(`${API}/counsellor/pending-proofs`, { credentials: 'include' }),
-        fetch(`${API}/counsellor/all-proofs`, { credentials: 'include' })
+        apiFetch(`${API}/counsellor/pending-proofs`, { credentials: 'include' }),
+        apiFetch(`${API}/counsellor/all-proofs`, { credentials: 'include' })
       ]);
       if (pendingRes.ok) setPendingProofs(await pendingRes.json());
       if (allRes.ok) setAllProofs(await allRes.json());
@@ -47,7 +47,7 @@ const CounsellorProofs = () => {
 
   const handleVerify = async (approved) => {
     try {
-      const response = await fetch(`${API}/counsellor/verify-proof`, {
+      const response = await apiFetch(`${API}/counsellor/verify-proof`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -70,7 +70,7 @@ const CounsellorProofs = () => {
     setReviewerNotes('');
     setHistoryLoading(true);
     try {
-      const r = await fetch(`${API}/counsellor/proof-history/${proof.class_id}`, { credentials: 'include' });
+      const r = await apiFetch(`${API}/counsellor/proof-history/${proof.class_id}`, { credentials: 'include' });
       if (r.ok) setHistory(await r.json());
       else setHistory({ current: [], archived: [] });
     } catch { setHistory({ current: [], archived: [] }); }

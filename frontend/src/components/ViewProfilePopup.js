@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { User, Star, FileText, MapPin, GraduationCap, Briefcase, Heart, Calendar } from 'lucide-react';
 
-import { API } from '../utils/api';
+import { API , apiFetch} from '../utils/api';
 
 export function ViewProfilePopup({ open, onOpenChange, userId, userRole }) {
   const [profile, setProfile] = useState(null);
@@ -13,7 +13,7 @@ export function ViewProfilePopup({ open, onOpenChange, userId, userRole }) {
     setLoading(true);
     try {
       const endpoint = userRole === 'teacher' ? 'teacher/view-profile' : 'counsellor/view-profile';
-      const res = await fetch(`${API}/${endpoint}/${userId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/${endpoint}/${userId}`, { credentials: 'include' });
       if (res.ok) setProfile(await res.json());
     } catch {}
     setLoading(false);

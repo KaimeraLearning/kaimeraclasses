@@ -70,6 +70,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ----- API Key gate -----
+# Every request to /api/* must carry the x-api-key header matching API_KEY env.
+# Exempts: CORS preflight (OPTIONS) and external webhooks that we cannot control.
+_API_KEY = os.environ.get("API_KEY", "").strip()
+_API_KEY_EXEMPT_PATHS = {
+    "/api/webhook/razorpay",
+}
+
+
+@app.middleware("http")
+async def api_key_guard(request: Request, call_next):
+    path = request.url.path or ""
+    # Only guard /api/* routes
+    if path.startswith("/api/"):
+        # Allow CORS preflight to pass through
+        if request.method != "OPTIONS" and path not in _API_KEY_EXEMPT_PATHS:
+            if _API_KEY:
+                provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key") or ""
+                if provided != _API_KEY:
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Invalid or missing API key."},
+                    )
+    return await call_next(request)
+
 # Include all route modules under /api prefix
 app.include_router(auth_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")

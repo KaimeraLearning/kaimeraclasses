@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Calendar, Clock, Users, Trash2 } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 
-import { API } from '../utils/api';
+import { API , apiFetch} from '../utils/api';
 
 const TeacherClasses = () => {
   const navigate = useNavigate();
@@ -18,7 +18,7 @@ const TeacherClasses = () => {
 
   const fetchClasses = async () => {
     try {
-      const response = await fetch(`${API}/teacher/dashboard`, {
+      const response = await apiFetch(`${API}/teacher/dashboard`, {
         credentials: 'include'
       });
 
@@ -40,7 +40,7 @@ const TeacherClasses = () => {
     if (!window.confirm('Are you sure you want to delete this class?')) return;
 
     try {
-      const response = await fetch(`${API}/classes/delete/${classId}`, {
+      const response = await apiFetch(`${API}/classes/delete/${classId}`, {
         method: 'DELETE',
         credentials: 'include'
       });

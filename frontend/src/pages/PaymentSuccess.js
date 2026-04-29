@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { CheckCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { API } from '../utils/api';
+import { API , apiFetch} from '../utils/api';
 
 const PaymentSuccess = () => {
   const navigate = useNavigate();
@@ -32,7 +32,7 @@ const PaymentSuccess = () => {
     }
 
     try {
-      const response = await fetch(`${API}/payments/status/${sessionId}`, {
+      const response = await apiFetch(`${API}/payments/status/${sessionId}`, {
         credentials: 'include'
       });
 

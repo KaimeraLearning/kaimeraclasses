@@ -1,4 +1,4 @@
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -27,31 +27,31 @@ const ComplaintsPage = () => {
 
   const fetchData = async () => {
     try {
-      const userRes = await fetch(`${API}/auth/me`, { credentials: 'include' });
+      const userRes = await apiFetch(`${API}/auth/me`, { credentials: 'include' });
       if (!userRes.ok) throw new Error('Not authenticated');
       const userData = await userRes.json();
       setUser(userData);
 
       // Fetch based on role
       if (userData.role === 'admin') {
-        const res = await fetch(`${API}/admin/complaints`, { credentials: 'include' });
+        const res = await apiFetch(`${API}/admin/complaints`, { credentials: 'include' });
         if (res.ok) setAllComplaints(await res.json());
       } else if (userData.role === 'teacher') {
         const [myRes, studentRes] = await Promise.all([
-          fetch(`${API}/complaints/my`, { credentials: 'include' }),
-          fetch(`${API}/teacher/student-complaints`, { credentials: 'include' })
+          apiFetch(`${API}/complaints/my`, { credentials: 'include' }),
+          apiFetch(`${API}/teacher/student-complaints`, { credentials: 'include' })
         ]);
         if (myRes.ok) setMyComplaints(await myRes.json());
         if (studentRes.ok) setStudentComplaints(await studentRes.json());
       } else if (userData.role === 'counsellor') {
         const [myRes, allRes] = await Promise.all([
-          fetch(`${API}/complaints/my`, { credentials: 'include' }),
-          fetch(`${API}/admin/complaints`, { credentials: 'include' })
+          apiFetch(`${API}/complaints/my`, { credentials: 'include' }),
+          apiFetch(`${API}/admin/complaints`, { credentials: 'include' })
         ]);
         if (myRes.ok) setMyComplaints(await myRes.json());
         if (allRes.ok) setAllComplaints(await allRes.json());
       } else {
-        const myRes = await fetch(`${API}/complaints/my`, { credentials: 'include' });
+        const myRes = await apiFetch(`${API}/complaints/my`, { credentials: 'include' });
         if (myRes.ok) setMyComplaints(await myRes.json());
       }
       setLoading(false);
@@ -64,7 +64,7 @@ const ComplaintsPage = () => {
   const handleCreateComplaint = async () => {
     if (!subject.trim() || !description.trim()) { toast.error('Fill all fields'); return; }
     try {
-      const response = await fetch(`${API}/complaints/create`, {
+      const response = await apiFetch(`${API}/complaints/create`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ subject, description })
       });
@@ -79,7 +79,7 @@ const ComplaintsPage = () => {
 
   const handleResolve = async (status) => {
     try {
-      const response = await fetch(`${API}/admin/resolve-complaint`, {
+      const response = await apiFetch(`${API}/admin/resolve-complaint`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ complaint_id: selectedComplaint.complaint_id, resolution, status })
       });

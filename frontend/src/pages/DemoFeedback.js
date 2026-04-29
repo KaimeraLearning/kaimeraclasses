@@ -1,4 +1,4 @@
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -18,8 +18,8 @@ const DemoFeedback = () => {
   const fetchData = useCallback(async () => {
     try {
       const [userRes, demosRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/demo/my-demos`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/demo/my-demos`, { credentials: 'include' })
       ]);
       if (!userRes.ok) { navigate('/login'); return; }
       const userData = await userRes.json();
@@ -48,7 +48,7 @@ const DemoFeedback = () => {
 
     setSubmitting(demoId);
     try {
-      const res = await fetch(`${API}/demo/feedback`, {
+      const res = await apiFetch(`${API}/demo/feedback`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

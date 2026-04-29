@@ -7,7 +7,7 @@ import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { GraduationCap, LogOut, Users, BookOpen, UserPlus, ShieldCheck, MessageSquare, Clock, User, MapPin, Target, CalendarClock, Zap, FileText, CalendarDays, Repeat, ChevronLeft, ChevronRight } from 'lucide-react';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 
 const CounsellorDashboard = () => {
   const navigate = useNavigate();
@@ -64,10 +64,10 @@ const CounsellorDashboard = () => {
   const fetchDashboardData = async () => {
     try {
       const [userRes, dashboardRes, proofsRes, expiredRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/counsellor/dashboard`, { credentials: 'include' }),
-        fetch(`${API}/counsellor/pending-proofs`, { credentials: 'include' }),
-        fetch(`${API}/counsellor/expired-classes`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/counsellor/dashboard`, { credentials: 'include' }),
+        apiFetch(`${API}/counsellor/pending-proofs`, { credentials: 'include' }),
+        apiFetch(`${API}/counsellor/expired-classes`, { credentials: 'include' })
       ]);
 
       if (!userRes.ok || !dashboardRes.ok) throw new Error('Failed to fetch data');
@@ -90,7 +90,7 @@ const CounsellorDashboard = () => {
         setExpiredClasses(await expiredRes.json());
       }
       // Check renewals
-      const renewalRes = await fetch(`${API}/renewal/check`, { credentials: 'include' });
+      const renewalRes = await apiFetch(`${API}/renewal/check`, { credentials: 'include' });
       if (renewalRes.ok) setRenewalClasses(await renewalRes.json());
       setLoading(false);
     } catch (error) {
@@ -102,7 +102,7 @@ const CounsellorDashboard = () => {
 
   const fetchLearningPlans = async () => {
     try {
-      const res = await fetch(`${API}/admin/learning-plans`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/learning-plans`, { credentials: 'include' });
       if (res.ok) setLearningPlans(await res.json());
     } catch {}
   };
@@ -117,7 +117,7 @@ const CounsellorDashboard = () => {
       return;
     }
     try {
-      const response = await fetch(`${API}/admin/assign-student`, {
+      const response = await apiFetch(`${API}/admin/assign-student`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -151,7 +151,7 @@ const CounsellorDashboard = () => {
     setSelectedTeacher(teacher);
     setShowTeacherDialog(true);
     try {
-      const res = await fetch(`${API}/teacher/view-profile/${teacher.user_id}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/teacher/view-profile/${teacher.user_id}`, { credentials: 'include' });
       if (res.ok) {
         const fullProfile = await res.json();
         setSelectedTeacher(prev => ({ ...prev, ...fullProfile }));
@@ -163,7 +163,7 @@ const CounsellorDashboard = () => {
     setSelectedStudent(student);
     setShowStudentDialog(true);
     try {
-      const res = await fetch(`${API}/counsellor/student-profile/${student.user_id}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/counsellor/student-profile/${student.user_id}`, { credentials: 'include' });
       if (res.ok) setStudentProfile(await res.json());
     } catch (error) {
       console.error(error);
@@ -172,7 +172,7 @@ const CounsellorDashboard = () => {
 
   const handleReassign = async (studentId, action) => {
     try {
-      const response = await fetch(`${API}/counsellor/reassign-student`, {
+      const response = await apiFetch(`${API}/counsellor/reassign-student`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -188,7 +188,7 @@ const CounsellorDashboard = () => {
 
   const handleLogout = async () => {
     try {
-      await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
+      await apiFetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
       navigate('/login');
     } catch (error) { console.error(error); }
   };
@@ -196,7 +196,7 @@ const CounsellorDashboard = () => {
   const handleTeacherSearch = async (query) => {
     setTeacherSearch(query);
     try {
-      const res = await fetch(`${API}/search/teachers?q=${encodeURIComponent(query)}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/search/teachers?q=${encodeURIComponent(query)}`, { credentials: 'include' });
       if (res.ok) setTeacherSearchResults(await res.json());
     } catch { /* ignore */ }
   };
@@ -205,7 +205,7 @@ const CounsellorDashboard = () => {
     const meetingDate = prompt('Enter meeting date (YYYY-MM-DD):');
     if (!meetingDate) return;
     try {
-      const res = await fetch(`${API}/renewal/schedule-meeting?class_id=${classId}&meeting_date=${meetingDate}`, {
+      const res = await apiFetch(`${API}/renewal/schedule-meeting?class_id=${classId}&meeting_date=${meetingDate}`, {
         method: 'POST', credentials: 'include'
       });
       if (!res.ok) throw new Error(await getApiError(res));

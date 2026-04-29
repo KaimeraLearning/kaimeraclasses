@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-import { API } from '../utils/api';
+import { API , apiFetch} from '../utils/api';
 
 const ProtectedRoute = ({ children, requiredRole }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
@@ -19,7 +19,7 @@ const ProtectedRoute = ({ children, requiredRole }) => {
 
     const checkAuth = async () => {
       try {
-        const response = await fetch(`${API}/auth/me`, {
+        const response = await apiFetch(`${API}/auth/me`, {
           credentials: 'include'
         });
         

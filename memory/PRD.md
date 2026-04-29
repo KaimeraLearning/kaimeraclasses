@@ -13,6 +13,7 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - **Email**: Gmail SMTP (smtplib STARTTLS port 587) — used for admin/teacher OTP verification, demo notifications
 - **PDF**: fpdf2 (receipt generation)
 - **Diagnostics**: `/api/health/config` returns runtime env presence + SMTP reachability + system_pricing seeded — useful after deploys
+- **API Gateway Key**: All `/api/*` requests require an `x-api-key` header matching backend env `API_KEY`. Frontend bakes the key in via `REACT_APP_API_KEY` and a central `apiFetch` helper in `utils/api.js`. Exempt routes: `/api/webhook/razorpay` (Razorpay external callback) and OPTIONS preflight. Note: this is a soft gate — the key is visible in bundled JS, real auth still happens via JWT. (Apr 2026)
 
 ## Code Structure
 ```

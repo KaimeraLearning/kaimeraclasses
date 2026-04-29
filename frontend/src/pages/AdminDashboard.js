@@ -13,7 +13,7 @@ import {
   Mail, CheckCircle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { useDateRangeFilter } from '../components/DateRangeFilter';
 
 // ─── Reusable Sub-Components ───
@@ -95,7 +95,7 @@ const EmailConfigPanel = () => {
 
   const fetchConfig = async () => {
     try {
-      const r = await fetch(`${API}/admin/email-config`, { credentials: 'include' });
+      const r = await apiFetch(`${API}/admin/email-config`, { credentials: 'include' });
       if (r.ok) {
         const d = await r.json();
         setConfig(d);
@@ -113,7 +113,7 @@ const EmailConfigPanel = () => {
     }
     setBusy(true);
     try {
-      const r = await fetch(`${API}/admin/email-config`, {
+      const r = await apiFetch(`${API}/admin/email-config`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sender_email: senderEmail, app_password: appPassword })
@@ -130,7 +130,7 @@ const EmailConfigPanel = () => {
     if (!testTo) { toast.error('Enter a recipient'); return; }
     setBusy(true); setTestResult(null);
     try {
-      const r = await fetch(`${API}/admin/email-test`, {
+      const r = await apiFetch(`${API}/admin/email-test`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: testTo })
@@ -146,7 +146,7 @@ const EmailConfigPanel = () => {
     if (!window.confirm('Remove DB override and fall back to .env values?')) return;
     setBusy(true);
     try {
-      const r = await fetch(`${API}/admin/email-config`, {
+      const r = await apiFetch(`${API}/admin/email-config`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clear_db: true })
@@ -251,7 +251,7 @@ const AdminProofsPanel = ({ proofs, onApprove }) => {
     setSelected(p);
     setAdminNotes('');
     try {
-      const r = await fetch(`${API}/counsellor/proof-history/${p.class_id}`, { credentials: 'include' });
+      const r = await apiFetch(`${API}/counsellor/proof-history/${p.class_id}`, { credentials: 'include' });
       if (r.ok) setHistory(await r.json()); else setHistory({ current: [], archived: [] });
     } catch { setHistory({ current: [], archived: [] }); }
   };
@@ -514,15 +514,15 @@ const AdminDashboard = () => {
   const fetchAll = async () => {
     try {
       const [userRes, usersRes, classesRes, txnRes, dailyRes, complaintsRes, proofsRes, tmplRes, trackRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/admin/all-users`, { credentials: 'include' }),
-        fetch(`${API}/admin/classes`, { credentials: 'include' }),
-        fetch(`${API}/admin/transactions`, { credentials: 'include' }),
-        fetch(`${API}/admin/transactions?view=daily`, { credentials: 'include' }),
-        fetch(`${API}/admin/complaints`, { credentials: 'include' }),
-        fetch(`${API}/admin/approved-proofs`, { credentials: 'include' }),
-        fetch(`${API}/admin/badge-templates`, { credentials: 'include' }),
-        fetch(`${API}/admin/counsellor-tracking`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/all-users`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/classes`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/transactions`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/transactions?view=daily`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/complaints`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/approved-proofs`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/badge-templates`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/counsellor-tracking`, { credentials: 'include' })
       ]);
       if (!userRes.ok) throw new Error('Authentication failed. Please log in again.');
       setUser(await userRes.json());
@@ -542,7 +542,7 @@ const AdminDashboard = () => {
 
   const fetchLearningPlans = async () => {
     try {
-      const res = await fetch(`${API}/admin/learning-plans`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/learning-plans`, { credentials: 'include' });
       if (res.ok) setLearningPlans(await res.json());
     } catch {}
   };
@@ -553,7 +553,7 @@ const AdminDashboard = () => {
     try {
       const url = editingPlan ? `${API}/admin/learning-plans/${editingPlan}` : `${API}/admin/learning-plans`;
       const method = editingPlan ? 'PUT' : 'POST';
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method, credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: planForm.name, price: parseFloat(planForm.price), details: planForm.details, max_days: planForm.max_days ? parseInt(planForm.max_days) : null })
       });
@@ -568,7 +568,7 @@ const AdminDashboard = () => {
   const handleDeletePlan = async (planId) => {
     if (!window.confirm('Deactivate this learning plan?')) return;
     try {
-      const res = await fetch(`${API}/admin/learning-plans/${planId}`, { method: 'DELETE', credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/learning-plans/${planId}`, { method: 'DELETE', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Plan deactivated');
       fetchLearningPlans();
@@ -581,7 +581,7 @@ const AdminDashboard = () => {
       if (rpFilterName) params.set('student_name', rpFilterName);
       if (rpFilterFrom) params.set('date_from', rpFilterFrom);
       if (rpFilterTo) params.set('date_to', rpFilterTo);
-      const res = await fetch(`${API}/admin/payments?${params}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/payments?${params}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setRazorpayPayments(data.payments || []);
@@ -595,7 +595,7 @@ const AdminDashboard = () => {
     if (!createForm.name || !createForm.email) { toast.error('Name and email required'); return; }
     try {
       const body = { ...createForm, role: createRole, password: 'auto' };
-      const res = await fetch(`${API}/admin/create-user`, {
+      const res = await apiFetch(`${API}/admin/create-user`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
@@ -613,14 +613,14 @@ const AdminDashboard = () => {
     const u = allUsers.find(x => x.user_id === userId);
     setDrawerUser(u);
     try {
-      const res = await fetch(`${API}/admin/user-detail/${userId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/user-detail/${userId}`, { credentials: 'include' });
       if (res.ok) setDrawerData(await res.json());
     } catch {}
     // Fetch full profile for teacher/counselor to show extended details + bank info
     if (u && (u.role === 'teacher' || u.role === 'counsellor')) {
       try {
         const endpoint = u.role === 'teacher' ? 'teacher/view-profile' : 'counsellor/view-profile';
-        const pRes = await fetch(`${API}/${endpoint}/${userId}`, { credentials: 'include' });
+        const pRes = await apiFetch(`${API}/${endpoint}/${userId}`, { credentials: 'include' });
         if (pRes.ok) {
           const profileData = await pRes.json();
           setDrawerUser(prev => prev ? { ...prev, ...profileData } : prev);
@@ -632,7 +632,7 @@ const AdminDashboard = () => {
   const handleBlock = async (userId, blocked) => {
     if (!window.confirm(`${blocked ? 'Block' : 'Unblock'} this user?`)) return;
     try {
-      const res = await fetch(`${API}/admin/block-user`, {
+      const res = await apiFetch(`${API}/admin/block-user`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, blocked })
       });
@@ -645,7 +645,7 @@ const AdminDashboard = () => {
   const handleDelete = async (userId) => {
     if (!window.confirm('PERMANENTLY delete this user?')) return;
     try {
-      const res = await fetch(`${API}/admin/delete-user`, {
+      const res = await apiFetch(`${API}/admin/delete-user`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId })
       });
@@ -663,7 +663,7 @@ const AdminDashboard = () => {
       const body = { new_password: resetPassword };
       if (target.user_id) body.user_id = target.user_id;
       else if (target.email) body.email = target.email;
-      const res = await fetch(`${API}/admin/reset-password`, {
+      const res = await apiFetch(`${API}/admin/reset-password`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
@@ -678,7 +678,7 @@ const AdminDashboard = () => {
   const handleResetSearch = async () => {
     if (!resetSearchQuery && resetRoleFilter === 'all') return;
     try {
-      const res = await fetch(`${API}/admin/search-users-for-reset?q=${encodeURIComponent(resetSearchQuery)}&role=${resetRoleFilter}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/search-users-for-reset?q=${encodeURIComponent(resetSearchQuery)}&role=${resetRoleFilter}`, { credentials: 'include' });
       if (res.ok) setResetSearchResults(await res.json());
     } catch {}
   };
@@ -686,7 +686,7 @@ const AdminDashboard = () => {
   const handleAdjustCredits = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${API}/admin/adjust-credits`, {
+      const res = await apiFetch(`${API}/admin/adjust-credits`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: creditUser, amount: parseFloat(creditAmount), action: creditAction })
       });
@@ -702,7 +702,7 @@ const AdminDashboard = () => {
       ? providedNotes
       : (approved ? '' : (prompt('Reason for rejection:') || ''));
     try {
-      const res = await fetch(`${API}/admin/approve-proof`, {
+      const res = await apiFetch(`${API}/admin/approve-proof`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ proof_id: proofId, approved, admin_notes: notes })
       });
@@ -715,7 +715,7 @@ const AdminDashboard = () => {
   const handleCreateBadgeTemplate = async () => {
     if (!newTemplateName.trim()) { toast.error('Badge name required'); return; }
     try {
-      const res = await fetch(`${API}/admin/badge-template`, {
+      const res = await apiFetch(`${API}/admin/badge-template`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newTemplateName.trim(), description: newTemplateDesc })
       });
@@ -728,7 +728,7 @@ const AdminDashboard = () => {
   };
 
   const handleDeleteBadgeTemplate = async (id) => {
-    await fetch(`${API}/admin/badge-template/${id}`, { method: 'DELETE', credentials: 'include' });
+    await apiFetch(`${API}/admin/badge-template/${id}`, { method: 'DELETE', credentials: 'include' });
     fetchAll();
   };
 
@@ -736,7 +736,7 @@ const AdminDashboard = () => {
     const badge = selectedTemplateBadge || badgeName;
     if (!badgeTarget || !badge) { toast.error('Select user and badge'); return; }
     try {
-      const res = await fetch(`${API}/admin/assign-badge`, {
+      const res = await apiFetch(`${API}/admin/assign-badge`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: badgeTarget, badge_name: badge })
       });
@@ -756,7 +756,7 @@ const AdminDashboard = () => {
     if (txnSearch) params.set('search', txnSearch);
     if (txnView === 'daily') params.set('view', 'daily');
     try {
-      const res = await fetch(`${API}/admin/transactions?${params}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/transactions?${params}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         if (txnView === 'daily') setDailyRevenue(data);
@@ -767,7 +767,7 @@ const AdminDashboard = () => {
 
   const fetchTeacherClasses = async (teacherId) => {
     try {
-      const res = await fetch(`${API}/admin/teacher-classes/${teacherId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/teacher-classes/${teacherId}`, { credentials: 'include' });
       if (res.ok) {
         setTeacherClasses(await res.json());
         setShowTeacherClassesDialog(true);
@@ -779,7 +779,7 @@ const AdminDashboard = () => {
   const fetchClassDetail = async (classId) => {
     if (expandedClassId === classId) { setExpandedClassId(null); return; }
     try {
-      const res = await fetch(`${API}/admin/class-detail/${classId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/class-detail/${classId}`, { credentials: 'include' });
       if (res.ok) {
         const detail = await res.json();
         // Merge detail into the classes list
@@ -796,7 +796,7 @@ const AdminDashboard = () => {
 
   const handleApproveTeacher = async (teacherId, approved) => {
     try {
-      await fetch(`${API}/admin/approve-teacher`, {
+      await apiFetch(`${API}/admin/approve-teacher`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: teacherId, approved })
       });
@@ -809,7 +809,7 @@ const AdminDashboard = () => {
     if (expandedCounsellor === cid) { setExpandedCounsellor(null); return; }
     setExpandedCounsellor(cid);
     try {
-      const res = await fetch(`${API}/admin/counsellor-daily-stats/${cid}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/counsellor-daily-stats/${cid}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setCounsellorDailyStats(prev => ({ ...prev, [cid]: data }));
@@ -818,13 +818,13 @@ const AdminDashboard = () => {
   };
 
   const handleLogout = async () => {
-    await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
+    await apiFetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
     navigate('/login');
   };
 
   const fetchPricing = async () => {
     try {
-      const res = await fetch(`${API}/admin/get-pricing`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/get-pricing`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setPricingForm({
@@ -842,7 +842,7 @@ const AdminDashboard = () => {
 
   const handleSavePricing = async () => {
     try {
-      const res = await fetch(`${API}/admin/set-pricing`, {
+      const res = await apiFetch(`${API}/admin/set-pricing`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           demo_price_student: parseFloat(pricingForm.demo_price_student) || 0,
@@ -879,7 +879,7 @@ const AdminDashboard = () => {
 
   const handleSaveStudentEdit = async () => {
     try {
-      const res = await fetch(`${API}/admin/edit-student/${drawerUser.user_id}`, {
+      const res = await apiFetch(`${API}/admin/edit-student/${drawerUser.user_id}`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm)
       });
@@ -895,7 +895,7 @@ const AdminDashboard = () => {
     if (!window.confirm('WARNING: This will delete ALL students, teachers, counselors, classes, demos, assignments, and pricing. Only the Admin account will remain. This action is IRREVERSIBLE. Are you sure?')) return;
     if (!window.confirm('FINAL CONFIRMATION: Type "yes" to proceed. Everything will be deleted.')) return;
     try {
-      const res = await fetch(`${API}/admin/purge-system`, { method: 'POST', credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/purge-system`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       toast.success('System purged! Fresh install state.');
       fetchAll();
