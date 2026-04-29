@@ -189,21 +189,7 @@ async def pay_from_wallet(request: Request, authorization: Optional[str] = Heade
         )
 
     # Deduct from wallet
-result = await db.users.update_one(
-    {
-        "user_id": user.user_id,
-        "credits": {"$gte": amount}   # 🔒 key condition
-    },
-    {
-        "$inc": {"credits": -amount}
-    }
-)
-
-if result.modified_count == 0:
-    raise HTTPException(
-        status_code=400,
-        detail=f"Insufficient wallet balance. Required: Rs.{amount}"
-    )
+    await db.users.update_one({"user_id": user.user_id}, {"$inc": {"credits": -amount}})
 
     # Record transaction
     payment_id = f"pay_{uuid.uuid4().hex[:12]}"
@@ -227,16 +213,14 @@ if result.modified_count == 0:
     })
 
     await db.transactions.insert_one({
-    "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
-    "user_id": user.user_id,
-    "type": "assignment_payment",
-    "amount": -abs(amount),   # 🔥 FORCE NEGATIVE
-    "description": f"Assignment payment (wallet): {assignment.get('learning_plan_name', 'Standard')}",
-    "assignment_id": assignment_id,
-    "payment_id": payment_id,
-    "counterparty_user_id": assignment.get('teacher_id'),
-    "status": "completed",
-    "created_at": datetime.now(timezone.utc).isoformat()
+        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id, "type": "assignment_payment",
+        "amount": -amount,
+        "description": f"Assignment payment (wallet): {assignment.get('learning_plan_name', 'Standard')} with {assignment.get('teacher_name')}",
+        "assignment_id": assignment_id,
+        "payment_id": payment_id,
+        "counterparty_user_id": assignment.get('teacher_id'),
+        "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
     })
     # Mirror: platform receives the wallet-payment
     await insert_admin_mirror_txn(
