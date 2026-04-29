@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { ArrowLeft, IndianRupee, Download, CreditCard, History, FileText, CheckCircle, Clock, Loader2 } from 'lucide-react';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
+import { txDirection, txDisplayAmount, txAmountClass } from '../utils/transactions';
 import { useDateRangeFilter } from '../components/DateRangeFilter';
 
 const WalletPage = () => {
@@ -18,9 +19,9 @@ const WalletPage = () => {
   const fetchData = async () => {
     try {
       const [meRes, payRes, txnRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/payments/my-payments`, { credentials: 'include' }),
-        fetch(`${API}/me/transactions`, { credentials: 'include' }).catch(() => ({ ok: false }))
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/payments/my-payments`, { credentials: 'include' }),
+        apiFetch(`${API}/me/transactions`, { credentials: 'include' }).catch(() => ({ ok: false }))
       ]);
       if (meRes.ok) setUser(await meRes.json());
       if (payRes.ok) setPayments(await payRes.json());
@@ -148,14 +149,15 @@ const WalletPage = () => {
                 <tbody>
                   {txnsFilter.filtered.map(t => {
                     const ref = t.reference || {};
+                    const isOutflow = txDirection(t) === 'outflow';
                     return (
                       <tr key={t.transaction_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`txn-row-${t.transaction_id}`}>
                         <td className="p-3 text-xs text-slate-600 whitespace-nowrap align-top">{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</td>
                         <td className="p-3 text-xs align-top">
                           <p className="font-semibold text-slate-800">{t.description}</p>
                           {ref.counterparty_name && (
-                            <p className={`text-[11px] mt-0.5 ${t.amount < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                              {t.amount < 0 ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
+                            <p className={`text-[11px] mt-0.5 ${isOutflow ? 'text-red-500' : 'text-emerald-600'}`}>
+                              {isOutflow ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
                               {ref.counterparty_role && <span className="text-slate-400"> ({ref.counterparty_role})</span>}
                             </p>
                           )}
@@ -163,8 +165,8 @@ const WalletPage = () => {
                           {ref.receipt_id && <p className="text-[10px] font-mono text-slate-400 mt-0.5">Receipt: {ref.receipt_id}</p>}
                           {ref.razorpay_payment_id && <p className="text-[10px] font-mono text-slate-400">Razorpay: {ref.razorpay_payment_id}</p>}
                         </td>
-                        <td className={`p-3 text-right text-xs font-bold align-top ${t.amount < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                          {t.amount < 0 ? '' : '+'}{t.amount}
+                        <td className={`p-3 text-right text-xs font-bold align-top ${txAmountClass(t)}`}>
+                          {txDisplayAmount(t)}
                         </td>
                         <td className="p-3 text-center align-top">
                           {ref.payment_id ? (

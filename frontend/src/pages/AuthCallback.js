@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 
-import { API } from '../utils/api';
+import { API , apiFetch} from '../utils/api';
 
 const AuthCallback = () => {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ const AuthCallback = () => {
         }
 
         // Exchange session_id for user session
-        const response = await fetch(`${API}/auth/session`, {
+        const response = await apiFetch(`${API}/auth/session`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',

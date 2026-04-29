@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
 import { GraduationCap, Send, Calendar, Clock, User, Mail, Phone, Building, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
-import { API } from '../utils/api';
+import { API , apiFetch} from '../utils/api';
 
 const BookDemo = () => {
   const navigate = useNavigate();
@@ -28,7 +28,7 @@ const BookDemo = () => {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const res = await fetch(`${API}/auth/me`, { credentials: 'include' });
+        const res = await apiFetch(`${API}/auth/me`, { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           setUser(data);
@@ -61,6 +61,13 @@ const BookDemo = () => {
       toast.error('Please enter a valid phone number');
       return;
     }
+    if (form.preferred_date && form.preferred_time_slot) {
+      const scheduled = new Date(`${form.preferred_date}T${form.preferred_time_slot}:00`);
+      if (Number.isNaN(scheduled.getTime()) || scheduled <= new Date()) {
+        toast.error('Please pick a future date and time. Past slots are not allowed.');
+        return;
+      }
+    }
     setIsLoading(true);
     try {
       const payload = {
@@ -73,7 +80,7 @@ const BookDemo = () => {
         preferred_time_slot: form.preferred_time_slot,
         message: form.message || null
       };
-      const res = await fetch(`${API}/demo/request`, {
+      const res = await apiFetch(`${API}/demo/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

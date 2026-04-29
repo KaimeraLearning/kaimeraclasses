@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { toast } from 'sonner';
 import { ArrowLeft, User, CreditCard, Calendar, MapPin, Target, CalendarClock, Phone, Search } from 'lucide-react';
 
-import { API } from '../utils/api';
+import { API , apiFetch} from '../utils/api';
 
 const CounsellorStudents = () => {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ const CounsellorStudents = () => {
 
   const fetchStudents = async () => {
     try {
-      const response = await fetch(`${API}/counsellor/dashboard`, { credentials: 'include' });
+      const response = await apiFetch(`${API}/counsellor/dashboard`, { credentials: 'include' });
       if (!response.ok) throw new Error('Failed to fetch');
       const data = await response.json();
       setStudents(data.all_students || []);
@@ -43,16 +43,16 @@ const CounsellorStudents = () => {
     setStudentProfile(null);
     setShowDetailsDialog(true);
     try {
-      const res = await fetch(`${API}/counsellor/student-profile/${student.user_id}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/counsellor/student-profile/${student.user_id}`, { credentials: 'include' });
       if (res.ok) setStudentProfile(await res.json());
-      const attRes = await fetch(`${API}/counsellor/student-attendance/${student.user_id}`, { credentials: 'include' });
+      const attRes = await apiFetch(`${API}/counsellor/student-attendance/${student.user_id}`, { credentials: 'include' });
       if (attRes.ok) {
         const attData = await attRes.json();
         setStudentAttendance(attData.records || []);
         setAttendanceClasses(attData.classes || []);
         setSelectedAttClass('');
       }
-      const teacherRes = await fetch(`${API}/counsellor/dashboard`, { credentials: 'include' });
+      const teacherRes = await apiFetch(`${API}/counsellor/dashboard`, { credentials: 'include' });
       if (teacherRes.ok) {
         const dashData = await teacherRes.json();
         setTeachers(dashData.teachers || []);
@@ -64,7 +64,7 @@ const CounsellorStudents = () => {
     if (!selectedStudent) return;
     const url = classId ? `${API}/counsellor/student-attendance/${selectedStudent.user_id}?class_id=${classId}` : `${API}/counsellor/student-attendance/${selectedStudent.user_id}`;
     try {
-      const res = await fetch(url, { credentials: 'include' });
+      const res = await apiFetch(url, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setStudentAttendance(data.records || []);
@@ -78,7 +78,7 @@ const CounsellorStudents = () => {
     if (!currentAssignment) { toast.error('No active assignment found'); return; }
     if (!window.confirm(`Transfer ${selectedStudent.name} to a new teacher? The old teacher's rating will be deducted.`)) return;
     try {
-      const res = await fetch(`${API}/counsellor/transfer-student`, {
+      const res = await apiFetch(`${API}/counsellor/transfer-student`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           student_id: selectedStudent.user_id,
@@ -323,7 +323,7 @@ const CounsellorStudents = () => {
                   <Button onClick={async () => {
                     if (!window.confirm(`Mark ${selectedStudent?.name} as finished? They will be removed from teacher and your dashboard.`)) return;
                     try {
-                      const res = await fetch(`${API}/counsellor/finish-student`, {
+                      const res = await apiFetch(`${API}/counsellor/finish-student`, {
                         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ student_id: selectedStudent.user_id, teacher_id: studentProfile.current_assignment.teacher_id })
                       });

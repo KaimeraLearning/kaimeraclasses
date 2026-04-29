@@ -1,4 +1,4 @@
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -19,8 +19,8 @@ const DemoLiveSheet = () => {
   const fetchData = useCallback(async () => {
     try {
       const [userRes, sheetRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/demo/live-sheet`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/demo/live-sheet`, { credentials: 'include' })
       ]);
       if (!userRes.ok) { navigate('/login'); return; }
       const userData = await userRes.json();
@@ -40,7 +40,7 @@ const DemoLiveSheet = () => {
   const handleAccept = async (demoId) => {
     setAcceptingId(demoId);
     try {
-      const res = await fetch(`${API}/demo/accept/${demoId}`, {
+      const res = await apiFetch(`${API}/demo/accept/${demoId}`, {
         method: 'POST', credentials: 'include'
       });
       if (!res.ok) throw new Error(await getApiError(res));
@@ -59,7 +59,7 @@ const DemoLiveSheet = () => {
     if (!teacherId) { toast.error('Select a teacher first'); return; }
     setAssigningId(demoId);
     try {
-      const res = await fetch(`${API}/demo/assign`, {
+      const res = await apiFetch(`${API}/demo/assign`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ demo_id: demoId, teacher_id: teacherId })

@@ -1,3 +1,4 @@
+import { Country, State, City } from "country-state-city";
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -9,11 +10,14 @@ import { toast } from 'sonner';
 import {
   GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap,
   History, Search, Shield, Award, Filter, BookOpen, KeyRound, Users, Trash2, Plus,
-  Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil, IndianRupee, Download
+  Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil, IndianRupee, Download,
+  Mail, CheckCircle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { useDateRangeFilter } from '../components/DateRangeFilter';
+import EmailTemplateManager from '../components/EmailTemplateManager';
+import { txDirection, txDisplayAmount, txAmountClass, adminTypeLabel } from '../utils/transactions';
 
 // ─── Reusable Sub-Components ───
 
@@ -42,6 +46,7 @@ const DrawerWalletHistory = ({ transactions }) => {
         <div className="space-y-1 max-h-72 overflow-y-auto">
           {filtered.map((t, i) => {
             const ref = t.reference || {};
+            const isOut = txDirection(t) === 'outflow';
             return (
               <div key={t.transaction_id || i} className="bg-slate-50 rounded-lg p-2 text-xs" data-testid={`drawer-txn-${i}`}>
                 <div className="flex justify-between items-center gap-2">
@@ -49,13 +54,13 @@ const DrawerWalletHistory = ({ transactions }) => {
                     <p className="font-medium text-slate-800 truncate">{t.description}</p>
                     <p className="text-[10px] text-slate-400">{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</p>
                   </div>
-                  <span className={`font-semibold whitespace-nowrap ${t.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{t.amount > 0 ? '+' : ''}{t.amount}</span>
+                  <span className={`font-semibold whitespace-nowrap ${txAmountClass(t)}`}>{txDisplayAmount(t)}</span>
                 </div>
                 {(ref.class_title || ref.receipt_id || ref.razorpay_payment_id || ref.counterparty_name) && (
                   <div className="mt-1 pt-1 border-t border-slate-200 text-[10px] text-slate-500 space-y-0.5">
                     {ref.counterparty_name && (
-                      <p className={t.amount < 0 ? 'text-red-500' : 'text-emerald-600'}>
-                        {t.amount < 0 ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
+                      <p className={isOut ? 'text-red-500' : 'text-emerald-600'}>
+                        {isOut ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
                         {ref.counterparty_role && <span className="text-slate-400"> ({ref.counterparty_role})</span>}
                       </p>
                     )}
@@ -82,6 +87,128 @@ const DrawerWalletHistory = ({ transactions }) => {
     </div>
   );
 };
+
+// Live-editable Email Config — admin can update SMTP without redeploy.
+const EmailConfigPanel = () => {
+  const [config, setConfig] = useState(null);
+  const [senderEmail, setSenderEmail] = useState('');
+  const [appPassword, setAppPassword] = useState('');
+  const [testTo, setTestTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  const fetchConfig = async () => {
+    try {
+      const r = await apiFetch(`${API}/admin/email-config`, { credentials: 'include' });
+      if (r.ok) {
+        const d = await r.json();
+        setConfig(d);
+        if (!senderEmail) setSenderEmail(d.active_sender_email || '');
+        if (!testTo) setTestTo(d.active_sender_email || '');
+      }
+    } catch {}
+  };
+
+  useEffect(() => { fetchConfig(); }, []);
+
+  const save = async () => {
+    if (!senderEmail && !appPassword) {
+      toast.error('Enter at least sender email or app password'); return;
+    }
+    setBusy(true);
+    try {
+      const r = await apiFetch(`${API}/admin/email-config`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sender_email: senderEmail, app_password: appPassword })
+      });
+      if (!r.ok) throw new Error(await getApiError(r));
+      toast.success('Email config saved');
+      setAppPassword('');
+      fetchConfig();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  const sendTest = async () => {
+    if (!testTo) { toast.error('Enter a recipient'); return; }
+    setBusy(true); setTestResult(null);
+    try {
+      const r = await apiFetch(`${API}/admin/email-test`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: testTo })
+      });
+      const d = await r.json();
+      setTestResult(d);
+      if (d.ok) toast.success(d.message); else toast.error(d.error || 'Test failed');
+    } catch (e) { toast.error(e.message); setTestResult({ ok: false, error: e.message }); }
+    setBusy(false);
+  };
+
+  const clearOverride = async () => {
+    if (!window.confirm('Remove DB override and fall back to .env values?')) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch(`${API}/admin/email-config`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear_db: true })
+      });
+      if (!r.ok) throw new Error(await getApiError(r));
+      toast.success('DB override cleared');
+      setAppPassword('');
+      fetchConfig();
+    } catch (e) { toast.error(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="bg-white rounded-3xl border-2 border-slate-100 p-6" data-testid="email-config-panel">
+      <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
+        <Mail className="w-5 h-5 text-rose-500" /> Email (Gmail SMTP) Config
+      </h3>
+      {config && (
+        <div className="bg-slate-50 rounded-xl p-3 text-xs space-y-1 mb-3" data-testid="email-config-status">
+          <p>Active sender: <strong className="text-slate-800">{config.active_sender_email || '(unset)'}</strong></p>
+          <p>Password: {config.password_set ? <span className="text-emerald-700 font-mono">{config.password_masked} ({config.password_length} chars)</span> : <span className="text-red-600">NOT SET</span>}</p>
+          <p>Source: <span className={config.source === 'database' ? 'text-violet-700' : 'text-slate-600'}>{config.source}</span></p>
+        </div>
+      )}
+      <div className="space-y-3">
+        <div>
+          <Label>Sender Email</Label>
+          <Input value={senderEmail} onChange={e => setSenderEmail(e.target.value)} placeholder="info@kaimeralearning.com" className="rounded-xl" data-testid="email-config-sender" />
+        </div>
+        <div>
+          <Label>Gmail App Password (16 chars, no spaces)</Label>
+          <Input type="password" value={appPassword} onChange={e => setAppPassword(e.target.value)} placeholder="Leave empty to keep current" className="rounded-xl font-mono" data-testid="email-config-password" />
+          <p className="text-[11px] text-slate-400 mt-1">Generated at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="underline text-sky-600">myaccount.google.com/apppasswords</a> — spaces auto-removed when saved.</p>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={save} disabled={busy} className="bg-rose-500 hover:bg-rose-600 text-white rounded-full flex-1" data-testid="email-config-save"><CheckCircle className="w-4 h-4 mr-2" /> Save</Button>
+          {config?.source === 'database' && (
+            <Button onClick={clearOverride} disabled={busy} variant="outline" className="rounded-full text-xs" data-testid="email-config-clear">Use .env</Button>
+          )}
+        </div>
+        <div className="border-t border-slate-100 pt-3 space-y-2">
+          <Label>Send Test Email To</Label>
+          <div className="flex gap-2">
+            <Input value={testTo} onChange={e => setTestTo(e.target.value)} placeholder="your@email.com" className="rounded-xl flex-1" data-testid="email-test-to" />
+            <Button onClick={sendTest} disabled={busy} className="bg-sky-500 hover:bg-sky-600 text-white rounded-full" data-testid="email-test-btn"><Mail className="w-4 h-4 mr-2" /> Test</Button>
+          </div>
+          {testResult && (
+            <div className={`rounded-xl p-3 text-sm ${testResult.ok ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'}`} data-testid="email-test-result">
+              <p className="font-semibold">{testResult.ok ? '✓ Sent successfully' : '✗ Failed'}</p>
+              <p className="text-xs mt-1 break-words">{testResult.message || testResult.error}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 
 // Admin proofs panel: groups by teacher+student, supports date filter, side-by-side compare with previous proof.
 const AdminProofsPanel = ({ proofs, onApprove }) => {
@@ -128,7 +255,7 @@ const AdminProofsPanel = ({ proofs, onApprove }) => {
     setSelected(p);
     setAdminNotes('');
     try {
-      const r = await fetch(`${API}/counsellor/proof-history/${p.class_id}`, { credentials: 'include' });
+      const r = await apiFetch(`${API}/counsellor/proof-history/${p.class_id}`, { credentials: 'include' });
       if (r.ok) setHistory(await r.json()); else setHistory({ current: [], archived: [] });
     } catch { setHistory({ current: [], archived: [] }); }
   };
@@ -293,6 +420,9 @@ const AdminDashboard = () => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mainTab, setMainTab] = useState('users');
+  const [countries, setCountries] = useState([]);
+  const [states, setStates] = useState([]);
+  const [cities, setCities] = useState([]);
 
   // Data stores
   const [allUsers, setAllUsers] = useState([]);
@@ -318,7 +448,7 @@ const AdminDashboard = () => {
 
   // Transactions
   const [txnSearch, setTxnSearch] = useState('');
-  const [txnRoleFilter, setTxnRoleFilter] = useState('all');
+  const [txnRoleFilter, setTxnRoleFilter] = useState('admin_own');
   const [txnDateFrom, setTxnDateFrom] = useState('');
   const [txnDateTo, setTxnDateTo] = useState('');
   const [txnView, setTxnView] = useState('daily');
@@ -388,18 +518,39 @@ const AdminDashboard = () => {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+  setCountries(Country.getAllCountries());
+  }, []);
+
+  useEffect(() => {
+  if (createForm.country) {
+    const st = State.getStatesOfCountry(createForm.country);
+    setStates(st);
+    setCities([]);
+    setCreateForm(prev => ({ ...prev, state: "", city: "" }));
+  }
+  }, [createForm.country]);
+
+  useEffect(() => {
+  if (createForm.state) {
+    const ct = City.getCitiesOfState(createForm.country, createForm.state);
+    setCities(ct);
+    setCreateForm(prev => ({ ...prev, city: "" }));
+  }
+  }, [createForm.state]);
+
   const fetchAll = async () => {
     try {
       const [userRes, usersRes, classesRes, txnRes, dailyRes, complaintsRes, proofsRes, tmplRes, trackRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/admin/all-users`, { credentials: 'include' }),
-        fetch(`${API}/admin/classes`, { credentials: 'include' }),
-        fetch(`${API}/admin/transactions`, { credentials: 'include' }),
-        fetch(`${API}/admin/transactions?view=daily`, { credentials: 'include' }),
-        fetch(`${API}/admin/complaints`, { credentials: 'include' }),
-        fetch(`${API}/admin/approved-proofs`, { credentials: 'include' }),
-        fetch(`${API}/admin/badge-templates`, { credentials: 'include' }),
-        fetch(`${API}/admin/counsellor-tracking`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/all-users`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/classes`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/transactions`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/transactions?view=daily&role=all`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/complaints`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/approved-proofs`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/badge-templates`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/counsellor-tracking`, { credentials: 'include' })
       ]);
       if (!userRes.ok) throw new Error('Authentication failed. Please log in again.');
       setUser(await userRes.json());
@@ -419,7 +570,7 @@ const AdminDashboard = () => {
 
   const fetchLearningPlans = async () => {
     try {
-      const res = await fetch(`${API}/admin/learning-plans`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/learning-plans`, { credentials: 'include' });
       if (res.ok) setLearningPlans(await res.json());
     } catch {}
   };
@@ -430,7 +581,7 @@ const AdminDashboard = () => {
     try {
       const url = editingPlan ? `${API}/admin/learning-plans/${editingPlan}` : `${API}/admin/learning-plans`;
       const method = editingPlan ? 'PUT' : 'POST';
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method, credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: planForm.name, price: parseFloat(planForm.price), details: planForm.details, max_days: planForm.max_days ? parseInt(planForm.max_days) : null })
       });
@@ -445,7 +596,7 @@ const AdminDashboard = () => {
   const handleDeletePlan = async (planId) => {
     if (!window.confirm('Deactivate this learning plan?')) return;
     try {
-      const res = await fetch(`${API}/admin/learning-plans/${planId}`, { method: 'DELETE', credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/learning-plans/${planId}`, { method: 'DELETE', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Plan deactivated');
       fetchLearningPlans();
@@ -458,7 +609,7 @@ const AdminDashboard = () => {
       if (rpFilterName) params.set('student_name', rpFilterName);
       if (rpFilterFrom) params.set('date_from', rpFilterFrom);
       if (rpFilterTo) params.set('date_to', rpFilterTo);
-      const res = await fetch(`${API}/admin/payments?${params}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/payments?${params}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setRazorpayPayments(data.payments || []);
@@ -472,7 +623,7 @@ const AdminDashboard = () => {
     if (!createForm.name || !createForm.email) { toast.error('Name and email required'); return; }
     try {
       const body = { ...createForm, role: createRole, password: 'auto' };
-      const res = await fetch(`${API}/admin/create-user`, {
+      const res = await apiFetch(`${API}/admin/create-user`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
@@ -490,14 +641,14 @@ const AdminDashboard = () => {
     const u = allUsers.find(x => x.user_id === userId);
     setDrawerUser(u);
     try {
-      const res = await fetch(`${API}/admin/user-detail/${userId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/user-detail/${userId}`, { credentials: 'include' });
       if (res.ok) setDrawerData(await res.json());
     } catch {}
     // Fetch full profile for teacher/counselor to show extended details + bank info
     if (u && (u.role === 'teacher' || u.role === 'counsellor')) {
       try {
         const endpoint = u.role === 'teacher' ? 'teacher/view-profile' : 'counsellor/view-profile';
-        const pRes = await fetch(`${API}/${endpoint}/${userId}`, { credentials: 'include' });
+        const pRes = await apiFetch(`${API}/${endpoint}/${userId}`, { credentials: 'include' });
         if (pRes.ok) {
           const profileData = await pRes.json();
           setDrawerUser(prev => prev ? { ...prev, ...profileData } : prev);
@@ -509,7 +660,7 @@ const AdminDashboard = () => {
   const handleBlock = async (userId, blocked) => {
     if (!window.confirm(`${blocked ? 'Block' : 'Unblock'} this user?`)) return;
     try {
-      const res = await fetch(`${API}/admin/block-user`, {
+      const res = await apiFetch(`${API}/admin/block-user`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, blocked })
       });
@@ -522,7 +673,7 @@ const AdminDashboard = () => {
   const handleDelete = async (userId) => {
     if (!window.confirm('PERMANENTLY delete this user?')) return;
     try {
-      const res = await fetch(`${API}/admin/delete-user`, {
+      const res = await apiFetch(`${API}/admin/delete-user`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId })
       });
@@ -540,7 +691,7 @@ const AdminDashboard = () => {
       const body = { new_password: resetPassword };
       if (target.user_id) body.user_id = target.user_id;
       else if (target.email) body.email = target.email;
-      const res = await fetch(`${API}/admin/reset-password`, {
+      const res = await apiFetch(`${API}/admin/reset-password`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
@@ -555,7 +706,7 @@ const AdminDashboard = () => {
   const handleResetSearch = async () => {
     if (!resetSearchQuery && resetRoleFilter === 'all') return;
     try {
-      const res = await fetch(`${API}/admin/search-users-for-reset?q=${encodeURIComponent(resetSearchQuery)}&role=${resetRoleFilter}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/search-users-for-reset?q=${encodeURIComponent(resetSearchQuery)}&role=${resetRoleFilter}`, { credentials: 'include' });
       if (res.ok) setResetSearchResults(await res.json());
     } catch {}
   };
@@ -563,7 +714,7 @@ const AdminDashboard = () => {
   const handleAdjustCredits = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${API}/admin/adjust-credits`, {
+      const res = await apiFetch(`${API}/admin/adjust-credits`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: creditUser, amount: parseFloat(creditAmount), action: creditAction })
       });
@@ -579,7 +730,7 @@ const AdminDashboard = () => {
       ? providedNotes
       : (approved ? '' : (prompt('Reason for rejection:') || ''));
     try {
-      const res = await fetch(`${API}/admin/approve-proof`, {
+      const res = await apiFetch(`${API}/admin/approve-proof`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ proof_id: proofId, approved, admin_notes: notes })
       });
@@ -592,7 +743,7 @@ const AdminDashboard = () => {
   const handleCreateBadgeTemplate = async () => {
     if (!newTemplateName.trim()) { toast.error('Badge name required'); return; }
     try {
-      const res = await fetch(`${API}/admin/badge-template`, {
+      const res = await apiFetch(`${API}/admin/badge-template`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newTemplateName.trim(), description: newTemplateDesc })
       });
@@ -605,7 +756,7 @@ const AdminDashboard = () => {
   };
 
   const handleDeleteBadgeTemplate = async (id) => {
-    await fetch(`${API}/admin/badge-template/${id}`, { method: 'DELETE', credentials: 'include' });
+    await apiFetch(`${API}/admin/badge-template/${id}`, { method: 'DELETE', credentials: 'include' });
     fetchAll();
   };
 
@@ -613,7 +764,7 @@ const AdminDashboard = () => {
     const badge = selectedTemplateBadge || badgeName;
     if (!badgeTarget || !badge) { toast.error('Select user and badge'); return; }
     try {
-      const res = await fetch(`${API}/admin/assign-badge`, {
+      const res = await apiFetch(`${API}/admin/assign-badge`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: badgeTarget, badge_name: badge })
       });
@@ -627,24 +778,32 @@ const AdminDashboard = () => {
 
   const handleFilterTransactions = async () => {
     const params = new URLSearchParams();
-    if (txnRoleFilter !== 'all') params.set('role', txnRoleFilter);
+    // 'admin_own' = no role param (server defaults to admin's own transactions)
+    if (txnRoleFilter && txnRoleFilter !== 'admin_own') params.set('role', txnRoleFilter);
     if (txnDateFrom) params.set('date_from', txnDateFrom);
     if (txnDateTo) params.set('date_to', txnDateTo);
     if (txnSearch) params.set('search', txnSearch);
     if (txnView === 'daily') params.set('view', 'daily');
     try {
-      const res = await fetch(`${API}/admin/transactions?${params}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/transactions?${params}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         if (txnView === 'daily') setDailyRevenue(data);
         else setTransactions(data);
       }
-    } catch {}
+    } catch { /* ignore network glitch */ }
   };
+
+  // Auto-refetch whenever the role filter or view changes so the displayed table
+  // always matches the active filter (no need to click "Apply").
+  useEffect(() => {
+    handleFilterTransactions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txnRoleFilter, txnView]);
 
   const fetchTeacherClasses = async (teacherId) => {
     try {
-      const res = await fetch(`${API}/admin/teacher-classes/${teacherId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/teacher-classes/${teacherId}`, { credentials: 'include' });
       if (res.ok) {
         setTeacherClasses(await res.json());
         setShowTeacherClassesDialog(true);
@@ -656,7 +815,7 @@ const AdminDashboard = () => {
   const fetchClassDetail = async (classId) => {
     if (expandedClassId === classId) { setExpandedClassId(null); return; }
     try {
-      const res = await fetch(`${API}/admin/class-detail/${classId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/class-detail/${classId}`, { credentials: 'include' });
       if (res.ok) {
         const detail = await res.json();
         // Merge detail into the classes list
@@ -673,7 +832,7 @@ const AdminDashboard = () => {
 
   const handleApproveTeacher = async (teacherId, approved) => {
     try {
-      await fetch(`${API}/admin/approve-teacher`, {
+      await apiFetch(`${API}/admin/approve-teacher`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: teacherId, approved })
       });
@@ -686,7 +845,7 @@ const AdminDashboard = () => {
     if (expandedCounsellor === cid) { setExpandedCounsellor(null); return; }
     setExpandedCounsellor(cid);
     try {
-      const res = await fetch(`${API}/admin/counsellor-daily-stats/${cid}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/counsellor-daily-stats/${cid}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setCounsellorDailyStats(prev => ({ ...prev, [cid]: data }));
@@ -695,13 +854,13 @@ const AdminDashboard = () => {
   };
 
   const handleLogout = async () => {
-    await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
+    await apiFetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
     navigate('/login');
   };
 
   const fetchPricing = async () => {
     try {
-      const res = await fetch(`${API}/admin/get-pricing`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/get-pricing`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setPricingForm({
@@ -719,7 +878,7 @@ const AdminDashboard = () => {
 
   const handleSavePricing = async () => {
     try {
-      const res = await fetch(`${API}/admin/set-pricing`, {
+      const res = await apiFetch(`${API}/admin/set-pricing`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           demo_price_student: parseFloat(pricingForm.demo_price_student) || 0,
@@ -756,7 +915,7 @@ const AdminDashboard = () => {
 
   const handleSaveStudentEdit = async () => {
     try {
-      const res = await fetch(`${API}/admin/edit-student/${drawerUser.user_id}`, {
+      const res = await apiFetch(`${API}/admin/edit-student/${drawerUser.user_id}`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm)
       });
@@ -772,7 +931,7 @@ const AdminDashboard = () => {
     if (!window.confirm('WARNING: This will delete ALL students, teachers, counselors, classes, demos, assignments, and pricing. Only the Admin account will remain. This action is IRREVERSIBLE. Are you sure?')) return;
     if (!window.confirm('FINAL CONFIRMATION: Type "yes" to proceed. Everything will be deleted.')) return;
     try {
-      const res = await fetch(`${API}/admin/purge-system`, { method: 'POST', credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/purge-system`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       toast.success('System purged! Fresh install state.');
       fetchAll();
@@ -893,9 +1052,10 @@ const AdminDashboard = () => {
                               </select>
                             </div>
                             <div><Label>Institute</Label><Input value={createForm.institute} onChange={e => setCreateForm({...createForm, institute: e.target.value})} className="rounded-xl" data-testid="create-institute" /></div>
-                            <div><Label>State</Label><Input value={createForm.state} onChange={e => setCreateForm({...createForm, state: e.target.value})} className="rounded-xl" data-testid="create-state" /></div>
-                            <div><Label>City</Label><Input value={createForm.city} onChange={e => setCreateForm({...createForm, city: e.target.value})} className="rounded-xl" data-testid="create-city" /></div>
-                            <div><Label>Country</Label><Input value={createForm.country} onChange={e => setCreateForm({...createForm, country: e.target.value})} className="rounded-xl" data-testid="create-country" /></div>
+                            <select value={createForm.country} onChange={(e)=>setCreateForm({...createForm,country:e.target.value})} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2">
+                            <option value="">Select Country</option>{countries.map(c=><option key={c.isoCode} value={c.isoCode}>{c.name}</option>)}</select>
+                            <select value={createForm.state} onChange={(e)=>setCreateForm({...createForm,state:e.target.value})} disabled={!createForm.country} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2"><option value="">Select State</option>{states.map(s=><option key={s.isoCode} value={s.isoCode}>{s.name}</option>)}</select>
+                            <select value={createForm.city} onChange={(e)=>setCreateForm({...createForm,city:e.target.value})} disabled={!createForm.state} className="w-full rounded-xl border-2 border-slate-200 px-3 py-2"><option value="">Select City</option>{cities.map((c,i)=><option key={i} value={c.name}>{c.name}</option>)}</select>
                             <div><Label>Goal</Label><Input value={createForm.goal} onChange={e => setCreateForm({...createForm, goal: e.target.value})} className="rounded-xl" data-testid="create-goal" /></div>
                           </div>
                         )}
@@ -1001,6 +1161,7 @@ const AdminDashboard = () => {
               {/* ── Credentials & Access ── */}
               <TabsContent value="credentials">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <EmailConfigPanel />
                   <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
                     <h3 className="font-semibold text-slate-800 mb-3 flex items-center gap-2"><KeyRound className="w-5 h-5 text-amber-500" /> Reset Password</h3>
                     <div className="space-y-3">
@@ -1069,6 +1230,9 @@ const AdminDashboard = () => {
                       </div>
                     </div>
                   </div>
+                </div>
+                <div className="mt-6">
+                  <EmailTemplateManager />
                 </div>
               </TabsContent>
             </Tabs>
@@ -1161,8 +1325,14 @@ const AdminDashboard = () => {
                       </div>
                     </div>
                     <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
-                      {['all', 'student', 'teacher', 'counsellor'].map(r => (
-                        <button key={r} onClick={() => setTxnRoleFilter(r)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${txnRoleFilter === r ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`} data-testid={`txn-filter-${r}`}>{r === 'all' ? 'All' : r.charAt(0).toUpperCase() + r.slice(1)}</button>
+                      {[
+                        { v: 'admin_own', label: 'My Wallet' },
+                        { v: 'all', label: 'All Users' },
+                        { v: 'student', label: 'Student' },
+                        { v: 'teacher', label: 'Teacher' },
+                        { v: 'counsellor', label: 'Counsellor' },
+                      ].map(r => (
+                        <button key={r.v} onClick={() => setTxnRoleFilter(r.v)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${txnRoleFilter === r.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`} data-testid={`txn-filter-${r.v}`}>{r.label}</button>
                       ))}
                     </div>
                     <Input type="date" value={txnDateFrom} onChange={e => setTxnDateFrom(e.target.value)} className="rounded-xl w-36" data-testid="txn-date-from" />
@@ -1207,9 +1377,16 @@ const AdminDashboard = () => {
                       <table className="w-full">
                         <thead className="bg-slate-50 sticky top-0">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">User</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Role</th>
+                            {txnRoleFilter !== 'admin_own' && (
+                              <>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">User</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Role</th>
+                              </>
+                            )}
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Type</th>
+                            {txnRoleFilter === 'admin_own' && (
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Counterparty</th>
+                            )}
                             <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600">Amount</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Description / Reference</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Date</th>
@@ -1219,20 +1396,44 @@ const AdminDashboard = () => {
                         <tbody>
                           {transactions.slice(0, 100).map((txn, i) => {
                             const ref = txn.reference || {};
+                            const isAdminView = txnRoleFilter === 'admin_own';
+                            const isOut = txDirection(txn) === 'outflow';
                             return (
                               <tr key={txn.transaction_id || i} className="border-t border-slate-100 hover:bg-slate-50 align-top" data-testid={`txn-row-${i}`}>
-                                <td className="px-4 py-3">
-                                  <button onClick={() => txn.user_id && handleOpenDrawer(txn.user_id)} className="text-sm font-medium text-slate-900 hover:text-sky-600">{txn.user_name || 'Unknown'}</button>
-                                  <p className="text-xs text-slate-400 font-mono">{txn.user_code}</p>
+                                {!isAdminView && (
+                                  <>
+                                    <td className="px-4 py-3">
+                                      <button onClick={() => txn.user_id && handleOpenDrawer(txn.user_id)} className="text-sm font-medium text-slate-900 hover:text-sky-600">{txn.user_name || 'Unknown'}</button>
+                                      <p className="text-xs text-slate-400 font-mono">{txn.user_code}</p>
+                                    </td>
+                                    <td className="px-4 py-3"><RoleBadge role={txn.user_role} /></td>
+                                  </>
+                                )}
+                                <td className="px-4 py-3 text-xs">
+                                  {isAdminView ? (
+                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${isOut ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                                      {adminTypeLabel(txn.type)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-500">{txn.type}</span>
+                                  )}
                                 </td>
-                                <td className="px-4 py-3"><RoleBadge role={txn.user_role} /></td>
-                                <td className="px-4 py-3 text-xs text-slate-500">{txn.type}</td>
-                                <td className={`px-4 py-3 text-sm text-right font-bold ${txn.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{txn.amount > 0 ? '+' : ''}{txn.amount}</td>
+                                {isAdminView && (
+                                  <td className="px-4 py-3 text-xs">
+                                    {ref.counterparty_name ? (
+                                      <button onClick={() => ref.counterparty_user_id && handleOpenDrawer(ref.counterparty_user_id)} className="text-left">
+                                        <p className="font-semibold text-slate-800 hover:text-sky-600">{ref.counterparty_name}</p>
+                                        {ref.counterparty_role && <p className="text-[11px] text-slate-400 capitalize">{ref.counterparty_role}</p>}
+                                      </button>
+                                    ) : <span className="text-slate-300">—</span>}
+                                  </td>
+                                )}
+                                <td className={`px-4 py-3 text-sm text-right font-bold ${txAmountClass(txn)}`}>{txDisplayAmount(txn)}</td>
                                 <td className="px-4 py-3 text-sm text-slate-600 max-w-[260px]">
                                   <p className="truncate">{txn.description}</p>
-                                  {ref.counterparty_name && (
-                                    <p className={`text-[11px] mt-0.5 ${txn.amount < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                                      {txn.amount < 0 ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
+                                  {!isAdminView && ref.counterparty_name && (
+                                    <p className={`text-[11px] mt-0.5 ${isOut ? 'text-red-500' : 'text-emerald-600'}`}>
+                                      {isOut ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
                                       {ref.counterparty_role && <span className="text-slate-400"> ({ref.counterparty_role})</span>}
                                     </p>
                                   )}

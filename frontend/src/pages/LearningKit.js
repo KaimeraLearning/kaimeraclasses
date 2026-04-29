@@ -1,4 +1,4 @@
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -22,8 +22,8 @@ const LearningKit = () => {
   const fetchData = useCallback(async () => {
     try {
       const [userRes, gradesRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/learning-kit/grades`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/learning-kit/grades`, { credentials: 'include' })
       ]);
       if (!userRes.ok) { navigate('/login'); return; }
       const userData = await userRes.json();
@@ -32,7 +32,7 @@ const LearningKit = () => {
 
       // Fetch kits
       const gradeParam = userData.role === 'student' && userData.grade ? `?grade=${userData.grade}` : (selectedGrade ? `?grade=${selectedGrade}` : '');
-      const kitsRes = await fetch(`${API}/learning-kit${gradeParam}`, { credentials: 'include' });
+      const kitsRes = await apiFetch(`${API}/learning-kit${gradeParam}`, { credentials: 'include' });
       if (kitsRes.ok) setKits(await kitsRes.json());
     } catch { toast.error('Failed to load'); }
     finally { setLoading(false); }
@@ -53,7 +53,7 @@ const LearningKit = () => {
       formData.append('grade', uploadForm.grade);
       formData.append('description', uploadForm.description);
       formData.append('file', file);
-      const res = await fetch(`${API}/admin/learning-kit/upload`, {
+      const res = await apiFetch(`${API}/admin/learning-kit/upload`, {
         method: 'POST', credentials: 'include', body: formData
       });
       if (!res.ok) throw new Error(await getApiError(res));
@@ -68,7 +68,7 @@ const LearningKit = () => {
   const handleDelete = async (kitId) => {
     if (!window.confirm('Delete this kit?')) return;
     try {
-      const res = await fetch(`${API}/admin/learning-kit/${kitId}`, { method: 'DELETE', credentials: 'include' });
+      const res = await apiFetch(`${API}/admin/learning-kit/${kitId}`, { method: 'DELETE', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Kit deleted');
       fetchData();

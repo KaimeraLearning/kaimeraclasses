@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck, Upload, MessageSquare, Bell, Play, ChevronDown, ChevronUp, Zap, CreditCard, BookOpen, CalendarDays, Search, User, Star, AlertTriangle, XCircle, CheckCircle, Clock, Camera, CalendarCheck } from 'lucide-react';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { ViewProfilePopup } from '../components/ViewProfilePopup';
 
 const TeacherDashboard = () => {
@@ -78,7 +78,7 @@ const TeacherDashboard = () => {
 
   const fetchUser = async () => {
     try {
-      const res = await fetch(`${API}/auth/me`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/auth/me`, { credentials: 'include' });
       if (!res.ok) { navigate('/login'); return; }
       setUser(await res.json());
     } catch { navigate('/login'); }
@@ -87,8 +87,8 @@ const TeacherDashboard = () => {
   const fetchDashboardData = async () => {
     try {
       const [dashRes, groupedRes] = await Promise.all([
-        fetch(`${API}/teacher/dashboard`, { credentials: 'include' }),
-        fetch(`${API}/teacher/grouped-classes`, { credentials: 'include' })
+        apiFetch(`${API}/teacher/dashboard`, { credentials: 'include' }),
+        apiFetch(`${API}/teacher/grouped-classes`, { credentials: 'include' })
       ]);
       if (dashRes.ok) {
         const data = await dashRes.json();
@@ -96,7 +96,7 @@ const TeacherDashboard = () => {
       }
       if (groupedRes.ok) setGroupedData(await groupedRes.json());
       try {
-        const demoFbRes = await fetch(`${API}/teacher/pending-demo-feedback`, { credentials: 'include' });
+        const demoFbRes = await apiFetch(`${API}/teacher/pending-demo-feedback`, { credentials: 'include' });
         if (demoFbRes.ok) setPendingDemoFeedback(await demoFbRes.json());
       } catch {}
       setLoading(false);
@@ -105,35 +105,35 @@ const TeacherDashboard = () => {
 
   const fetchNotifications = async () => {
     try {
-      const res = await fetch(`${API}/notifications`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/notifications`, { credentials: 'include' });
       if (res.ok) { const data = await res.json(); setNotifications(data); setUnreadCount(data.filter(n => !n.read).length); }
     } catch {}
   };
 
   const fetchRating = async () => {
     try {
-      const res = await fetch(`${API}/teacher/my-rating`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/teacher/my-rating`, { credentials: 'include' });
       if (res.ok) setRatingData(await res.json());
     } catch {}
   };
 
   const fetchAttendance = async () => {
     try {
-      const res = await fetch(`${API}/attendance/teacher`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/attendance/teacher`, { credentials: 'include' });
       if (res.ok) { setAttendanceRecords(await res.json()); setShowAttendanceDialog(true); }
     } catch {}
   };
 
   const fetchUnmarkedAttendance = async () => {
     try {
-      const res = await fetch(`${API}/attendance/unmarked`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/attendance/unmarked`, { credentials: 'include' });
       if (res.ok) setUnmarkedAttendance(await res.json());
     } catch {}
   };
 
   const fetchTodayClasses = async (studentId) => {
     try {
-      const res = await fetch(`${API}/attendance/class-today/${studentId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/attendance/class-today/${studentId}`, { credentials: 'include' });
       if (res.ok) {
         const classes = await res.json();
         setTodayClassesForAttendance(prev => ({ ...prev, [studentId]: classes }));
@@ -146,7 +146,7 @@ const TeacherDashboard = () => {
     setExpandedStudent(studentId);
     if (!studentDetail[studentId]) {
       try {
-        const res = await fetch(`${API}/teacher/student-detail/${studentId}`, { credentials: 'include' });
+        const res = await apiFetch(`${API}/teacher/student-detail/${studentId}`, { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           setStudentDetail(prev => ({ ...prev, [studentId]: data }));
@@ -161,7 +161,7 @@ const TeacherDashboard = () => {
       const payload = { student_id: studentId, date, status };
       if (reason) payload.reason = reason;
       if (classId) payload.class_id = classId;
-      const res = await fetch(`${API}/attendance/mark`, {
+      const res = await apiFetch(`${API}/attendance/mark`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -186,7 +186,7 @@ const TeacherDashboard = () => {
       toast.error('Please fill all required fields'); return;
     }
     try {
-      const res = await fetch(`${API}/classes/create`, {
+      const res = await apiFetch(`${API}/classes/create`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify(classForm)
       });
@@ -201,7 +201,7 @@ const TeacherDashboard = () => {
   const handleDeleteClass = async (classId) => {
     if (!window.confirm('Delete this class?')) return;
     try {
-      const res = await fetch(`${API}/classes/delete/${classId}`, { method: 'DELETE', credentials: 'include' });
+      const res = await apiFetch(`${API}/classes/delete/${classId}`, { method: 'DELETE', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Class deleted'); fetchDashboardData();
     } catch (err) { toast.error(err.message); }
@@ -212,7 +212,7 @@ const TeacherDashboard = () => {
     if (!window.confirm("Cancel today's session? You must reschedule before the next session can start.")) return;
     setCancellingClassId(classId);
     try {
-      const res = await fetch(`${API}/teacher/cancel-class/${classId}`, { method: 'POST', credentials: 'include' });
+      const res = await apiFetch(`${API}/teacher/cancel-class/${classId}`, { method: 'POST', credentials: 'include' });
       let data;
       try { data = await res.json(); } catch { throw new Error('Failed to cancel session. Please try again.'); }
       if (!res.ok) throw new Error(data.detail || 'Failed to cancel session');
@@ -228,7 +228,7 @@ const TeacherDashboard = () => {
 
   const handleApproveAssignment = async (assignmentId, approved) => {
     try {
-      const res = await fetch(`${API}/teacher/approve-assignment`, {
+      const res = await apiFetch(`${API}/teacher/approve-assignment`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ assignment_id: assignmentId, approved })
       });
@@ -240,7 +240,7 @@ const TeacherDashboard = () => {
 
   const handleSubmitProof = async () => {
   try {
-    const res = await fetch(`${API}/teacher/submit-proof`, {
+    const res = await apiFetch(`${API}/teacher/submit-proof`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -275,7 +275,7 @@ const TeacherDashboard = () => {
   const handleSendFeedback = async () => {
     if (!feedbackForm.feedback_text) { toast.error('Please enter feedback'); return; }
     try {
-      const res = await fetch(`${API}/teacher/feedback-to-student`, {
+      const res = await apiFetch(`${API}/teacher/feedback-to-student`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ student_id: feedbackTarget.student_id, ...feedbackForm })
       });
@@ -291,7 +291,7 @@ const TeacherDashboard = () => {
       toast.error('All reschedule fields required'); return;
     }
     try {
-      const res = await fetch(`${API}/teacher/reschedule-class/${rescheduleTarget.class_id}`, {
+      const res = await apiFetch(`${API}/teacher/reschedule-class/${rescheduleTarget.class_id}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify(rescheduleForm)
       });
@@ -306,7 +306,7 @@ const TeacherDashboard = () => {
   const handleSubmitDemoFeedback = async () => {
     if (!demoFeedbackForm.feedback_text) { toast.error('Please enter demo feedback'); return; }
     try {
-      const res = await fetch(`${API}/teacher/submit-demo-feedback`, {
+      const res = await apiFetch(`${API}/teacher/submit-demo-feedback`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ demo_id: demoFeedbackTarget.demo_id, student_id: demoFeedbackTarget.student_id || demoFeedbackTarget.student_user_id, ...demoFeedbackForm })
       });
@@ -320,13 +320,13 @@ const TeacherDashboard = () => {
 
   const handleMarkAllRead = async () => {
     try {
-      await fetch(`${API}/notifications/mark-all-read`, { method: 'POST', credentials: 'include' });
+      await apiFetch(`${API}/notifications/mark-all-read`, { method: 'POST', credentials: 'include' });
       fetchNotifications();
     } catch {}
   };
 
   const handleLogout = async () => {
-    await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
+    await apiFetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
     navigate('/login');
   };
 

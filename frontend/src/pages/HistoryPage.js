@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import { ArrowLeft, Search, User, GraduationCap, Clock, BookOpen, FileText, MessageSquare, Star, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 
-import { API } from '../utils/api';
+import { API , apiFetch} from '../utils/api';
 
 const HistoryPage = () => {
   const navigate = useNavigate();
@@ -22,8 +22,8 @@ const HistoryPage = () => {
   const fetchUsers = useCallback(async () => {
     try {
       const [userRes, usersRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/history/users`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/history/users`, { credentials: 'include' })
       ]);
       if (!userRes.ok) { navigate('/login'); return; }
       setUser(await userRes.json());
@@ -37,7 +37,7 @@ const HistoryPage = () => {
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     try {
-      const res = await fetch(`${API}/history/search?q=${encodeURIComponent(searchQuery)}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/history/search?q=${encodeURIComponent(searchQuery)}`, { credentials: 'include' });
       if (res.ok) setSearchResults(await res.json());
     } catch { toast.error('Search failed'); }
   };
@@ -48,7 +48,7 @@ const HistoryPage = () => {
     setExpandedSections({});
     try {
       const endpoint = role === 'teacher' ? 'teacher' : 'student';
-      const res = await fetch(`${API}/history/${endpoint}/${userId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/history/${endpoint}/${userId}`, { credentials: 'include' });
       if (res.ok) setProfileData(await res.json());
       else toast.error('Failed to load profile');
     } catch { toast.error('Error loading profile'); }

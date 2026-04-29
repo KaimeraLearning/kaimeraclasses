@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { GraduationCap, ArrowLeft, CreditCard, Users, Check, IndianRupee, Loader2 } from 'lucide-react';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 
 const CREDIT_PACKAGES = [
   { id: 'pack_2000', credits: 2000, price: 2000, label: '2,000' },
@@ -26,8 +26,8 @@ const BrowseClasses = () => {
     const fetchData = async () => {
       try {
         const [clsRes, meRes] = await Promise.all([
-          fetch(`${API}/student/my-classes`, { credentials: 'include' }),
-          fetch(`${API}/auth/me`, { credentials: 'include' })
+          apiFetch(`${API}/student/my-classes`, { credentials: 'include' }),
+          apiFetch(`${API}/auth/me`, { credentials: 'include' })
         ]);
         if (clsRes.ok) setClasses(await clsRes.json());
         if (meRes.ok) { const me = await meRes.json(); setUserCredits(me.credits || 0); }
@@ -52,10 +52,14 @@ const BrowseClasses = () => {
   const handlePurchaseCredits = async (pkg) => {
     setIsProcessing(true);
     try {
-      const res = await fetch(`${API}/payments/recharge`, {
+      const isCustom = !pkg.id || pkg.id === 'custom';
+      const payload = isCustom
+        ? { custom_amount: pkg.price }
+        : { package_id: pkg.id };
+      const res = await apiFetch(`${API}/payments/recharge`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ package_id: pkg.id })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
@@ -71,7 +75,7 @@ const BrowseClasses = () => {
         prefill: { name: data.student_name, email: data.student_email },
         handler: async (response) => {
           try {
-            const verifyRes = await fetch(`${API}/payments/verify-recharge`, {
+            const verifyRes = await apiFetch(`${API}/payments/verify-recharge`, {
               method: 'POST', credentials: 'include',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

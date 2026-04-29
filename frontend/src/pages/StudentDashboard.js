@@ -6,7 +6,7 @@ import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { GraduationCap, LogOut, Calendar, CreditCard, BookOpen, Play, MessageSquare, Bell, AlertCircle, Lock, Star, Clock, User, XCircle, IndianRupee, Download, CheckCircle } from 'lucide-react';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { ViewProfilePopup } from '../components/ViewProfilePopup';
 
 const StudentDashboard = () => {
@@ -60,11 +60,11 @@ const StudentDashboard = () => {
   const fetchData = async () => {
     try {
       const [userRes, dashRes, notifRes, enrollRes, feedbackRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/student/dashboard`, { credentials: 'include' }),
-        fetch(`${API}/notifications/my`, { credentials: 'include' }),
-        fetch(`${API}/student/enrollment-status`, { credentials: 'include' }),
-        fetch(`${API}/student/demo-feedback-received`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/student/dashboard`, { credentials: 'include' }),
+        apiFetch(`${API}/notifications/my`, { credentials: 'include' }),
+        apiFetch(`${API}/student/enrollment-status`, { credentials: 'include' }),
+        apiFetch(`${API}/student/demo-feedback-received`, { credentials: 'include' })
       ]);
       if (!userRes.ok) throw new Error('Authentication failed. Please log in again.');
       const userData = await userRes.json();
@@ -87,13 +87,13 @@ const StudentDashboard = () => {
     setLoading(false);
   };
 
-  const handleLogout = async () => { await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' }); navigate('/login'); };
-  const handleMarkAllRead = async () => { await fetch(`${API}/notifications/mark-all-read`, { method: 'POST', credentials: 'include' }); fetchData(); };
+  const handleLogout = async () => { await apiFetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' }); navigate('/login'); };
+  const handleMarkAllRead = async () => { await apiFetch(`${API}/notifications/mark-all-read`, { method: 'POST', credentials: 'include' }); fetchData(); };
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const fetchAttendance = async () => {
     try {
-      const res = await fetch(`${API}/attendance/student`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/attendance/student`, { credentials: 'include' });
       if (res.ok) { setAttendanceRecords(await res.json()); setShowAttendanceDialog(true); }
     } catch {}
   };
@@ -118,7 +118,7 @@ const StudentDashboard = () => {
   const handlePayWithWallet = async (assignmentId) => {
     setPaymentLoading(true);
     try {
-      const res = await fetch(`${API}/payments/pay-from-wallet`, {
+      const res = await apiFetch(`${API}/payments/pay-from-wallet`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assignment_id: assignmentId })
       });
@@ -133,7 +133,7 @@ const StudentDashboard = () => {
   const handlePayWithRazorpay = async (assignmentId) => {
     setPaymentLoading(true);
     try {
-      const res = await fetch(`${API}/payments/create-order`, {
+      const res = await apiFetch(`${API}/payments/create-order`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assignment_id: assignmentId })
       });
@@ -152,7 +152,7 @@ const StudentDashboard = () => {
         prefill: { name: data.student_name, email: data.student_email },
         handler: async (response) => {
           try {
-            const verifyRes = await fetch(`${API}/payments/verify`, {
+            const verifyRes = await apiFetch(`${API}/payments/verify`, {
               method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 razorpay_order_id: response.razorpay_order_id,
@@ -177,7 +177,7 @@ const StudentDashboard = () => {
 
   const handleUpdateProfile = async () => {
     try {
-      const res = await fetch(`${API}/student/update-profile`, {
+      const res = await apiFetch(`${API}/student/update-profile`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profileForm)
       });
@@ -191,7 +191,7 @@ const StudentDashboard = () => {
   const handleCancelSession = async (classId) => {
     if (!window.confirm("Cancel today's session? Your teacher will reschedule.")) return;
     try {
-      const res = await fetch(`${API}/classes/cancel-session/${classId}`, {
+      const res = await apiFetch(`${API}/classes/cancel-session/${classId}`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
       });
@@ -204,7 +204,7 @@ const StudentDashboard = () => {
   const handleSubmitRating = async () => {
     if (!ratingForm.comments) { toast.error('Please enter comments'); return; }
     try {
-      const res = await fetch(`${API}/student/rate-class`, {
+      const res = await apiFetch(`${API}/student/rate-class`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ class_id: ratingTarget.class_id, rating: ratingForm.rating, comments: ratingForm.comments })
       });

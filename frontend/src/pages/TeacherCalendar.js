@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, Users, AlertCircle } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
 
-import { API } from '../utils/api';
+import { API , apiFetch} from '../utils/api';
 
 const TeacherCalendar = () => {
   const navigate = useNavigate();
@@ -19,7 +19,7 @@ const TeacherCalendar = () => {
 
   const fetchSchedule = async () => {
     try {
-      const res = await fetch(`${API}/teacher/schedule`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/teacher/schedule`, { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch schedule');
       setClasses(await res.json());
     } catch (err) { toast.error(err.message); }

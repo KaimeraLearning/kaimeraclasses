@@ -1,4 +1,4 @@
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -18,8 +18,8 @@ const DemoFeedback = () => {
   const fetchData = useCallback(async () => {
     try {
       const [userRes, demosRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/demo/my-demos`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/demo/my-demos`, { credentials: 'include' })
       ]);
       if (!userRes.ok) { navigate('/login'); return; }
       const userData = await userRes.json();
@@ -27,8 +27,21 @@ const DemoFeedback = () => {
 
       if (demosRes.ok) {
         const allDemos = await demosRes.json();
-        // Show demos that are accepted (class completed) but no feedback yet
-        const completedDemos = allDemos.filter(d => d.status === 'accepted' && !d.feedback_id);
+        // Show demos where:
+        //  - teacher accepted it (status='accepted')
+        //  - student hasn't submitted feedback yet
+        //  - the class date+time has actually passed (don't show upcoming classes!)
+        const now = new Date();
+        const completedDemos = allDemos.filter(d => {
+          if (d.status !== 'accepted' || d.feedback_id) return false;
+          if (!d.preferred_date) return false;
+          const slot = d.preferred_time_slot || '10:00';
+          // Treat the demo as a 1-hour session — only ask for feedback after it ends
+          const start = new Date(`${d.preferred_date}T${slot}:00`);
+          if (Number.isNaN(start.getTime())) return false;
+          const endApprox = new Date(start.getTime() + 60 * 60 * 1000);
+          return now >= endApprox;
+        });
         setDemos(completedDemos);
 
         // Get unique teacher names for selection
@@ -48,7 +61,7 @@ const DemoFeedback = () => {
 
     setSubmitting(demoId);
     try {
-      const res = await fetch(`${API}/demo/feedback`, {
+      const res = await apiFetch(`${API}/demo/feedback`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

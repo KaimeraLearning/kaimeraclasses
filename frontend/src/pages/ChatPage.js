@@ -5,7 +5,7 @@ import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
 import { ArrowLeft, Send, MessageSquare, User, Search } from 'lucide-react';
 
-import { API, getApiError } from '../utils/api';
+import { API, getApiError , apiFetch} from '../utils/api';
 
 const ChatPage = () => {
   const navigate = useNavigate();
@@ -42,7 +42,7 @@ const ChatPage = () => {
 
   const fetchUser = async () => {
     try {
-      const res = await fetch(`${API}/auth/me`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/auth/me`, { credentials: 'include' });
       if (!res.ok) { navigate('/login'); return; }
       setUser(await res.json());
     } catch { navigate('/login'); }
@@ -50,7 +50,7 @@ const ChatPage = () => {
 
   const fetchContacts = async () => {
     try {
-      const res = await fetch(`${API}/chat/contacts`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/chat/contacts`, { credentials: 'include' });
       if (res.ok) setContacts(await res.json());
     } catch {}
     setLoading(false);
@@ -58,14 +58,14 @@ const ChatPage = () => {
 
   const fetchConversations = async () => {
     try {
-      const res = await fetch(`${API}/chat/conversations`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/chat/conversations`, { credentials: 'include' });
       if (res.ok) setConversations(await res.json());
     } catch {}
   };
 
   const fetchMessages = async (partnerId) => {
     try {
-      const res = await fetch(`${API}/chat/messages/${partnerId}`, { credentials: 'include' });
+      const res = await apiFetch(`${API}/chat/messages/${partnerId}`, { credentials: 'include' });
       if (res.ok) {
         setMessages(await res.json());
         fetchConversations();
@@ -76,7 +76,7 @@ const ChatPage = () => {
   const handleSend = async () => {
     if (!newMessage.trim() || !selectedContact) return;
     try {
-      const res = await fetch(`${API}/chat/send`, {
+      const res = await apiFetch(`${API}/chat/send`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
         body: JSON.stringify({ recipient_id: selectedContact.user_id, message: newMessage.trim() })
       });

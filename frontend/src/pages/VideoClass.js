@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { Camera, PhoneOff, ArrowLeft, Loader2 } from 'lucide-react';
-import { getApiError, API } from '../utils/api';
+import { getApiError, API , apiFetch} from '../utils/api';
 
 const JITSI_SCRIPT_SRC = 'https://meet.jit.si/external_api.js';
 
@@ -37,8 +37,8 @@ const VideoClass = () => {
   const fetchData = useCallback(async () => {
     try {
       const [userRes, statusRes] = await Promise.all([
-        fetch(`${API}/auth/me`, { credentials: 'include' }),
-        fetch(`${API}/classes/status/${classId}`, { credentials: 'include' })
+        apiFetch(`${API}/auth/me`, { credentials: 'include' }),
+        apiFetch(`${API}/classes/status/${classId}`, { credentials: 'include' })
       ]);
       if (!userRes.ok) throw new Error('Authentication failed. Please log in again.');
       if (!statusRes.ok) throw new Error(await getApiError(statusRes));
@@ -118,7 +118,7 @@ const VideoClass = () => {
         api.addListener('videoConferenceLeft', async () => {
           if (!isMod) {
             try {
-              await fetch(`${API}/classes/student-left/${classId}`, {
+              await apiFetch(`${API}/classes/student-left/${classId}`, {
                 method: 'POST', credentials: 'include'
               });
             } catch {}
@@ -144,7 +144,7 @@ const VideoClass = () => {
 
   const handleStartClass = async () => {
     try {
-      const res = await fetch(`${API}/classes/start/${classId}`, { method: 'POST', credentials: 'include' });
+      const res = await apiFetch(`${API}/classes/start/${classId}`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       toast.success('Class started!');
       fetchData();
@@ -154,7 +154,7 @@ const VideoClass = () => {
   const handleEndClass = async () => {
     if (!window.confirm('End the class session?')) return;
     try {
-      const res = await fetch(`${API}/classes/end/${classId}`, { method: 'POST', credentials: 'include' });
+      const res = await apiFetch(`${API}/classes/end/${classId}`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error(await getApiError(res));
       try { apiRef.current && apiRef.current.dispose(); } catch {}
       apiRef.current = null;
