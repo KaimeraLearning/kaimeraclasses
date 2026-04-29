@@ -38,9 +38,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    docs_url="/docs" if os.environ.get("ENABLE_DOCS", "false").lower() == "true" else None,
-    redoc_url="/redoc" if os.environ.get("ENABLE_DOCS", "false").lower() == "true" else None,
-    openapi_url="/openapi.json" if os.environ.get("ENABLE_DOCS", "false").lower() == "true" else None,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None
 )
 
 
