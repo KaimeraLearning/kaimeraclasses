@@ -1417,6 +1417,7 @@ async def list_email_events(request: Request, authorization: Optional[str] = Hea
             "default": {f: ev.get(f, "") for f in ("subject", "title", "intro", "body_html", "cta_label", "cta_url")},
             "override": {f: ovr.get(f, "") for f in ("subject", "title", "intro", "body_html", "cta_label", "cta_url")} if ovr else {},
             "inline_image_id": ovr.get("inline_image_id"),
+            "logo_url": ovr.get("logo_url") or "",
             "attachment_ids": ovr.get("attachment_ids", []) or [],
         })
     return out
@@ -1441,6 +1442,7 @@ async def save_email_template(event_key: str, request: Request, authorization: O
         "cta_label": (body.get("cta_label") or "").strip(),
         "cta_url": (body.get("cta_url") or "").strip(),
         "inline_image_id": body.get("inline_image_id") or None,
+        "logo_url": (body.get("logo_url") or "").strip() or None,
         "attachment_ids": body.get("attachment_ids") or [],
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": user.user_id,
@@ -1486,7 +1488,9 @@ async def test_email_template(event_key: str, request: Request, authorization: O
         raise HTTPException(status_code=404, detail="Template missing")
     inline_images, attachments = await _resolve_template_media(tpl.get("inline_image_id"), tpl.get("attachment_ids", []))
     logo_cid = "logo" if inline_images else ""
-    html = _wrap_email_html(tpl["title"], tpl["intro"], tpl["body_html"], tpl["cta_label"], tpl["cta_url"], inline_logo_cid=logo_cid)
+    logo_url = tpl.get("logo_url") or ""
+    html = _wrap_email_html(tpl["title"], tpl["intro"], tpl["body_html"], tpl["cta_label"], tpl["cta_url"],
+                            inline_logo_cid=logo_cid, logo_url=logo_url)
     result = await send_email(to, tpl["subject"], html, inline_images=inline_images, attachments=attachments)
     if not result or (isinstance(result, dict) and result.get("error")):
         err = (result or {}).get("error", "unknown error")
