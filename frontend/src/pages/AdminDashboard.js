@@ -545,7 +545,7 @@ const AdminDashboard = () => {
         apiFetch(`${API}/auth/me`, { credentials: 'include' }),
         apiFetch(`${API}/admin/all-users`, { credentials: 'include' }),
         apiFetch(`${API}/admin/classes`, { credentials: 'include' }),
-        apiFetch(`${API}/admin/transactions?role=all`, { credentials: 'include' }),
+        apiFetch(`${API}/admin/transactions`, { credentials: 'include' }),
         apiFetch(`${API}/admin/transactions?view=daily&role=all`, { credentials: 'include' }),
         apiFetch(`${API}/admin/complaints`, { credentials: 'include' }),
         apiFetch(`${API}/admin/approved-proofs`, { credentials: 'include' }),
@@ -791,8 +791,15 @@ const AdminDashboard = () => {
         if (txnView === 'daily') setDailyRevenue(data);
         else setTransactions(data);
       }
-    } catch {}
+    } catch { /* ignore network glitch */ }
   };
+
+  // Auto-refetch whenever the role filter or view changes so the displayed table
+  // always matches the active filter (no need to click "Apply").
+  useEffect(() => {
+    handleFilterTransactions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txnRoleFilter, txnView]);
 
   const fetchTeacherClasses = async (teacherId) => {
     try {
