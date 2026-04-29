@@ -149,6 +149,7 @@ async def get_transactions(request: Request, authorization: Optional[str] = Head
             ref["razorpay_payment_id"] = p.get("razorpay_payment_id")
         if txn.get("counterparty_user_id") and cp_map.get(txn["counterparty_user_id"]):
             cp = cp_map[txn["counterparty_user_id"]]
+            ref["counterparty_user_id"] = txn["counterparty_user_id"]
             ref["counterparty_name"] = cp.get("name")
             ref["counterparty_role"] = cp.get("role")
         txn["reference"] = ref
@@ -204,9 +205,11 @@ async def adjust_credits(adjustment: CreditAdjustment, request: Request, authori
     if adjustment.user_id != user.user_id:
         await insert_admin_mirror_txn(
             amount=-txn_amount,
-            description=(f"Manual credit ADD to {target_user.get('name','user')} (-{adjustment.amount})"
-                         if adjustment.action == "add"
-                         else f"Manual credit DEDUCT from {target_user.get('name','user')} (+{adjustment.amount})"),
+            description=(
+                f"Credits added to {target_user.get('name','user')} ({target_user.get('role','user')}) — admin wallet debited {adjustment.amount}"
+                if adjustment.action == "add"
+                else f"Credits deducted from {target_user.get('name','user')} ({target_user.get('role','user')}) — admin wallet credited {adjustment.amount}"
+            ),
             txn_type="manual_adjustment",
             counterparty_user_id=adjustment.user_id
         )
