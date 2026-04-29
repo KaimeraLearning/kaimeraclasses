@@ -19,6 +19,7 @@ import { API, apiFetch, getApiError } from '../utils/api';
 export default function EmailTemplateManager() {
   const [events, setEvents] = useState([]);
   const [media, setMedia] = useState([]);
+  const [mediaUrls, setMediaUrls] = useState({}); // media_id -> blob:URL (for preview <img>)
   const [selectedKey, setSelectedKey] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -50,13 +51,38 @@ export default function EmailTemplateManager() {
     try {
       const r = await apiFetch(`${API}/admin/email-media`, { credentials: 'include' });
       const data = await r.json();
-      setMedia(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setMedia(list);
+      // Pre-fetch each image as a blob URL so <img> tags in the preview don't
+      // hit the API key gate (img tags can't carry the x-api-key header).
+      const urls = {};
+      await Promise.all(list.filter(m => m.kind === 'image').map(async m => {
+        try {
+          const ir = await apiFetch(`${API}/admin/email-media/file/${m.media_id}`, { credentials: 'include' });
+          if (!ir.ok) return;
+          const blob = await ir.blob();
+          urls[m.media_id] = URL.createObjectURL(blob);
+        } catch { /* ignore */ }
+      }));
+      // Revoke previous URLs to avoid leaks
+      setMediaUrls(prev => {
+        Object.values(prev).forEach(u => { try { URL.revokeObjectURL(u); } catch (_) { /* ignore */ } });
+        return urls;
+      });
     } catch (e) {
       // silent
     }
   };
 
   useEffect(() => { loadEvents(); loadMedia(); /* eslint-disable-next-line */ }, []);
+
+  // Cleanup all blob URLs when the component unmounts to avoid memory leaks.
+  useEffect(() => {
+    return () => {
+      Object.values(mediaUrls).forEach(u => { try { URL.revokeObjectURL(u); } catch (_) { /* ignore */ } });
+    };
+    // eslint-disable-next-line
+  }, []);
 
   const selectEvent = (ev) => {
     setSelectedKey(ev.event_key);
@@ -183,8 +209,9 @@ export default function EmailTemplateManager() {
     return txt.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, k) => `<span style="background:#fef3c7;padding:1px 6px;border-radius:4px;color:#92400e;font-weight:600;">[${k}]</span>`);
   };
   const previewLogo = inlineImageId ? media.find(m => m.media_id === inlineImageId) : null;
+  const previewLogoUrl = previewLogo ? mediaUrls[previewLogo.media_id] : '';
   const previewHtml = `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#f8fafc;border-radius:16px;">
-    ${previewLogo ? `<div style="text-align:center;margin:0 0 16px;"><img src="${API}/admin/email-media/file/${previewLogo.media_id}" alt="Logo" style="max-width:160px;max-height:80px;"/></div>` : ''}
+    ${previewLogoUrl ? `<div style="text-align:center;margin:0 0 16px;"><img src="${previewLogoUrl}" alt="Logo" style="max-width:160px;max-height:80px;"/></div>` : ''}
     <h2 style="color:#0ea5e9;margin:0 0 8px;">${sampleFill(title)}</h2>
     <p style="color:#475569;margin:0 0 16px;">${sampleFill(intro)}</p>
     ${sampleFill(bodyHtml)}
@@ -266,6 +293,9 @@ export default function EmailTemplateManager() {
           <div className="border-t border-slate-100 pt-3">
             <Label className="text-xs flex items-center gap-1 mb-2"><ImageIcon className="w-3.5 h-3.5" /> Inline Logo (shown at top of email)</Label>
             <div className="flex flex-wrap gap-2 items-center">
+              {inlineImageId && mediaUrls[inlineImageId] && (
+                <img src={mediaUrls[inlineImageId]} alt="logo preview" className="h-10 w-auto rounded border border-slate-200 bg-white p-1" data-testid="email-template-inline-thumb" />
+              )}
               <select
                 className="rounded-xl border-2 border-slate-200 px-2 py-1 text-xs flex-1 min-w-[140px]"
                 value={inlineImageId}
@@ -354,9 +384,13 @@ export default function EmailTemplateManager() {
               {media.map(m => (
                 <div key={m.media_id} className="flex items-center justify-between bg-slate-50 rounded-lg px-2 py-1 text-xs">
                   <div className="flex items-center gap-2 min-w-0">
-                    {m.kind === 'image'
-                      ? <ImageIcon className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-                      : <Paperclip className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />}
+                    {m.kind === 'image' && mediaUrls[m.media_id] ? (
+                      <img src={mediaUrls[m.media_id]} alt={m.filename} className="h-6 w-6 object-cover rounded border border-slate-200 flex-shrink-0" />
+                    ) : m.kind === 'image' ? (
+                      <ImageIcon className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                    ) : (
+                      <Paperclip className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                    )}
                     <span className="truncate">{m.filename}</span>
                     <span className="text-[10px] text-slate-400 flex-shrink-0">{(m.size / 1024).toFixed(1)}KB</span>
                   </div>

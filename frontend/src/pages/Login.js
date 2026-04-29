@@ -187,7 +187,7 @@ const Login = () => {
             <div className="flex-1 h-px bg-white/20" />
           </div>
 
-          <h2 className="text-lg font-bold text-white mb-4 text-center" data-testid="login-heading">Sign In</h2>
+          <h2 className="text-lg font-bold text-white mb-4 text-center" data-testid="login-heading">Welcome Back</h2>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
