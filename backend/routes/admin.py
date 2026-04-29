@@ -1464,11 +1464,12 @@ async def reset_email_template(event_key: str, request: Request, authorization: 
 
 @router.post("/admin/email-templates/{event_key}/test")
 async def test_email_template(event_key: str, request: Request, authorization: Optional[str] = Header(None)):
-    """Send the resolved template (with sample data) to a test recipient."""
+    """Send the resolved template (with sample data) to a test recipient. Returns real SMTP status."""
     user = await get_current_user(request, authorization)
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
-    from services.email_templates import EMAIL_EVENTS, invalidate_template_cache
+    from services.email_templates import EMAIL_EVENTS, invalidate_template_cache, resolve_template
+    from services.helpers import _wrap_email_html, _resolve_template_media, send_email
     if event_key not in EMAIL_EVENTS:
         raise HTTPException(status_code=404, detail="Unknown event_key")
     body = await request.json()
@@ -1480,9 +1481,17 @@ async def test_email_template(event_key: str, request: Request, authorization: O
     for v in EMAIL_EVENTS[event_key]["variables"]:
         sample_vars.setdefault(v, f"[{v}]")
     invalidate_template_cache()
-    from services.helpers import notify_event as _ne
-    await _ne(to_email=to, event_key=event_key, vars=sample_vars)
-    return {"ok": True, "message": f"Test email sent to {to}"}
+    tpl = await resolve_template(event_key, sample_vars)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template missing")
+    inline_images, attachments = await _resolve_template_media(tpl.get("inline_image_id"), tpl.get("attachment_ids", []))
+    logo_cid = "logo" if inline_images else ""
+    html = _wrap_email_html(tpl["title"], tpl["intro"], tpl["body_html"], tpl["cta_label"], tpl["cta_url"], inline_logo_cid=logo_cid)
+    result = await send_email(to, tpl["subject"], html, inline_images=inline_images, attachments=attachments)
+    if not result or (isinstance(result, dict) and result.get("error")):
+        err = (result or {}).get("error", "unknown error")
+        return {"ok": False, "error": err, "to": to}
+    return {"ok": True, "message": f"Test email sent to {to}", "to": to}
 
 
 # ─── Email Media Library (logos / attachments) ────────────────────────────────

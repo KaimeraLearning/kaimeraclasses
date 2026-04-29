@@ -132,7 +132,11 @@ export default function EmailTemplateManager() {
       });
       if (!r.ok) throw new Error(await getApiError(r));
       const data = await r.json();
-      toast.success(data.message || 'Test sent');
+      if (data.ok === false) {
+        toast.error(`SMTP rejected: ${data.error}`, { duration: 8000 });
+      } else {
+        toast.success(data.message || 'Test sent — check your inbox');
+      }
     } catch (e) {
       toast.error(e.message || 'Test failed');
     } finally { setBusy(false); }
