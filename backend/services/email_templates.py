@@ -203,6 +203,7 @@ async def resolve_template(event_key: str, vars: Optional[Dict[str, Any]] = None
         raw = override.get(field) if override.get(field) else base.get(field, "")
         out[field] = _substitute(raw, vars)
     out["inline_image_id"] = override.get("inline_image_id")
+    out["logo_url"] = (override.get("logo_url") or "").strip() or None
     out["attachment_ids"] = override.get("attachment_ids", []) or []
     return out
 

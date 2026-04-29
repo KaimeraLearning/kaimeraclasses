@@ -31,6 +31,7 @@ export default function EmailTemplateManager() {
   const [ctaLabel, setCtaLabel] = useState('');
   const [ctaUrl, setCtaUrl] = useState('');
   const [inlineImageId, setInlineImageId] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
   const [attachmentIds, setAttachmentIds] = useState([]);
 
   // test send
@@ -94,6 +95,7 @@ export default function EmailTemplateManager() {
     setCtaLabel(src.cta_label || '');
     setCtaUrl(src.cta_url || '');
     setInlineImageId(ev.inline_image_id || '');
+    setLogoUrl(ev.logo_url || '');
     setAttachmentIds(ev.attachment_ids || []);
   };
 
@@ -115,6 +117,7 @@ export default function EmailTemplateManager() {
           subject, title, intro, body_html: bodyHtml,
           cta_label: ctaLabel, cta_url: ctaUrl,
           inline_image_id: inlineImageId || null,
+          logo_url: logoUrl || null,
           attachment_ids: attachmentIds,
         }),
       });
@@ -210,8 +213,10 @@ export default function EmailTemplateManager() {
   };
   const previewLogo = inlineImageId ? media.find(m => m.media_id === inlineImageId) : null;
   const previewLogoUrl = previewLogo ? mediaUrls[previewLogo.media_id] : '';
+  // Logo precedence: inline-uploaded image (cid: in real email) > logoUrl (public URL).
+  const effectiveLogoSrc = previewLogoUrl || logoUrl || '';
   const previewHtml = `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#f8fafc;border-radius:16px;">
-    ${previewLogoUrl ? `<div style="text-align:center;margin:0 0 16px;"><img src="${previewLogoUrl}" alt="Logo" style="max-width:160px;max-height:80px;"/></div>` : ''}
+    ${effectiveLogoSrc ? `<div style="text-align:center;margin:0 0 16px;"><img src="${effectiveLogoSrc}" alt="Logo" style="max-width:160px;max-height:80px;"/></div>` : ''}
     <h2 style="color:#0ea5e9;margin:0 0 8px;">${sampleFill(title)}</h2>
     <p style="color:#475569;margin:0 0 16px;">${sampleFill(intro)}</p>
     ${sampleFill(bodyHtml)}
@@ -291,18 +296,19 @@ export default function EmailTemplateManager() {
 
           {/* Inline Logo */}
           <div className="border-t border-slate-100 pt-3">
-            <Label className="text-xs flex items-center gap-1 mb-2"><ImageIcon className="w-3.5 h-3.5" /> Inline Logo (shown at top of email)</Label>
-            <div className="flex flex-wrap gap-2 items-center">
-              {inlineImageId && mediaUrls[inlineImageId] && (
-                <img src={mediaUrls[inlineImageId]} alt="logo preview" className="h-10 w-auto rounded border border-slate-200 bg-white p-1" data-testid="email-template-inline-thumb" />
-              )}
+            <Label className="text-xs flex items-center gap-1 mb-2"><ImageIcon className="w-3.5 h-3.5" /> Logo (shown at top of email)</Label>
+            <p className="text-[11px] text-slate-400 mb-2">Use an upload (works on all email clients) <strong>or</strong> a public URL (simpler but Gmail may proxy/strip).</p>
+            <div className="flex flex-wrap gap-2 items-center mb-2">
+              {(inlineImageId && mediaUrls[inlineImageId]) || logoUrl ? (
+                <img src={mediaUrls[inlineImageId] || logoUrl} alt="logo preview" className="h-10 w-auto rounded border border-slate-200 bg-white p-1" data-testid="email-template-inline-thumb" onError={(e) => e.target.style.display = 'none'} />
+              ) : null}
               <select
                 className="rounded-xl border-2 border-slate-200 px-2 py-1 text-xs flex-1 min-w-[140px]"
                 value={inlineImageId}
                 onChange={e => setInlineImageId(e.target.value)}
                 data-testid="email-template-inline-select"
               >
-                <option value="">— None —</option>
+                <option value="">— Upload from library —</option>
                 {imageMedia.map(m => <option key={m.media_id} value={m.media_id}>{m.filename}</option>)}
               </select>
               <label className="cursor-pointer text-xs bg-slate-100 hover:bg-slate-200 rounded-full px-3 py-1.5 flex items-center gap-1" data-testid="email-template-upload-image">
@@ -310,6 +316,13 @@ export default function EmailTemplateManager() {
                 <input type="file" accept="image/*" className="hidden" onChange={e => uploadMedia(e, 'image')} />
               </label>
             </div>
+            <Input
+              value={logoUrl}
+              onChange={e => setLogoUrl(e.target.value)}
+              placeholder="…or paste a public image URL (https://...)"
+              className="rounded-xl text-xs"
+              data-testid="email-template-logo-url"
+            />
           </div>
 
           {/* Attachments */}
