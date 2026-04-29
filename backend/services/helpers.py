@@ -239,15 +239,19 @@ import string as _string
 
 
 def _wrap_email_html(title: str, intro: str, body_html: str = "", cta_label: str = "", cta_url: str = "",
-                     inline_logo_cid: str = "") -> str:
+                     inline_logo_cid: str = "", logo_url: str = "") -> str:
     """Standard branded wrapper for transactional emails.
-    If `inline_logo_cid` is provided, a logo image is rendered above the title (referenced via cid:)."""
+    `inline_logo_cid` → renders <img src="cid:..."> referencing an attached MIME image (private upload).
+    `logo_url`        → renders <img src="https://..."> from a public URL (CDN/website).
+    If both are provided, inline takes priority."""
     cta_block = ""
     if cta_label and cta_url:
         cta_block = f'<div style="text-align:center;margin:24px 0;"><a href="{cta_url}" style="display:inline-block;padding:12px 28px;background:#0ea5e9;color:#fff;border-radius:24px;text-decoration:none;font-weight:bold;">{cta_label}</a></div>'
     logo_block = ""
     if inline_logo_cid:
         logo_block = f'<div style="text-align:center;margin:0 0 16px;"><img src="cid:{inline_logo_cid}" alt="Kaimera Learning" style="max-width:160px;max-height:80px;"/></div>'
+    elif logo_url:
+        logo_block = f'<div style="text-align:center;margin:0 0 16px;"><img src="{logo_url}" alt="Kaimera Learning" style="max-width:160px;max-height:80px;"/></div>'
     return f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#f8fafc;border-radius:16px;">
         {logo_block}
         <h2 style="color:#0ea5e9;margin:0 0 8px;">{title}</h2>
@@ -295,6 +299,7 @@ async def notify_event(to_email: str, subject: str = "", title: str = "", intro:
     try:
         inline_images = []
         attachments = []
+        logo_url = ""
         if event_key:
             from services.email_templates import resolve_template
             tpl = await resolve_template(event_key, vars)
@@ -308,9 +313,11 @@ async def notify_event(to_email: str, subject: str = "", title: str = "", intro:
                 inline_images, attachments = await _resolve_template_media(
                     tpl.get("inline_image_id"), tpl.get("attachment_ids", [])
                 )
+                logo_url = tpl.get("logo_url") or ""
 
         logo_cid = "logo" if inline_images else ""
-        html = _wrap_email_html(title, intro, body_html, cta_label, cta_url, inline_logo_cid=logo_cid)
+        html = _wrap_email_html(title, intro, body_html, cta_label, cta_url,
+                                inline_logo_cid=logo_cid, logo_url=logo_url)
         result = await send_email(to_email, subject, html, inline_images=inline_images, attachments=attachments)
         if not result or (isinstance(result, dict) and result.get("error")):
             logger.warning(f"notify_event failed for {to_email}: {result}")
