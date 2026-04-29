@@ -243,8 +243,18 @@ async def create_class(class_data: ClassSessionCreate, request: Request, authori
     if student.get("credits", 0) < total_cost and total_cost > 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Action Failed: Insufficient funds in student account. Required: {total_cost} credits, Available: {student.get('credits', 0)} credits."
+            detail=f"Action Failed: Insufficient balance in {student.get('name','student')}'s account. Required: {total_cost} credits, Available: {student.get('credits', 0)} credits."
         )
+
+    # Date+time must not be in the past
+    try:
+        scheduled_dt = datetime.fromisoformat(f"{class_data.date}T{(class_data.start_time or '00:00')}:00")
+        if scheduled_dt.tzinfo is None:
+            scheduled_dt = scheduled_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid class date/time format")
+    if scheduled_dt <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Class can only be scheduled for a future date and time. Past or current slots are not allowed.")
 
     start_date = datetime.fromisoformat(class_data.date)
     end_date = start_date + timedelta(days=class_data.duration_days - 1)
