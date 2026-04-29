@@ -15,6 +15,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { getApiError, API , apiFetch} from '../utils/api';
 import { useDateRangeFilter } from '../components/DateRangeFilter';
+import EmailTemplateManager from '../components/EmailTemplateManager';
 
 // ─── Reusable Sub-Components ───
 
@@ -1193,6 +1194,9 @@ const AdminDashboard = () => {
                       </div>
                     </div>
                   </div>
+                </div>
+                <div className="mt-6">
+                  <EmailTemplateManager />
                 </div>
               </TabsContent>
             </Tabs>

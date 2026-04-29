@@ -219,7 +219,9 @@ async def accept_demo(demo_id: str, request: Request, authorization: Optional[st
             f"Hi {demo['name']}, teacher <b>{user.name}</b> has accepted your demo request. Your demo class is scheduled for <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>. Use the credentials below to log in:",
             body_html=creds_html,
             cta_label="Sign In Now",
-            cta_url="https://edu.kaimeralearning.com/login"
+            cta_url="https://edu.kaimeralearning.com/login",
+            event_key="demo_accepted_new_student",
+            vars={"student_name": demo['name'], "teacher_name": user.name, "preferred_date": demo['preferred_date'], "preferred_time": demo.get('preferred_time_slot', ''), "email": demo['email'], "temp_password": temp_password, "credentials_block": creds_html},
         )
         # Don't expose password back to teacher anymore
         result["student_credentials_emailed"] = True
@@ -231,7 +233,9 @@ async def accept_demo(demo_id: str, request: Request, authorization: Optional[st
             "Demo Confirmed",
             f"Hi {demo['name']}, teacher <b>{user.name}</b> has accepted your demo request. Your demo class is scheduled for <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>.",
             cta_label="Open Dashboard",
-            cta_url="https://edu.kaimeralearning.com/student-dashboard"
+            cta_url="https://edu.kaimeralearning.com/student-dashboard",
+            event_key="demo_accepted_existing_student",
+            vars={"student_name": demo['name'], "teacher_name": user.name, "preferred_date": demo['preferred_date'], "preferred_time": demo.get('preferred_time_slot', '')},
         )
     return result
 
@@ -293,7 +297,9 @@ async def assign_demo_to_teacher(data: DemoAssign, request: Request, authorizati
         "Demo Session Assigned",
         f"Counselor <b>{user.name}</b> has assigned a demo session with <b>{demo['name']}</b> to you on <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>.",
         cta_label="View Teacher Dashboard",
-        cta_url="https://edu.kaimeralearning.com/teacher-dashboard"
+        cta_url="https://edu.kaimeralearning.com/teacher-dashboard",
+        event_key="demo_assigned_to_teacher",
+        vars={"student_name": demo['name'], "teacher_name": teacher['name'], "counselor_name": user.name, "preferred_date": demo['preferred_date'], "preferred_time": demo.get('preferred_time_slot', '')},
     )
 
     # Email student: confirm demo + send credentials if newly created
@@ -311,7 +317,9 @@ async def assign_demo_to_teacher(data: DemoAssign, request: Request, authorizati
             f"Hi {demo['name']}, our counselor has assigned <b>{teacher['name']}</b> for your demo session on <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>. Use the credentials below to log in:",
             body_html=creds_html,
             cta_label="Sign In Now",
-            cta_url="https://edu.kaimeralearning.com/login"
+            cta_url="https://edu.kaimeralearning.com/login",
+            event_key="demo_assigned_new_student",
+            vars={"student_name": demo['name'], "teacher_name": teacher['name'], "preferred_date": demo['preferred_date'], "preferred_time": demo.get('preferred_time_slot', ''), "email": demo['email'], "temp_password": temp_password, "credentials_block": creds_html},
         )
     else:
         await notify_event(
@@ -320,7 +328,9 @@ async def assign_demo_to_teacher(data: DemoAssign, request: Request, authorizati
             "Demo Scheduled",
             f"Hi {demo['name']}, our counselor has assigned <b>{teacher['name']}</b> as your demo teacher for <b>{demo['preferred_date']} at {demo.get('preferred_time_slot','')}</b>.",
             cta_label="Open Dashboard",
-            cta_url="https://edu.kaimeralearning.com/student-dashboard"
+            cta_url="https://edu.kaimeralearning.com/student-dashboard",
+            event_key="demo_assigned_existing_student",
+            vars={"student_name": demo['name'], "teacher_name": teacher['name'], "preferred_date": demo['preferred_date'], "preferred_time": demo.get('preferred_time_slot', '')},
         )
 
     return {"message": f"Demo assigned to {teacher['name']} and class created"}

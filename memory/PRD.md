@@ -20,14 +20,23 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 /app/backend/
   server.py, database.py
   models/schemas.py
-  services/auth.py, helpers.py, rating.py
+  services/auth.py, helpers.py, rating.py, email_templates.py
   tasks/background.py
   routes/admin.py, auth.py, chat.py, classes.py, counsellor.py, demo.py, general.py, payments.py, student.py, teacher.py, attendance.py
 /app/frontend/src/
-  components/ (ViewProfilePopup.js, ui/)
+  components/ (ViewProfilePopup.js, EmailTemplateManager.js, ui/)
   pages/ (*Dashboard.js, *Profile.js, Login.js, WalletPage.js, BrowseClasses.js)
   utils/api.js
 ```
+
+## Email Template System (Apr 2026)
+- **Registry** in `services/email_templates.py` — 12 events (student_assigned_for_student/teacher, *_account_created, password_reset_by_admin, demo_*).
+- **Override storage** in MongoDB `email_templates` collection. Empty fields fall back to default.
+- **Variable substitution**: `{{var_name}}` placeholders replaced at send time.
+- **Media library** in `email_media` collection + files in `/app/backend/uploads/email_media/`. Used for inline logos (rendered via `cid:logo`) and file attachments.
+- **Admin endpoints**: `GET /api/admin/email-events`, `PUT/DELETE /api/admin/email-templates/{event_key}`, `POST /api/admin/email-templates/{event_key}/test`, `POST/GET/DELETE /api/admin/email-media`, `GET /api/admin/email-media/file/{id}`.
+- **UI**: `EmailTemplateManager.js` mounted in AdminDashboard → User Management → Credentials & Access tab. Provides editor + live preview + media manager + test send.
+
 
 ## Completed Features
 

@@ -306,7 +306,9 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         f"Welcome to your learning journey, {student.get('name','')}!",
         f"Our counselor has assigned <b>{teacher['name']}</b> as your teacher for the <b>{plan_label}</b> ({days_label}). You'll receive class invitations soon.",
         cta_label="Open Dashboard",
-        cta_url="https://edu.kaimeralearning.com/student-dashboard"
+        cta_url="https://edu.kaimeralearning.com/student-dashboard",
+        event_key="student_assigned_for_student",
+        vars={"student_name": student.get('name', ''), "teacher_name": teacher['name'], "plan_label": plan_label, "days_label": days_label},
     )
     await notify_event(
         teacher.get('email'),
@@ -314,7 +316,9 @@ async def assign_student_to_teacher(assignment: AssignStudentToTeacher, request:
         "You have a new class request",
         f"<b>{student['name']}</b> has been assigned to you for the <b>{plan_label}</b> ({days_label}). Please review and accept within 24 hours from your teacher dashboard.",
         cta_label="Review Request",
-        cta_url="https://edu.kaimeralearning.com/teacher-dashboard"
+        cta_url="https://edu.kaimeralearning.com/teacher-dashboard",
+        event_key="student_assigned_for_teacher",
+        vars={"student_name": student['name'], "teacher_name": teacher['name'], "plan_label": plan_label, "days_label": days_label},
     )
     return {"message": "Student assigned to teacher. Teacher has 24 hours to approve.", "assignment_id": assignment_id}
 
@@ -407,7 +411,9 @@ async def create_teacher_account(teacher_data: CreateTeacherAccount, request: Re
         f"Hi {teacher_data.name}, your teacher account on Kaimera Learning has been created by the admin.",
         body_html=creds_html,
         cta_label="Sign In Now",
-        cta_url="https://edu.kaimeralearning.com/login"
+        cta_url="https://edu.kaimeralearning.com/login",
+        event_key="teacher_account_created",
+        vars={"name": teacher_data.name, "email": teacher_data.email, "temp_password": auto_password, "credentials_block": creds_html},
     )
 
     return {"message": "Teacher account created. Credentials emailed directly to the teacher.", "user_id": user_id, "email": teacher_data.email, "teacher_code": teacher_code}
@@ -450,7 +456,9 @@ async def create_counsellor_account(counsellor_data: CreateTeacherAccount, reque
         f"Hi {counsellor_data.name}, your counselor account has been created by the admin.",
         body_html=creds_html,
         cta_label="Sign In Now",
-        cta_url="https://edu.kaimeralearning.com/login"
+        cta_url="https://edu.kaimeralearning.com/login",
+        event_key="counsellor_account_created",
+        vars={"name": counsellor_data.name, "email": counsellor_data.email, "temp_password": auto_password, "credentials_block": creds_html},
     )
 
     return {"message": "Counselor account created. Credentials emailed directly to the counselor.", "user_id": user_id, "email": counsellor_data.email, "counselor_id": counselor_id}
@@ -522,7 +530,9 @@ async def admin_create_user(request: Request, authorization: Optional[str] = Hea
         f"Hi {name}, your {role} account on Kaimera Learning has been created.",
         body_html=creds_html,
         cta_label="Sign In Now",
-        cta_url="https://edu.kaimeralearning.com/login"
+        cta_url="https://edu.kaimeralearning.com/login",
+        event_key="user_account_created",
+        vars={"name": name, "email": email, "role": role, "role_capitalized": role.capitalize(), "temp_password": auto_password, "credentials_block": creds_html},
     )
 
     return {"message": f"{role.capitalize()} account created. Credentials emailed directly to the user.", "user_id": user_id, "email": email, "user_code": user_code}
@@ -753,7 +763,9 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
         f"Hi {student_data.name}, your student account on Kaimera Learning has been created.",
         body_html=creds_html,
         cta_label="Sign In Now",
-        cta_url="https://edu.kaimeralearning.com/login"
+        cta_url="https://edu.kaimeralearning.com/login",
+        event_key="student_account_created",
+        vars={"name": student_data.name, "email": student_data.email, "temp_password": auto_password, "credentials_block": creds_html},
     )
 
     return {"message": "Student account created. Credentials emailed directly to the student.", "user_id": user_id, "email": student_data.email, "name": student_data.name, "student_code": student_code}
@@ -796,7 +808,9 @@ async def admin_reset_password(request: Request, authorization: Optional[str] = 
         f"Hi {target.get('name','')}, an administrator has reset your account password.",
         body_html=creds_html,
         cta_label="Sign In Now",
-        cta_url="https://edu.kaimeralearning.com/login"
+        cta_url="https://edu.kaimeralearning.com/login",
+        event_key="password_reset_by_admin",
+        vars={"name": target.get('name', ''), "email": target["email"], "new_password": new_password, "credentials_block": creds_html},
     )
     return {"message": f"Password reset for {target['name']} ({target['email']}). New password emailed directly. All sessions invalidated.", "role": target["role"], "email": target["email"], "user_id": target["user_id"]}
 
@@ -1371,3 +1385,201 @@ async def test_email_config(request: Request, authorization: Optional[str] = Hea
         err = (result or {}).get("error", "unknown error")
         return {"ok": False, "error": err, "to": to}
     return {"ok": True, "message": f"Test email queued for {to}. Check the inbox in a few seconds.", "to": to}
+
+
+
+# ─── Email Template Editor (admin) ────────────────────────────────────────────
+
+EMAIL_MEDIA_DIR = UPLOADS_DIR / "email_media"
+EMAIL_MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_EMAIL_MEDIA_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
+                           ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt"}
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
+
+
+@router.get("/admin/email-events")
+async def list_email_events(request: Request, authorization: Optional[str] = Header(None)):
+    """Returns the registry of all email events with their default templates and which are overridden."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    from services.email_templates import EMAIL_EVENTS
+    overrides = {d["event_key"]: d for d in await db.email_templates.find({}, {"_id": 0}).to_list(200)}
+    out = []
+    for key, ev in EMAIL_EVENTS.items():
+        ovr = overrides.get(key, {})
+        out.append({
+            "event_key": key,
+            "name": ev["name"],
+            "description": ev["description"],
+            "variables": ev["variables"],
+            "is_overridden": bool(ovr),
+            "default": {f: ev.get(f, "") for f in ("subject", "title", "intro", "body_html", "cta_label", "cta_url")},
+            "override": {f: ovr.get(f, "") for f in ("subject", "title", "intro", "body_html", "cta_label", "cta_url")} if ovr else {},
+            "inline_image_id": ovr.get("inline_image_id"),
+            "attachment_ids": ovr.get("attachment_ids", []) or [],
+        })
+    return out
+
+
+@router.put("/admin/email-templates/{event_key}")
+async def save_email_template(event_key: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Save admin override for a specific email event. Empty fields fall back to defaults at send time."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    from services.email_templates import EMAIL_EVENTS, invalidate_template_cache
+    if event_key not in EMAIL_EVENTS:
+        raise HTTPException(status_code=404, detail="Unknown event_key")
+    body = await request.json()
+    update = {
+        "event_key": event_key,
+        "subject": (body.get("subject") or "").strip(),
+        "title": (body.get("title") or "").strip(),
+        "intro": body.get("intro") or "",
+        "body_html": body.get("body_html") or "",
+        "cta_label": (body.get("cta_label") or "").strip(),
+        "cta_url": (body.get("cta_url") or "").strip(),
+        "inline_image_id": body.get("inline_image_id") or None,
+        "attachment_ids": body.get("attachment_ids") or [],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": user.user_id,
+    }
+    await db.email_templates.update_one({"event_key": event_key}, {"$set": update}, upsert=True)
+    invalidate_template_cache()
+    return {"message": "Template saved", "event_key": event_key}
+
+
+@router.delete("/admin/email-templates/{event_key}")
+async def reset_email_template(event_key: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Restore the default template (deletes admin override)."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    from services.email_templates import invalidate_template_cache
+    await db.email_templates.delete_one({"event_key": event_key})
+    invalidate_template_cache()
+    return {"message": "Template reset to default"}
+
+
+@router.post("/admin/email-templates/{event_key}/test")
+async def test_email_template(event_key: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Send the resolved template (with sample data) to a test recipient."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    from services.email_templates import EMAIL_EVENTS, invalidate_template_cache
+    if event_key not in EMAIL_EVENTS:
+        raise HTTPException(status_code=404, detail="Unknown event_key")
+    body = await request.json()
+    to = (body.get("to") or user.email or "").strip()
+    if not to:
+        raise HTTPException(status_code=400, detail="Provide a 'to' email")
+    sample_vars = body.get("vars") or {}
+    # Provide defaults so {{var}} substitution doesn't leave gaps
+    for v in EMAIL_EVENTS[event_key]["variables"]:
+        sample_vars.setdefault(v, f"[{v}]")
+    invalidate_template_cache()
+    from services.helpers import notify_event as _ne
+    await _ne(to_email=to, event_key=event_key, vars=sample_vars)
+    return {"ok": True, "message": f"Test email sent to {to}"}
+
+
+# ─── Email Media Library (logos / attachments) ────────────────────────────────
+
+@router.post("/admin/email-media")
+async def upload_email_media(file: UploadFile = File(...), kind: str = Form("auto"),
+                             request: Request = None, authorization: Optional[str] = Header(None)):
+    """Upload an image or file to the shared email media library. Reusable across templates."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_EMAIL_MEDIA_EXT:
+        raise HTTPException(status_code=400, detail=f"File type {ext} not allowed.")
+    detected_kind = "image" if ext in IMAGE_EXT else "file"
+    if kind not in ("auto", "image", "file"):
+        raise HTTPException(status_code=400, detail="kind must be auto/image/file")
+    final_kind = detected_kind if kind == "auto" else kind
+    if final_kind == "image" and ext not in IMAGE_EXT:
+        raise HTTPException(status_code=400, detail="Selected kind=image but file is not an image")
+
+    media_id = f"em_{uuid.uuid4().hex[:12]}"
+    safe_name = f"{media_id}{ext}"
+    dest = EMAIL_MEDIA_DIR / safe_name
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 5MB)")
+    with open(dest, "wb") as fh:
+        fh.write(content)
+
+    # Best-effort mime type
+    import mimetypes
+    mime, _ = mimetypes.guess_type(file.filename or "")
+    doc = {
+        "media_id": media_id,
+        "filename": file.filename,
+        "stored_name": safe_name,
+        "mime": mime or "application/octet-stream",
+        "size": len(content),
+        "kind": final_kind,
+        "uploaded_by": user.user_id,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.email_media.insert_one(doc.copy())
+    return {"message": "Uploaded", "media": doc}
+
+
+@router.get("/admin/email-media")
+async def list_email_media(request: Request, authorization: Optional[str] = Header(None),
+                           kind: Optional[str] = None):
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    q = {}
+    if kind in ("image", "file"):
+        q["kind"] = kind
+    items = await db.email_media.find(q, {"_id": 0}).sort("uploaded_at", -1).to_list(500)
+    return items
+
+
+@router.get("/admin/email-media/file/{media_id}")
+async def get_email_media_file(media_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Serve the raw file for preview in the admin UI."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    m = await db.email_media.find_one({"media_id": media_id}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Media not found")
+    p = EMAIL_MEDIA_DIR / m["stored_name"]
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    from fastapi.responses import FileResponse
+    return FileResponse(str(p), media_type=m.get("mime") or "application/octet-stream", filename=m.get("filename"))
+
+
+@router.delete("/admin/email-media/{media_id}")
+async def delete_email_media(media_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    m = await db.email_media.find_one({"media_id": media_id}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Not found")
+    # Refuse delete if any template still references it
+    in_use = await db.email_templates.count_documents({
+        "$or": [{"inline_image_id": media_id}, {"attachment_ids": media_id}]
+    })
+    if in_use:
+        raise HTTPException(status_code=400, detail=f"Media is in use by {in_use} template(s). Detach it first.")
+    p = EMAIL_MEDIA_DIR / m["stored_name"]
+    if p.exists():
+        try:
+            p.unlink()
+        except Exception:
+            pass
+    await db.email_media.delete_one({"media_id": media_id})
+    from services.email_templates import invalidate_template_cache
+    invalidate_template_cache()
+    return {"message": "Deleted"}
