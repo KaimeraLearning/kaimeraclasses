@@ -241,8 +241,10 @@ const BookDemo = () => {
                 <div className="relative">
                   <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <Input
-                    type="text" placeholder="Your school or institute"
-                    value={form.institute} onChange={e => setForm({...form, institute: e.target.value})}
+                    type="text"
+                    placeholder="Your school or institute"
+                    value={form.institute}
+                    onChange={e => setForm({ ...form, institute: e.target.value })}
                     className="pl-10 bg-slate-50 border-2 border-slate-200 rounded-xl h-11 text-sm"
                     data-testid="demo-institute-input"
                   />
@@ -308,7 +310,7 @@ const BookDemo = () => {
               </Button>
 
               <p className="text-xs text-slate-400 text-center">
-                Max 3 demo sessions per student. By booking, you agree to our terms.
+                Max 2 demo sessions per student. By booking, you agree to our terms.
               </p>
             </form>
           </div>
