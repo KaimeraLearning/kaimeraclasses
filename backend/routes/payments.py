@@ -227,14 +227,16 @@ if result.modified_count == 0:
     })
 
     await db.transactions.insert_one({
-        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
-        "user_id": user.user_id, "type": "assignment_payment",
-        "amount": -amount,
-        "description": f"Assignment payment (wallet): {assignment.get('learning_plan_name', 'Standard')} with {assignment.get('teacher_name')}",
-        "assignment_id": assignment_id,
-        "payment_id": payment_id,
-        "counterparty_user_id": assignment.get('teacher_id'),
-        "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
+    "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+    "user_id": user.user_id,
+    "type": "assignment_payment",
+    "amount": -abs(amount),   # 🔥 FORCE NEGATIVE
+    "description": f"Assignment payment (wallet): {assignment.get('learning_plan_name', 'Standard')}",
+    "assignment_id": assignment_id,
+    "payment_id": payment_id,
+    "counterparty_user_id": assignment.get('teacher_id'),
+    "status": "completed",
+    "created_at": datetime.now(timezone.utc).isoformat()
     })
     # Mirror: platform receives the wallet-payment
     await insert_admin_mirror_txn(
