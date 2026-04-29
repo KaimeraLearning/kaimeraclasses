@@ -240,25 +240,41 @@ import string as _string
 
 def _wrap_email_html(title: str, intro: str, body_html: str = "", cta_label: str = "", cta_url: str = "",
                      inline_logo_cid: str = "", logo_url: str = "") -> str:
-    """Standard branded wrapper for transactional emails.
+    """Standard branded wrapper for transactional emails — gradient header + clean body.
     `inline_logo_cid` → renders <img src="cid:..."> referencing an attached MIME image (private upload).
     `logo_url`        → renders <img src="https://..."> from a public URL (CDN/website).
     If both are provided, inline takes priority."""
     cta_block = ""
     if cta_label and cta_url:
-        cta_block = f'<div style="text-align:center;margin:24px 0;"><a href="{cta_url}" style="display:inline-block;padding:12px 28px;background:#0ea5e9;color:#fff;border-radius:24px;text-decoration:none;font-weight:bold;">{cta_label}</a></div>'
+        cta_block = (
+            '<div style="text-align:center;margin:24px 0;">'
+            f'<a href="{cta_url}" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#0ea5e9,#8b5cf6);color:#fff;border-radius:24px;text-decoration:none;font-weight:bold;font-size:14px;">{cta_label}</a>'
+            '</div>'
+        )
     logo_block = ""
+    logo_src = ""
     if inline_logo_cid:
-        logo_block = f'<div style="text-align:center;margin:0 0 16px;"><img src="cid:{inline_logo_cid}" alt="Kaimera Learning" style="max-width:160px;max-height:80px;"/></div>'
+        logo_src = f"cid:{inline_logo_cid}"
     elif logo_url:
-        logo_block = f'<div style="text-align:center;margin:0 0 16px;"><img src="{logo_url}" alt="Kaimera Learning" style="max-width:160px;max-height:80px;"/></div>'
-    return f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#f8fafc;border-radius:16px;">
-        {logo_block}
-        <h2 style="color:#0ea5e9;margin:0 0 8px;">{title}</h2>
-        <p style="color:#475569;margin:0 0 16px;">{intro}</p>
-        {body_html}
-        {cta_block}
-        <p style="color:#94a3b8;font-size:12px;margin-top:24px;">Kaimera Learning · This is an automated email · Please do not reply.</p>
+        logo_src = logo_url
+    if logo_src:
+        logo_block = (
+            '<div style="text-align:center;margin:0 0 12px;">'
+            f'<img src="{logo_src}" alt="Kaimera Learning" style="max-width:160px;max-height:80px;background:#fff;padding:6px 12px;border-radius:8px;"/>'
+            '</div>'
+        )
+
+    return f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#ffffff;">
+        <div style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6);padding:30px 24px;border-radius:16px 16px 0 0;color:#fff;text-align:center;">
+            {logo_block}
+            <h1 style="margin:0;font-size:24px;font-weight:700;">{title}</h1>
+        </div>
+        <div style="padding:24px;background:#f8fafc;border-radius:0 0 16px 16px;border:1px solid #e2e8f0;border-top:0;">
+            <p style="color:#334155;font-size:15px;line-height:1.6;margin:0 0 12px;">{intro}</p>
+            {body_html}
+            {cta_block}
+        </div>
+        <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:20px;">Kaimera Learning &middot; This is an automated email &middot; Please do not reply.</p>
     </div>"""
 
 
