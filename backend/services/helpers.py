@@ -5,8 +5,12 @@ import random
 import asyncio
 import logging
 import smtplib
+from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
+from email.mime.base import MIMEBase
+from email import encoders
 from datetime import datetime, timezone, timedelta
 
 from database import db
@@ -113,8 +117,15 @@ async def generate_student_code():
     return f"KL-S{doc['seq']:04d}"
 
 
-async def send_email(to_email: str, subject: str, html_content: str):
-    """Send email via Gmail SMTP with TLS. Returns dict on success, dict with error on failure."""
+async def send_email(to_email: str, subject: str, html_content: str,
+                     inline_images: list = None, attachments: list = None):
+    """Send email via Gmail SMTP with TLS. Returns dict on success, dict with error on failure.
+
+    `inline_images`: list of dicts {"cid": "logo", "path": "/abs/path", "mime": "image/png"}.
+        These render inside the HTML body via <img src="cid:logo">.
+    `attachments`: list of dicts {"path": "/abs/path", "filename": "doc.pdf"}.
+        These appear as downloadable files in the email client.
+    """
     try:
         config = await _get_email_config()
         if not config["password"]:
@@ -124,16 +135,51 @@ async def send_email(to_email: str, subject: str, html_content: str):
             logger.error("SENDER_EMAIL not configured")
             return {"error": "SENDER_EMAIL not configured on server"}
 
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = f"Kaimera Learning <{config['email']}>"
-        msg["To"] = to_email
-        msg["Reply-To"] = config["email"]
-        msg.attach(MIMEText(html_content, "html"))
+        # Outer container: "mixed" so we can attach files alongside the HTML body.
+        # The body itself is a "related" multipart (HTML + inline images that the HTML references).
+        outer = MIMEMultipart("mixed")
+        outer["Subject"] = subject
+        outer["From"] = f"Kaimera Learning <{config['email']}>"
+        outer["To"] = to_email
+        outer["Reply-To"] = config["email"]
+
+        body_related = MIMEMultipart("related")
+        body_alt = MIMEMultipart("alternative")
+        body_related.attach(body_alt)
+
+        body_alt.attach(MIMEText(html_content, "html"))
         # Also add plain text version for better deliverability
-        import re
-        plain_text = re.sub(r'<[^>]+>', '', html_content).strip()
-        msg.attach(MIMEText(plain_text, "plain"))
+        import re as _re
+        plain_text = _re.sub(r'<[^>]+>', '', html_content).strip()
+        body_alt.attach(MIMEText(plain_text, "plain"))
+
+        # Inline images: each is referenced by "cid:<cid>" inside the HTML body.
+        for img in (inline_images or []):
+            try:
+                with open(img["path"], "rb") as fh:
+                    part = MIMEImage(fh.read(), _subtype=(img.get("mime") or "image/png").split("/")[-1])
+                part.add_header("Content-ID", f"<{img['cid']}>")
+                part.add_header("Content-Disposition", "inline", filename=os.path.basename(img["path"]))
+                body_related.attach(part)
+            except Exception as ie:
+                logger.warning(f"Failed to attach inline image {img.get('cid')}: {ie}")
+
+        outer.attach(body_related)
+
+        # File attachments: appear as downloadables.
+        for att in (attachments or []):
+            try:
+                with open(att["path"], "rb") as fh:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(fh.read())
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition",
+                    f'attachment; filename="{att.get("filename") or os.path.basename(att["path"])}"'
+                )
+                outer.attach(part)
+            except Exception as ae:
+                logger.warning(f"Failed to attach file {att.get('filename')}: {ae}")
 
         def _send():
             with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
@@ -141,7 +187,7 @@ async def send_email(to_email: str, subject: str, html_content: str):
                 server.starttls()
                 server.ehlo()
                 server.login(config["email"], config["password"])
-                result = server.sendmail(config["email"], to_email, msg.as_string())
+                result = server.sendmail(config["email"], to_email, outer.as_string())
                 logger.info(f"SMTP sendmail result for {to_email}: {result}")
                 return result
 
@@ -181,12 +227,18 @@ import secrets as _secrets
 import string as _string
 
 
-def _wrap_email_html(title: str, intro: str, body_html: str = "", cta_label: str = "", cta_url: str = "") -> str:
-    """Standard branded wrapper for transactional emails."""
+def _wrap_email_html(title: str, intro: str, body_html: str = "", cta_label: str = "", cta_url: str = "",
+                     inline_logo_cid: str = "") -> str:
+    """Standard branded wrapper for transactional emails.
+    If `inline_logo_cid` is provided, a logo image is rendered above the title (referenced via cid:)."""
     cta_block = ""
     if cta_label and cta_url:
         cta_block = f'<div style="text-align:center;margin:24px 0;"><a href="{cta_url}" style="display:inline-block;padding:12px 28px;background:#0ea5e9;color:#fff;border-radius:24px;text-decoration:none;font-weight:bold;">{cta_label}</a></div>'
+    logo_block = ""
+    if inline_logo_cid:
+        logo_block = f'<div style="text-align:center;margin:0 0 16px;"><img src="cid:{inline_logo_cid}" alt="Kaimera Learning" style="max-width:160px;max-height:80px;"/></div>'
     return f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;background:#f8fafc;border-radius:16px;">
+        {logo_block}
         <h2 style="color:#0ea5e9;margin:0 0 8px;">{title}</h2>
         <p style="color:#475569;margin:0 0 16px;">{intro}</p>
         {body_html}
@@ -195,15 +247,60 @@ def _wrap_email_html(title: str, intro: str, body_html: str = "", cta_label: str
     </div>"""
 
 
-async def notify_event(to_email: str, subject: str, title: str, intro: str,
-                       body_html: str = "", cta_label: str = "", cta_url: str = ""):
+async def _resolve_template_media(inline_image_id, attachment_ids):
+    """Look up media files from `email_media` collection; return tuples ready for send_email."""
+    inline = []
+    files = []
+    if inline_image_id:
+        m = await db.email_media.find_one({"media_id": inline_image_id}, {"_id": 0})
+        if m:
+            p = Path(__file__).resolve().parent.parent / "uploads" / "email_media" / m["stored_name"]
+            if p.exists():
+                inline.append({"cid": "logo", "path": str(p), "mime": m.get("mime", "image/png")})
+    if attachment_ids:
+        for aid in attachment_ids:
+            m = await db.email_media.find_one({"media_id": aid}, {"_id": 0})
+            if not m:
+                continue
+            p = Path(__file__).resolve().parent.parent / "uploads" / "email_media" / m["stored_name"]
+            if p.exists():
+                files.append({"path": str(p), "filename": m.get("filename") or m["stored_name"]})
+    return inline, files
+
+
+async def notify_event(to_email: str, subject: str = "", title: str = "", intro: str = "",
+                       body_html: str = "", cta_label: str = "", cta_url: str = "",
+                       event_key: str = None, vars: dict = None):
     """Best-effort transactional email. Failures are logged but never raise (so
-    they don't break primary flows like demo accept, class start, etc.)."""
+    they don't break primary flows like demo accept, class start, etc.).
+
+    If `event_key` is provided, the system loads the admin-editable template from DB
+    (or falls back to defaults registered in `services/email_templates.py`) and substitutes
+    `{{var}}` placeholders from `vars`. The positional args still work as a fallback for
+    legacy call sites that haven't been migrated yet.
+    """
     if not to_email:
         return
     try:
-        html = _wrap_email_html(title, intro, body_html, cta_label, cta_url)
-        result = await send_email(to_email, subject, html)
+        inline_images = []
+        attachments = []
+        if event_key:
+            from services.email_templates import resolve_template
+            tpl = await resolve_template(event_key, vars)
+            if tpl:
+                subject = tpl["subject"] or subject
+                title = tpl["title"] or title
+                intro = tpl["intro"] or intro
+                body_html = tpl["body_html"] if tpl["body_html"] else body_html
+                cta_label = tpl["cta_label"] or cta_label
+                cta_url = tpl["cta_url"] or cta_url
+                inline_images, attachments = await _resolve_template_media(
+                    tpl.get("inline_image_id"), tpl.get("attachment_ids", [])
+                )
+
+        logo_cid = "logo" if inline_images else ""
+        html = _wrap_email_html(title, intro, body_html, cta_label, cta_url, inline_logo_cid=logo_cid)
+        result = await send_email(to_email, subject, html, inline_images=inline_images, attachments=attachments)
         if not result or (isinstance(result, dict) and result.get("error")):
             logger.warning(f"notify_event failed for {to_email}: {result}")
     except Exception as e:
