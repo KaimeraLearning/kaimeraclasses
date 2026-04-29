@@ -37,7 +37,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+app = FastAPI(
+    docs_url="/docs" if os.environ.get("ENABLE_DOCS", "false").lower() == "true" else None,
+    redoc_url="/redoc" if os.environ.get("ENABLE_DOCS", "false").lower() == "true" else None,
+    openapi_url="/openapi.json" if os.environ.get("ENABLE_DOCS", "false").lower() == "true" else None,
+)
 
 
 @app.exception_handler(ConnectionFailure)
@@ -78,6 +82,21 @@ _API_KEY = os.environ.get("API_KEY", "").strip()
 _API_KEY_EXEMPT_PATHS = {
     "/api/webhook/razorpay",
 }
+# Allowed Origin/Referer domains — request must come from one of these (browser-set headers).
+# Pulled from CORS_ORIGINS so config stays in one place. "*" disables the check.
+_ALLOWED_ORIGINS_RAW = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
+_ENFORCE_ORIGIN = "*" not in _ALLOWED_ORIGINS_RAW and len(_ALLOWED_ORIGINS_RAW) > 0
+
+
+def _origin_allowed(request: Request) -> bool:
+    if not _ENFORCE_ORIGIN:
+        return True
+    origin = request.headers.get("origin") or ""
+    referer = request.headers.get("referer") or ""
+    for allowed in _ALLOWED_ORIGINS_RAW:
+        if origin == allowed or referer.startswith(allowed):
+            return True
+    return False
 
 
 @app.middleware("http")
@@ -94,6 +113,12 @@ async def api_key_guard(request: Request, call_next):
                         status_code=401,
                         content={"detail": "Invalid or missing API key."},
                     )
+            # Block requests whose Origin/Referer don't match the allow-list (soft layer).
+            if not _origin_allowed(request):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Request origin not allowed."},
+                )
     return await call_next(request)
 
 # Include all route modules under /api prefix
