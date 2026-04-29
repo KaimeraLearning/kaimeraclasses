@@ -26,8 +26,8 @@ def validate_gmail(email: str):
     if not email.lower().endswith('@gmail.com'):
         raise HTTPException(status_code=400, detail="Only @gmail.com email addresses are allowed")
 
-UPLOADS_DIR = Path("/app/backend/uploads")
-UPLOADS_DIR.mkdir(exist_ok=True)
+UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.post("/admin/approve-teacher")

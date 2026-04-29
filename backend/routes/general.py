@@ -14,8 +14,8 @@ from services.auth import get_current_user
 
 router = APIRouter()
 
-UPLOADS_DIR = Path("/app/backend/uploads")
-UPLOADS_DIR.mkdir(exist_ok=True)
+UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ── My transactions (any role) ───────────────────────────────────────────────
