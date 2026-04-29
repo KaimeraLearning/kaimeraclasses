@@ -189,7 +189,21 @@ async def pay_from_wallet(request: Request, authorization: Optional[str] = Heade
         )
 
     # Deduct from wallet
-    await db.users.update_one({"user_id": user.user_id}, {"$inc": {"credits": -amount}})
+result = await db.users.update_one(
+    {
+        "user_id": user.user_id,
+        "credits": {"$gte": amount}   # 🔒 key condition
+    },
+    {
+        "$inc": {"credits": -amount}
+    }
+)
+
+if result.modified_count == 0:
+    raise HTTPException(
+        status_code=400,
+        detail=f"Insufficient wallet balance. Required: Rs.{amount}"
+    )
 
     # Record transaction
     payment_id = f"pay_{uuid.uuid4().hex[:12]}"
