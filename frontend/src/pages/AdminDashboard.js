@@ -17,7 +17,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { getApiError, API , apiFetch} from '../utils/api';
 import { useDateRangeFilter } from '../components/DateRangeFilter';
 import EmailTemplateManager from '../components/EmailTemplateManager';
-import { txDirection, txDisplayAmount, txAmountClass } from '../utils/transactions';
+import { txDirection, txDisplayAmount, txAmountClass, adminTypeLabel } from '../utils/transactions';
 
 // ─── Reusable Sub-Components ───
 
@@ -1370,9 +1370,16 @@ const AdminDashboard = () => {
                       <table className="w-full">
                         <thead className="bg-slate-50 sticky top-0">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">User</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Role</th>
+                            {txnRoleFilter !== 'admin_own' && (
+                              <>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">User</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Role</th>
+                              </>
+                            )}
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Type</th>
+                            {txnRoleFilter === 'admin_own' && (
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Counterparty</th>
+                            )}
                             <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600">Amount</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Description / Reference</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600">Date</th>
@@ -1382,20 +1389,44 @@ const AdminDashboard = () => {
                         <tbody>
                           {transactions.slice(0, 100).map((txn, i) => {
                             const ref = txn.reference || {};
+                            const isAdminView = txnRoleFilter === 'admin_own';
+                            const isOut = txDirection(txn) === 'outflow';
                             return (
                               <tr key={txn.transaction_id || i} className="border-t border-slate-100 hover:bg-slate-50 align-top" data-testid={`txn-row-${i}`}>
-                                <td className="px-4 py-3">
-                                  <button onClick={() => txn.user_id && handleOpenDrawer(txn.user_id)} className="text-sm font-medium text-slate-900 hover:text-sky-600">{txn.user_name || 'Unknown'}</button>
-                                  <p className="text-xs text-slate-400 font-mono">{txn.user_code}</p>
+                                {!isAdminView && (
+                                  <>
+                                    <td className="px-4 py-3">
+                                      <button onClick={() => txn.user_id && handleOpenDrawer(txn.user_id)} className="text-sm font-medium text-slate-900 hover:text-sky-600">{txn.user_name || 'Unknown'}</button>
+                                      <p className="text-xs text-slate-400 font-mono">{txn.user_code}</p>
+                                    </td>
+                                    <td className="px-4 py-3"><RoleBadge role={txn.user_role} /></td>
+                                  </>
+                                )}
+                                <td className="px-4 py-3 text-xs">
+                                  {isAdminView ? (
+                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${isOut ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                                      {adminTypeLabel(txn.type)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-500">{txn.type}</span>
+                                  )}
                                 </td>
-                                <td className="px-4 py-3"><RoleBadge role={txn.user_role} /></td>
-                                <td className="px-4 py-3 text-xs text-slate-500">{txn.type}</td>
+                                {isAdminView && (
+                                  <td className="px-4 py-3 text-xs">
+                                    {ref.counterparty_name ? (
+                                      <button onClick={() => ref.counterparty_user_id && handleOpenDrawer(ref.counterparty_user_id)} className="text-left">
+                                        <p className="font-semibold text-slate-800 hover:text-sky-600">{ref.counterparty_name}</p>
+                                        {ref.counterparty_role && <p className="text-[11px] text-slate-400 capitalize">{ref.counterparty_role}</p>}
+                                      </button>
+                                    ) : <span className="text-slate-300">—</span>}
+                                  </td>
+                                )}
                                 <td className={`px-4 py-3 text-sm text-right font-bold ${txAmountClass(txn)}`}>{txDisplayAmount(txn)}</td>
                                 <td className="px-4 py-3 text-sm text-slate-600 max-w-[260px]">
                                   <p className="truncate">{txn.description}</p>
-                                  {ref.counterparty_name && (
-                                    <p className={`text-[11px] mt-0.5 ${txDirection(txn) === 'outflow' ? 'text-red-500' : 'text-emerald-600'}`}>
-                                      {txDirection(txn) === 'outflow' ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
+                                  {!isAdminView && ref.counterparty_name && (
+                                    <p className={`text-[11px] mt-0.5 ${isOut ? 'text-red-500' : 'text-emerald-600'}`}>
+                                      {isOut ? '→ paid to' : '← received from'} <span className="font-semibold">{ref.counterparty_name}</span>
                                       {ref.counterparty_role && <span className="text-slate-400"> ({ref.counterparty_role})</span>}
                                     </p>
                                   )}

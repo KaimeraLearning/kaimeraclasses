@@ -7,7 +7,7 @@ from typing import Optional
 from database import db
 from models.schemas import DemoRequestCreate, DemoAssign, DemoFeedbackCreate
 from services.auth import get_current_user, hash_password
-from services.helpers import send_email, notify_event
+from services.helpers import send_email, notify_event, insert_admin_mirror_txn
 
 router = APIRouter()
 
@@ -80,6 +80,14 @@ async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str
             "counterparty_user_id": teacher_user_id,
             "status": "completed", "created_at": datetime.now(timezone.utc).isoformat()
         })
+        # Mirror entry on admin's wallet (+demo_price = admin received)
+        await insert_admin_mirror_txn(
+            amount=demo_price,
+            description=f"Demo booking received from {demo['name']} for class with {teacher_name}",
+            txn_type="demo_booking_received",
+            counterparty_user_id=student_id,
+            class_id=class_id,
+        )
 
     await db.notifications.insert_one({
         "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
