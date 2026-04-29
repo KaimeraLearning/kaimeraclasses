@@ -102,23 +102,39 @@ def _origin_allowed(request: Request) -> bool:
 @app.middleware("http")
 async def api_key_guard(request: Request, call_next):
     path = request.url.path or ""
-    # Only guard /api/* routes
-    if path.startswith("/api/"):
-        # Allow CORS preflight to pass through
-        if request.method != "OPTIONS" and path not in _API_KEY_EXEMPT_PATHS:
-            if _API_KEY:
-                provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key") or ""
-                if provided != _API_KEY:
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "Invalid or missing API key."},
-                    )
-            # Block requests whose Origin/Referer don't match the allow-list (soft layer).
-            if not _origin_allowed(request):
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "Request origin not allowed."},
-                )
+
+    # Always allow CORS preflight
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    # External webhooks we cannot control (Razorpay) bypass everything
+    if path in _API_KEY_EXEMPT_PATHS:
+        return await call_next(request)
+
+    # Any non-/api/* path (e.g. /docs, /redoc, /openapi.json, /, /favicon.ico) is FORBIDDEN.
+    # This makes the entire API surface invisible to public scanners.
+    if not path.startswith("/api/"):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Forbidden."},
+        )
+
+    # /api/* — require x-api-key header
+    if _API_KEY:
+        provided = request.headers.get("x-api-key") or request.headers.get("X-API-Key") or ""
+        if provided != _API_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or missing API key."},
+            )
+
+    # /api/* — require Origin/Referer to match allow-list (when CORS_ORIGINS is not "*")
+    if not _origin_allowed(request):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Request origin not allowed."},
+        )
+
     return await call_next(request)
 
 # Include all route modules under /api prefix
