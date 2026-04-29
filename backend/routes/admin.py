@@ -82,7 +82,11 @@ async def get_transactions(request: Request, authorization: Optional[str] = Head
             date_q["$lte"] = date_to + "T23:59:59"
         query["created_at"] = date_q
 
-    if role and role != "all":
+    # Default: show only the admin's OWN transactions (what they paid / received).
+    # Pass role=all to see system-wide ledger, or role=teacher/student/counsellor for a specific role.
+    if not role:
+        query["user_id"] = user.user_id
+    elif role != "all":
         user_ids = [u["user_id"] for u in await db.users.find({"role": role}, {"_id": 0, "user_id": 1}).to_list(5000)]
         query["user_id"] = {"$in": user_ids}
 
