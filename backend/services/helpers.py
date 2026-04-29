@@ -135,51 +135,62 @@ async def send_email(to_email: str, subject: str, html_content: str,
             logger.error("SENDER_EMAIL not configured")
             return {"error": "SENDER_EMAIL not configured on server"}
 
-        # Outer container: "mixed" so we can attach files alongside the HTML body.
-        # The body itself is a "related" multipart (HTML + inline images that the HTML references).
-        outer = MIMEMultipart("mixed")
+        has_attachments = bool(attachments)
+        has_inline = bool(inline_images)
+
+        # Build the MIME tree adaptively:
+        #   - alt:        plain text + HTML (always)
+        #   - related:    alt + inline-cid images (only if any inline images)
+        #   - mixed:      (related|alt) + file attachments (only if any attachments)
+        # In multipart/alternative the LAST attached part is what email clients
+        # render when supported — so plain first, HTML last.
+        import re as _re
+        plain_text = _re.sub(r'<[^>]+>', ' ', html_content)
+        plain_text = _re.sub(r'\s+', ' ', plain_text).strip() or " "
+
+        body_alt = MIMEMultipart("alternative")
+        body_alt.attach(MIMEText(plain_text, "plain", "utf-8"))
+        body_alt.attach(MIMEText(html_content, "html", "utf-8"))
+
+        if has_inline:
+            body_related = MIMEMultipart("related")
+            body_related.attach(body_alt)
+            for img in inline_images:
+                try:
+                    with open(img["path"], "rb") as fh:
+                        part = MIMEImage(fh.read(), _subtype=(img.get("mime") or "image/png").split("/")[-1])
+                    part.add_header("Content-ID", f"<{img['cid']}>")
+                    part.add_header("Content-Disposition", "inline", filename=os.path.basename(img["path"]))
+                    body_related.attach(part)
+                except Exception as ie:
+                    logger.warning(f"Failed to attach inline image {img.get('cid')}: {ie}")
+            body_root = body_related
+        else:
+            body_root = body_alt
+
+        if has_attachments:
+            outer = MIMEMultipart("mixed")
+            outer.attach(body_root)
+            for att in attachments:
+                try:
+                    with open(att["path"], "rb") as fh:
+                        part = MIMEBase("application", "octet-stream")
+                        part.set_payload(fh.read())
+                    encoders.encode_base64(part)
+                    part.add_header(
+                        "Content-Disposition",
+                        f'attachment; filename="{att.get("filename") or os.path.basename(att["path"])}"'
+                    )
+                    outer.attach(part)
+                except Exception as ae:
+                    logger.warning(f"Failed to attach file {att.get('filename')}: {ae}")
+        else:
+            outer = body_root
+
         outer["Subject"] = subject
         outer["From"] = f"Kaimera Learning <{config['email']}>"
         outer["To"] = to_email
         outer["Reply-To"] = config["email"]
-
-        body_related = MIMEMultipart("related")
-        body_alt = MIMEMultipart("alternative")
-        body_related.attach(body_alt)
-
-        body_alt.attach(MIMEText(html_content, "html"))
-        # Also add plain text version for better deliverability
-        import re as _re
-        plain_text = _re.sub(r'<[^>]+>', '', html_content).strip()
-        body_alt.attach(MIMEText(plain_text, "plain"))
-
-        # Inline images: each is referenced by "cid:<cid>" inside the HTML body.
-        for img in (inline_images or []):
-            try:
-                with open(img["path"], "rb") as fh:
-                    part = MIMEImage(fh.read(), _subtype=(img.get("mime") or "image/png").split("/")[-1])
-                part.add_header("Content-ID", f"<{img['cid']}>")
-                part.add_header("Content-Disposition", "inline", filename=os.path.basename(img["path"]))
-                body_related.attach(part)
-            except Exception as ie:
-                logger.warning(f"Failed to attach inline image {img.get('cid')}: {ie}")
-
-        outer.attach(body_related)
-
-        # File attachments: appear as downloadables.
-        for att in (attachments or []):
-            try:
-                with open(att["path"], "rb") as fh:
-                    part = MIMEBase("application", "octet-stream")
-                    part.set_payload(fh.read())
-                encoders.encode_base64(part)
-                part.add_header(
-                    "Content-Disposition",
-                    f'attachment; filename="{att.get("filename") or os.path.basename(att["path"])}"'
-                )
-                outer.attach(part)
-            except Exception as ae:
-                logger.warning(f"Failed to attach file {att.get('filename')}: {ae}")
 
         def _send():
             with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
