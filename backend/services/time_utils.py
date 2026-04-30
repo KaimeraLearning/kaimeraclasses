@@ -63,4 +63,3 @@ def is_past_grace(end_date: str, end_time: str, grace_minutes: int = 30) -> bool
     except Exception:
         return False
     return now_local() > end_dt + timedelta(minutes=grace_minutes)
-
