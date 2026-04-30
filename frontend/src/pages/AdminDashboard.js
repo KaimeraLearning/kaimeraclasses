@@ -17,6 +17,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { getApiError, API , apiFetch} from '../utils/api';
 import { useDateRangeFilter } from '../components/DateRangeFilter';
 import EmailTemplateManager from '../components/EmailTemplateManager';
+import SystemRepairButton from '../components/SystemRepairButton';
 import { txDirection, txDisplayAmount, txAmountClass, adminTypeLabel } from '../utils/transactions';
 
 // ─── Reusable Sub-Components ───
@@ -976,6 +977,7 @@ const AdminDashboard = () => {
               <Button onClick={() => navigate('/demo-live-sheet')} size="sm" className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full text-xs font-bold" data-testid="admin-demo-live-sheet"><Zap className="w-3 h-3 mr-1" /> Demo Sheet</Button>
               <Button onClick={() => navigate('/history')} size="sm" variant="outline" className="rounded-full text-xs" data-testid="admin-history-link"><History className="w-3 h-3 mr-1" /> History</Button>
               <Button onClick={() => navigate('/learning-kit')} size="sm" variant="outline" className="rounded-full text-xs" data-testid="admin-learning-kit-link"><BookOpen className="w-3 h-3 mr-1" /> Learning Kit</Button>
+              <SystemRepairButton />
               <span className="text-sm font-medium text-slate-700">{user?.name}</span>
               <Button onClick={handleLogout} variant="outline" size="sm" className="rounded-full" data-testid="logout-button"><LogOut className="w-3 h-3" /></Button>
             </div>
