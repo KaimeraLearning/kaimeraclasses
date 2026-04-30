@@ -1,6 +1,6 @@
 """Demo booking and feedback routes"""
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional
 from pymongo import ReturnDocument
@@ -11,6 +11,31 @@ from services.auth import get_current_user, hash_password
 from services.helpers import send_email, notify_event, insert_admin_mirror_txn
 
 router = APIRouter()
+
+
+def _is_teacher_no_show(cls: dict) -> bool:
+    """Returns True if the teacher failed to start the class.
+
+    Considers either an explicit DB flag (set by cron / dashboard auto-progression
+    / admin) OR an on-the-fly calculation: scheduled end_time + 30min grace has
+    passed and the class was never started (`started_at_actual` is null).
+    """
+    if not cls:
+        return False
+    if cls.get("teacher_no_show"):
+        return True
+    if cls.get("status") in ("teacher_no_show", "cancelled", "cancelled_by_teacher"):
+        return True
+    if cls.get("started_at_actual"):
+        return False
+    end_t = (cls.get("end_time") or "23:59")
+    try:
+        end_dt = datetime.fromisoformat(f"{cls.get('end_date') or cls.get('date')}T{end_t}:00")
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return False
+    return datetime.now(timezone.utc) > end_dt + timedelta(minutes=30)
 
 
 async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str):
@@ -169,13 +194,16 @@ async def create_demo_request(demo_data: DemoRequestCreate):
             continue
         cls = await db.class_sessions.find_one(
             {"class_id": cid},
-            {"_id": 0, "status": 1, "started_at_actual": 1, "teacher_no_show": 1}
+            {
+                "_id": 0, "status": 1, "started_at_actual": 1, "teacher_no_show": 1,
+                "date": 1, "end_date": 1, "end_time": 1
+            }
         )
         if not cls:
             # Class doc missing — orphan. Don't count against user.
             continue
         # Skip (= refund) if teacher never started OR class was cancelled.
-        if cls.get("teacher_no_show") or cls.get("status") in ("teacher_no_show", "cancelled", "cancelled_by_teacher"):
+        if _is_teacher_no_show(cls):
             continue
         counted += 1
 

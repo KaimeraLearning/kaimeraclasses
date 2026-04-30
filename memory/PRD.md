@@ -176,10 +176,20 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 ### Previous Features
 - Full role-based dashboards, Demo-first workflow, Jitsi video, Teacher rating/suspension, Scoped chat, Single-device sessions, KLAT/KL-CAT scoring, PDF resume upload, Class proofs, Complaint system, Notifications, Financial controls, ViewProfilePopup, Auto-refresh on tab focus
 
+### Teacher No-Show Demo Refund (Feb 2026)
+- A demo no longer counts against the user's 2-demo limit if the teacher fails to start it.
+- `routes/demo.py` now exposes `_is_teacher_no_show(cls)` helper which detects no-show via:
+  (a) explicit `teacher_no_show=True` / `status` flag (set by cron, dashboard auto-progression, or admin)
+  (b) on-the-fly: scheduled `end_time + 30min` grace passed without `started_at_actual` being set
+- Counting logic in `POST /api/demo/request` uses this helper, ensuring same-day no-shows refund the demo slot immediately (no cron dependency).
+- Pytest coverage: `/app/backend/tests/test_iteration37_demo_no_show_refund.py` (3 scenarios — explicit flag, implicit time-elapsed, regression for actually-started demos).
+- StudentDashboard.js already renders "Teacher was unable to start the class" banner when `cls.teacher_no_show` is true (set by `_annotate_no_show` in `routes/student.py`).
+
 ## Backlog
 ### P2
 - Verify Resend domain for production email
 - Google OAuth origin whitelisting for production domain
+- Optional data migration: set `is_verified:true` & `must_change_password:true` for legacy manual user accounts.
 ### P3
 - Real-time WebSocket notifications/chat
 - Student progress PDF reports
