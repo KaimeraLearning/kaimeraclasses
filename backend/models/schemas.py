@@ -25,6 +25,7 @@ class User(BaseModel):
     teacher_code: Optional[str] = None  # Auto-generated for teachers e.g. KL-T0001
     bank_details: Optional[dict] = None  # {account_name, account_number, bank_name, ifsc_code}
     badges: Optional[list] = None  # Admin-assigned badges
+    must_change_password: bool = False  # True for accounts with auto-generated passwords; cleared on first password change
     created_at: datetime
 
 

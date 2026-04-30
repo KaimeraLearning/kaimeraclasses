@@ -396,7 +396,8 @@ async def create_teacher_account(teacher_data: CreateTeacherAccount, request: Re
     teacher_doc = {
         "user_id": user_id, "email": teacher_data.email, "name": teacher_data.name,
         "role": "teacher", "credits": 0.0, "picture": None,
-        "password_hash": password_hash_val, "is_approved": True, "is_verified": False,
+        "password_hash": password_hash_val, "is_approved": True, "is_verified": True,
+        "must_change_password": True,
         "phone": None, "bio": None, "teacher_code": teacher_code,
         "bank_details": None, "badges": [],
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -443,7 +444,8 @@ async def create_counsellor_account(counsellor_data: CreateTeacherAccount, reque
     counsellor_doc = {
         "user_id": user_id, "email": counsellor_data.email, "name": counsellor_data.name,
         "role": "counsellor", "credits": 0.0, "picture": None,
-        "password_hash": password_hash_val, "is_approved": True, "is_verified": False,
+        "password_hash": password_hash_val, "is_approved": True, "is_verified": True,
+        "must_change_password": True,
         "phone": None, "bio": None, "counselor_id": counselor_id,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -509,7 +511,8 @@ async def admin_create_user(request: Request, authorization: Optional[str] = Hea
     base_doc = {
         "user_id": user_id, "email": email, "name": name, "role": role,
         "credits": 0.0, "picture": None, "password_hash": password_hash_val,
-        "is_approved": True, "is_verified": False,
+        "is_approved": True, "is_verified": True,
+        "must_change_password": True,
         "phone": phone, "bio": None, "badges": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -746,7 +749,8 @@ async def admin_create_student(student_data: CreateStudentAccount, request: Requ
     student_doc = {
         "user_id": user_id, "email": student_data.email, "name": student_data.name,
         "role": "student", "credits": 0.0, "picture": None, "password_hash": password_hash_val,
-        "is_approved": True, "is_verified": False,
+        "is_approved": True, "is_verified": True,
+        "must_change_password": True,
         "phone": student_data.phone, "bio": None,
         "institute": student_data.institute, "goal": student_data.goal,
         "preferred_time_slot": student_data.preferred_time_slot,
@@ -799,7 +803,10 @@ async def admin_reset_password(request: Request, authorization: Optional[str] = 
     if not new_password:
         new_password = generate_temp_password()
     password_hash_val = hash_password(new_password)
-    await db.users.update_one({"user_id": target["user_id"]}, {"$set": {"password_hash": password_hash_val}})
+    await db.users.update_one(
+        {"user_id": target["user_id"]},
+        {"$set": {"password_hash": password_hash_val, "must_change_password": True}}
+    )
     # Invalidate all existing sessions for this user
     await db.user_sessions.delete_many({"user_id": target["user_id"]})
 

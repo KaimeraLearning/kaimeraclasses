@@ -9,12 +9,17 @@ import { toast } from 'sonner';
 import { Mail, Lock, User, Phone, BookOpen, Calendar, Clock, MessageSquare, Loader2, Sparkles } from 'lucide-react';
 
 import { API, getApiError , apiFetch} from '../utils/api';
+import ForcePasswordChangeModal from '../components/ForcePasswordChangeModal';
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
 
 const Login = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ email: '', password: '' });
+  // When server returns must_change_password=true after a successful login,
+  // we hold the role here and show the forced-change modal. The user is NOT
+  // redirected to their dashboard until they pick a real password.
+  const [forcePwdState, setForcePwdState] = useState(null); // { role: string }
 
   const [demoOpen, setDemoOpen] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
@@ -41,6 +46,12 @@ const Login = () => {
       const data = await res.json();
       localStorage.setItem('token', data.session_token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      if (data.must_change_password) {
+        // Hold redirect; show forced-change modal. Role is captured so we can
+        // route the user once they've set a real password.
+        setForcePwdState({ role: data.user.role });
+        return;
+      }
       toast.success(`Welcome back, ${data.user.name}!`);
       redirectByRole(data.user.role);
     } catch (err) {
@@ -311,6 +322,16 @@ const Login = () => {
           </form>
         </DialogContent>
       </Dialog>
+
+      {forcePwdState && (
+        <ForcePasswordChangeModal
+          onSuccess={() => {
+            const role = forcePwdState.role;
+            setForcePwdState(null);
+            redirectByRole(role);
+          }}
+        />
+      )}
     </div>
   );
 };
