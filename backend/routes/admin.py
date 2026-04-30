@@ -1645,3 +1645,254 @@ async def run_system_repair(request: Request, authorization: Optional[str] = Hea
         "ran_by": user.user_id,
     }
 
+
+
+
+# ─── Demo No-Show Audit ──────────────────────────────────────────────────────
+
+@router.get("/admin/demo-no-show-audit")
+async def demo_no_show_audit(
+    request: Request, authorization: Optional[str] = Header(None), days: int = 30
+):
+    """List demo classes auto-flagged or admin-flagged as teacher_no_show within
+    the last N days, with refund status so admin can spot any missed refunds."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    days = max(1, min(int(days or 30), 365))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # Fetch demo classes that are flagged no-show (either via DB flag or status)
+    classes = await db.class_sessions.find({
+        "is_demo": True,
+        "$or": [
+            {"teacher_no_show": True},
+            {"status": "teacher_no_show"},
+        ],
+        "created_at": {"$gte": cutoff},
+    }, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    # Also include scheduled-but-time-elapsed demo classes (implicit no-shows)
+    # so admin sees them too even before cron has marked them.
+    implicit = await db.class_sessions.find({
+        "is_demo": True,
+        "started_at_actual": None,
+        "status": "scheduled",
+        "created_at": {"$gte": cutoff},
+    }, {"_id": 0}).to_list(500)
+
+    seen_ids = {c["class_id"] for c in classes}
+    now = datetime.now(timezone.utc)
+    for c in implicit:
+        if c["class_id"] in seen_ids:
+            continue
+        end_t = (c.get("end_time") or "23:59")
+        try:
+            end_dt = datetime.fromisoformat(f"{c.get('end_date') or c.get('date')}T{end_t}:00")
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            if now > end_dt + timedelta(minutes=30):
+                c["_implicit"] = True   # not yet flagged in DB
+                classes.append(c)
+        except Exception:
+            continue
+
+    rows = []
+    for c in classes:
+        # Look up the demo_booking debit + any refund credit
+        booking = await db.transactions.find_one(
+            {"class_id": c["class_id"], "type": "demo_booking", "amount": {"$lt": 0}},
+            {"_id": 0}
+        )
+        refund = await db.transactions.find_one(
+            {"class_id": c["class_id"], "type": "class_delete_refund", "amount": {"$gt": 0}},
+            {"_id": 0}
+        )
+        student_id = c.get("assigned_student_id") or (
+            c.get("enrolled_students", [{}])[0].get("user_id") if c.get("enrolled_students") else None
+        )
+        student = await db.users.find_one({"user_id": student_id}, {"_id": 0, "name": 1, "email": 1, "credits": 1}) if student_id else None
+        rows.append({
+            "class_id": c["class_id"],
+            "title": c.get("title"),
+            "date": c.get("date"),
+            "end_time": c.get("end_time"),
+            "teacher_id": c.get("teacher_id"),
+            "teacher_name": c.get("teacher_name"),
+            "student_id": student_id,
+            "student_name": (student or {}).get("name"),
+            "student_email": (student or {}).get("email"),
+            "student_credits": (student or {}).get("credits", 0),
+            "amount_charged": abs(booking["amount"]) if booking else 0,
+            "amount_refunded": refund["amount"] if refund else 0,
+            "refund_pending": bool(booking and not refund),
+            "marked_at": c.get("no_show_marked_at"),
+            "implicit": bool(c.get("_implicit")),
+            "status": c.get("status"),
+        })
+
+    return {
+        "rows": rows,
+        "total": len(rows),
+        "days_window": days,
+        "refund_pending_count": sum(1 for r in rows if r["refund_pending"]),
+    }
+
+
+@router.post("/admin/demo-no-show-audit/recredit/{class_id}")
+async def demo_no_show_recredit(
+    class_id: str, request: Request, authorization: Optional[str] = Header(None)
+):
+    """Manually re-credit a missed demo refund. Idempotent — won't double-refund
+    if a class_delete_refund already exists for this class."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if not (cls.get("is_demo")):
+        raise HTTPException(status_code=400, detail="Only demo classes are eligible for this audit")
+
+    # Ensure the class is actually flagged as no-show (or implicit elapsed).
+    now = datetime.now(timezone.utc)
+    is_explicit_no_show = bool(cls.get("teacher_no_show")) or cls.get("status") == "teacher_no_show"
+    if not is_explicit_no_show:
+        if cls.get("started_at_actual"):
+            raise HTTPException(status_code=400, detail="Teacher started this class — refund not applicable")
+        # Implicit check
+        end_t = (cls.get("end_time") or "23:59")
+        try:
+            end_dt = datetime.fromisoformat(f"{cls.get('end_date') or cls.get('date')}T{end_t}:00")
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Class has invalid date/time")
+        if now <= end_dt + timedelta(minutes=30):
+            raise HTTPException(status_code=400, detail="Class end+30min grace has not elapsed yet")
+        # Mark as no-show now (so subsequent audits/queries are consistent)
+        await db.class_sessions.update_one(
+            {"class_id": class_id},
+            {"$set": {
+                "status": "teacher_no_show", "teacher_no_show": True,
+                "no_show_marked_at": now.isoformat(), "no_show_marked_by": user.user_id,
+            }}
+        )
+
+    # Idempotent refund: skip if class_delete_refund already booked
+    existing_refund = await db.transactions.find_one(
+        {"class_id": class_id, "type": "class_delete_refund", "amount": {"$gt": 0}},
+        {"_id": 0}
+    )
+    if existing_refund:
+        return {"ok": True, "message": "Already refunded — no action taken", "refunded": 0}
+
+    refunded = 0
+    txns = await db.transactions.find(
+        {"class_id": class_id, "type": "demo_booking", "amount": {"$lt": 0}},
+        {"_id": 0}
+    ).to_list(50)
+    for t in txns:
+        amount = abs(t["amount"])
+        await db.users.update_one({"user_id": t["user_id"]}, {"$inc": {"credits": amount}})
+        await db.transactions.insert_one({
+            "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+            "user_id": t["user_id"], "type": "class_delete_refund", "amount": amount,
+            "description": f"Manual refund (admin audit) — teacher did not start demo '{cls.get('title','Class')}'",
+            "class_id": class_id,
+            "counterparty_user_id": cls.get("teacher_id"),
+            "status": "completed", "created_at": now.isoformat(),
+        })
+        await insert_admin_mirror_txn(
+            amount=-amount,
+            description=f"Manual demo refund issued to {t['user_id']} via audit (no-show)",
+            txn_type="class_refund_paid",
+            counterparty_user_id=t["user_id"],
+            class_id=class_id,
+        )
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": t["user_id"], "type": "class_no_show",
+            "title": "Demo refund credited",
+            "message": f"Your balance for '{cls.get('title','demo class')}' has been restored ({amount} credits).",
+            "read": False, "related_id": class_id, "created_at": now.isoformat(),
+        })
+        refunded += amount
+
+    return {
+        "ok": True,
+        "refunded": refunded,
+        "transactions": len(txns),
+        "message": "Refund issued" if refunded else "No demo_booking debit found for this class",
+    }
+
+
+# ─── Legacy User Migration (P2) ───────────────────────────────────────────────
+
+@router.get("/admin/legacy-user-migration/preview")
+async def legacy_user_migration_preview(
+    request: Request, authorization: Optional[str] = Header(None)
+):
+    """Preview how many legacy manual user accounts are missing
+    `is_verified` / `must_change_password` flags — safe to run anytime."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    missing_verified = await db.users.count_documents({
+        "role": {"$in": ["teacher", "counsellor", "student"]},
+        "$or": [{"is_verified": {"$exists": False}}, {"is_verified": None}],
+    })
+    missing_must_change = await db.users.count_documents({
+        "role": {"$in": ["teacher", "counsellor", "student"]},
+        "$or": [{"must_change_password": {"$exists": False}}],
+        # Only target users who have a password_hash (manual accounts) — not OAuth-only
+        "password_hash": {"$ne": None, "$exists": True},
+    })
+
+    return {
+        "missing_is_verified": missing_verified,
+        "missing_must_change_password": missing_must_change,
+        "would_set_is_verified_true": missing_verified,
+        "would_set_must_change_password_true": missing_must_change,
+        "note": "Migration only sets fields where they're missing — never overwrites existing values.",
+    }
+
+
+@router.post("/admin/legacy-user-migration")
+async def legacy_user_migration_run(
+    request: Request, authorization: Optional[str] = Header(None)
+):
+    """One-shot: backfill `is_verified=True` and `must_change_password=True` for
+    any legacy teacher / counsellor / student account that's missing these
+    fields. Idempotent — only fills missing fields, never overwrites."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    res_v = await db.users.update_many(
+        {
+            "role": {"$in": ["teacher", "counsellor", "student"]},
+            "$or": [{"is_verified": {"$exists": False}}, {"is_verified": None}],
+        },
+        {"$set": {"is_verified": True}},
+    )
+
+    res_m = await db.users.update_many(
+        {
+            "role": {"$in": ["teacher", "counsellor", "student"]},
+            "must_change_password": {"$exists": False},
+            "password_hash": {"$ne": None, "$exists": True},
+        },
+        {"$set": {"must_change_password": True}},
+    )
+
+    return {
+        "ok": True,
+        "is_verified_set": res_v.modified_count,
+        "must_change_password_set": res_m.modified_count,
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "ran_by": user.user_id,
+    }

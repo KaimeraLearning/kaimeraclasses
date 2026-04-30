@@ -185,11 +185,21 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
 - Pytest coverage: `/app/backend/tests/test_iteration37_demo_no_show_refund.py` (3 scenarios — explicit flag, implicit time-elapsed, regression for actually-started demos).
 - StudentDashboard.js already renders "Teacher was unable to start the class" banner when `cls.teacher_no_show` is true (set by `_annotate_no_show` in `routes/student.py`).
 
+### Demo No-Show Audit + Legacy User Migration + Deployment Health (Feb 2026)
+- **Demo No-Show Audit** (`Operations Center → Financials → No-Show Audit`):
+  - `GET /api/admin/demo-no-show-audit?days=N` lists all demo classes flagged as teacher_no_show (explicit + implicit elapsed) with refund status.
+  - `POST /api/admin/demo-no-show-audit/recredit/{class_id}` issues a manual refund if the auto-refund failed. Idempotent — skips if a `class_delete_refund` txn already exists for the class. Marks implicit-elapsed classes as no-show during recredit.
+  - Panel: `/app/frontend/src/components/DemoNoShowAudit.js` — table with one-click "Re-credit" buttons.
+- **Legacy User Migration** (`Operations Center → User Management → Credentials & Access`):
+  - `GET /api/admin/legacy-user-migration/preview` — counts users missing `is_verified` / `must_change_password`.
+  - `POST /api/admin/legacy-user-migration` — backfills both flags. Idempotent: only fills missing fields, never overwrites.
+  - Panel: `/app/frontend/src/components/LegacyUserMigration.js`.
+- **Deployment Health Badge** (header chip in Operations Center): polls `/api/health/config` and surfaces missing env vars / SMTP / pricing seeding in a dialog. Resolves the recurring "works in preview, fails on deploy" issue. Component: `/app/frontend/src/components/DeploymentHealthBadge.js`.
+
 ## Backlog
 ### P2
 - Verify Resend domain for production email
 - Google OAuth origin whitelisting for production domain
-- Optional data migration: set `is_verified:true` & `must_change_password:true` for legacy manual user accounts.
 ### P3
 - Real-time WebSocket notifications/chat
 - Student progress PDF reports

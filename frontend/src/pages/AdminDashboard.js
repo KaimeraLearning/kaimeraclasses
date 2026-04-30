@@ -11,13 +11,16 @@ import {
   GraduationCap, LogOut, Check, X, DollarSign, MessageSquare, UserPlus, Copy, Zap,
   History, Search, Shield, Award, Filter, BookOpen, KeyRound, Users, Trash2, Plus,
   Ban, ChevronDown, ChevronUp, Calendar, CreditCard, BarChart3, Play, Settings, Save, Pencil, IndianRupee, Download,
-  Mail, CheckCircle
+  Mail, CheckCircle, ShieldAlert
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { getApiError, API , apiFetch} from '../utils/api';
 import { useDateRangeFilter } from '../components/DateRangeFilter';
 import EmailTemplateManager from '../components/EmailTemplateManager';
 import SystemRepairButton from '../components/SystemRepairButton';
+import DemoNoShowAudit from '../components/DemoNoShowAudit';
+import LegacyUserMigration from '../components/LegacyUserMigration';
+import DeploymentHealthBadge from '../components/DeploymentHealthBadge';
 import { txDirection, txDisplayAmount, txAmountClass, adminTypeLabel } from '../utils/transactions';
 
 // ─── Reusable Sub-Components ───
@@ -977,6 +980,7 @@ const AdminDashboard = () => {
               <Button onClick={() => navigate('/demo-live-sheet')} size="sm" className="bg-amber-400 hover:bg-amber-500 text-slate-900 rounded-full text-xs font-bold" data-testid="admin-demo-live-sheet"><Zap className="w-3 h-3 mr-1" /> Demo Sheet</Button>
               <Button onClick={() => navigate('/history')} size="sm" variant="outline" className="rounded-full text-xs" data-testid="admin-history-link"><History className="w-3 h-3 mr-1" /> History</Button>
               <Button onClick={() => navigate('/learning-kit')} size="sm" variant="outline" className="rounded-full text-xs" data-testid="admin-learning-kit-link"><BookOpen className="w-3 h-3 mr-1" /> Learning Kit</Button>
+              <DeploymentHealthBadge />
               <SystemRepairButton />
               <span className="text-sm font-medium text-slate-700">{user?.name}</span>
               <Button onClick={handleLogout} variant="outline" size="sm" className="rounded-full" data-testid="logout-button"><LogOut className="w-3 h-3" /></Button>
@@ -1234,6 +1238,9 @@ const AdminDashboard = () => {
                   </div>
                 </div>
                 <div className="mt-6">
+                  <LegacyUserMigration />
+                </div>
+                <div className="mt-6">
                   <EmailTemplateManager />
                 </div>
               </TabsContent>
@@ -1312,6 +1319,7 @@ const AdminDashboard = () => {
                 <TabsTrigger value="ledger" data-testid="ledger-tab">Transaction Ledger</TabsTrigger>
                 <TabsTrigger value="razorpay-payments" data-testid="razorpay-payments-tab" onClick={() => fetchRazorpayPayments()}><IndianRupee className="w-3.5 h-3.5 mr-1" /> Razorpay Payments</TabsTrigger>
                 <TabsTrigger value="proofs" data-testid="proofs-tab">Proofs & Approvals ({pendingProofs.length})</TabsTrigger>
+                <TabsTrigger value="no-show-audit" data-testid="no-show-audit-tab"><ShieldAlert className="w-3.5 h-3.5 mr-1.5" /> No-Show Audit</TabsTrigger>
                 <TabsTrigger value="pricing" data-testid="pricing-tab" onClick={() => { if (!pricingLoaded) fetchPricing(); }}><Settings className="w-3.5 h-3.5 mr-1.5" /> System Pricing</TabsTrigger>
               </TabsList>
 
@@ -1523,6 +1531,13 @@ const AdminDashboard = () => {
               {/* ── Proofs & Approvals ── */}
               <TabsContent value="proofs">
                 <AdminProofsPanel proofs={pendingProofs} onApprove={(proofId, approved, notes) => handleApproveProof(proofId, approved, notes)} />
+              </TabsContent>
+
+              {/* ── Demo No-Show Audit ── */}
+              <TabsContent value="no-show-audit">
+                <div className="bg-white rounded-3xl border-2 border-slate-100 p-6">
+                  <DemoNoShowAudit />
+                </div>
               </TabsContent>
 
               {/* ── System Pricing ── */}
