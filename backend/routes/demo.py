@@ -43,6 +43,7 @@ async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str
             "user_id": student_id, "email": demo["email"], "name": demo["name"],
             "role": "student", "credits": 0.0, "picture": None,
             "password_hash": hash_password(temp_password), "is_approved": True,
+            "is_verified": True, "must_change_password": True,
             "phone": demo.get("phone"), "bio": None,
             "institute": demo.get("institute"), "goal": None,
             "preferred_time_slot": demo.get("preferred_time_slot"),
