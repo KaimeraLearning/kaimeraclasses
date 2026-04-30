@@ -11,7 +11,7 @@ Every task is:
 Each task returns `{name, ok, count, message}`. The HTTP route aggregates them
 into a report the admin sees in the UI.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 
 from database import db
@@ -28,29 +28,31 @@ async def _run(name: str, fn) -> Dict[str, Any]:
 # ─── Individual repair tasks ──────────────────────────────────────────────────
 
 async def task_dedupe_demo_classes():
-    """If multiple class_sessions exist for the same demo_id (caused by the
-    pre-fix double-click bug), keep the EARLIEST and delete the rest.
-    Only operates when the duplicate has no proofs / attendance / transactions
-    against it (safety net — never removes a class that already has activity)."""
-    pipeline = [
-        {"$match": {"demo_id": {"$ne": None, "$exists": True}}},
-        {"$group": {"_id": "$demo_id", "ids": {"$push": "$class_id"}, "count": {"$sum": 1}}},
-        {"$match": {"count": {"$gt": 1}}},
-    ]
-    duplicates = await db.class_sessions.aggregate(pipeline).to_list(1000)
+    """Detect and remove duplicate demo classes — including those created BEFORE
+    `demo_id` was added (the original double-click bug created multiple class_sessions
+    without any back-link, so grouping by demo_id alone misses them).
+
+    Strategy:
+      Stage A: group by demo_id (catches new-style duplicates)
+      Stage B: group by (teacher_id, student_id, date, start_time) on demo classes
+               (catches OLD pre-fix duplicates without demo_id)
+
+    Safety: a duplicate is only removed if it has zero proofs, transactions,
+    or attendance records — otherwise it's kept for audit and reported as 'skipped'."""
     deleted = 0
     skipped = 0
-    for group in duplicates:
-        # Keep earliest (sort ascending by created_at)
-        classes = await db.class_sessions.find(
-            {"class_id": {"$in": group["ids"]}}, {"_id": 0}
-        ).sort("created_at", 1).to_list(100)
-        if len(classes) <= 1:
-            continue
-        keep = classes[0]
-        for dup in classes[1:]:
+
+    async def _try_dedupe(group_classes):
+        """Given a list of class_session dicts that are duplicates of each other,
+        keep the earliest and try to delete the rest. Returns (deleted, skipped)."""
+        nonlocal deleted, skipped
+        if len(group_classes) <= 1:
+            return
+        # Sort by created_at ASC so index 0 is the earliest (the one to keep).
+        group_classes.sort(key=lambda c: c.get("created_at") or "")
+        keep = group_classes[0]
+        for dup in group_classes[1:]:
             cid = dup["class_id"]
-            # Safety: skip if the dup has any proofs, transactions, or attendance
             has_activity = (
                 await db.class_proofs.count_documents({"class_id": cid})
                 or await db.transactions.count_documents({"class_id": cid})
@@ -61,14 +63,76 @@ async def task_dedupe_demo_classes():
                 continue
             await db.class_sessions.delete_one({"class_id": cid})
             deleted += 1
-        # Also make sure the kept class has the demo_id (idempotent)
-        await db.class_sessions.update_one(
-            {"class_id": keep["class_id"]},
-            {"$set": {"demo_id": group["_id"]}}
+        # Make sure the kept class has demo_id (if any duplicate had it)
+        kept_demo_id = keep.get("demo_id") or next(
+            (c.get("demo_id") for c in group_classes if c.get("demo_id")), None
         )
+        if kept_demo_id and not keep.get("demo_id"):
+            await db.class_sessions.update_one(
+                {"class_id": keep["class_id"]},
+                {"$set": {"demo_id": kept_demo_id}}
+            )
+
+    # ── Stage A: group by demo_id ────────────────────────────────────────────
+    pipeline_a = [
+        {"$match": {"demo_id": {"$ne": None, "$exists": True}}},
+        {"$group": {"_id": "$demo_id", "ids": {"$push": "$class_id"}, "n": {"$sum": 1}}},
+        {"$match": {"n": {"$gt": 1}}},
+    ]
+    a_groups = await db.class_sessions.aggregate(pipeline_a).to_list(1000)
+    for g in a_groups:
+        classes = await db.class_sessions.find(
+            {"class_id": {"$in": g["ids"]}}, {"_id": 0}
+        ).to_list(50)
+        await _try_dedupe(classes)
+
+    # ── Stage B: group by behavioral fingerprint (catches pre-fix dups) ─────
+    # Pull every class that looks like a demo, then group in Python so we can
+    # also pick the student from `enrolled_students` if `assigned_student_id` is missing.
+    demo_query = {
+        "$or": [
+            {"is_demo": True},
+            {"title": {"$regex": "^Demo Session", "$options": "i"}},
+        ]
+    }
+    demo_classes = await db.class_sessions.find(
+        demo_query,
+        {"_id": 0, "class_id": 1, "demo_id": 1, "teacher_id": 1,
+         "assigned_student_id": 1, "enrolled_students": 1,
+         "date": 1, "start_time": 1, "title": 1, "created_at": 1}
+    ).to_list(20000)
+
+    from collections import defaultdict
+    buckets = defaultdict(list)
+    for c in demo_classes:
+        student_id = c.get("assigned_student_id")
+        if not student_id and c.get("enrolled_students"):
+            student_id = (c["enrolled_students"][0] or {}).get("user_id")
+        key = (
+            c.get("teacher_id"),
+            student_id,
+            (c.get("date") or "").split("T")[0],
+            c.get("start_time"),
+        )
+        # Need a non-empty key fingerprint to avoid lumping unrelated classes
+        if key[0] and key[1] and key[2]:
+            buckets[key].append(c)
+
+    for key, classes in buckets.items():
+        if len(classes) <= 1:
+            continue
+        # Re-fetch live (in case Stage A already deleted some)
+        live = await db.class_sessions.find(
+            {"class_id": {"$in": [c["class_id"] for c in classes]}},
+            {"_id": 0}
+        ).to_list(50)
+        await _try_dedupe(live)
+
     msg = f"Removed {deleted} duplicate demo class(es)"
     if skipped:
         msg += f"; skipped {skipped} duplicate(s) that already have proofs/transactions/attendance (kept for audit)"
+    if deleted == 0 and skipped == 0:
+        msg = "No duplicate demo classes found"
     return {"count": deleted, "message": msg}
 
 
@@ -136,7 +200,7 @@ async def task_verify_admin_created_users():
     so the email is already proven)."""
     res = await db.users.update_many(
         {
-            "password_hash": {"$exists": True, "$ne": None, "$ne": ""},
+            "password_hash": {"$exists": True, "$nin": [None, ""]},
             "is_verified": False,
         },
         {"$set": {"is_verified": True}}
@@ -247,6 +311,130 @@ async def task_invalidate_caches():
     return {"count": 0, "message": "Cleared in-memory caches"}
 
 
+async def task_mark_overdue_no_show_classes():
+    """Backfill `teacher_no_show=True` and `status="teacher_no_show"` on any
+    scheduled class whose end-time + 30min grace has passed and the teacher
+    never started it. This is what triggers the demo-allowance refund logic.
+    Idempotent: skips classes already marked, and never overwrites a class
+    where the teacher actually started or that's already completed."""
+    now = datetime.now(timezone.utc)
+    grace = now - timedelta(minutes=30)
+    updated = 0
+    refunded = 0
+    cursor = db.class_sessions.find(
+        {
+            "started_at_actual": {"$in": [None]},
+            "status": {"$in": ["scheduled", "in_progress"]},
+            "$or": [{"teacher_no_show": {"$ne": True}}, {"teacher_no_show": {"$exists": False}}],
+        },
+        {"_id": 0, "class_id": 1, "date": 1, "end_date": 1,
+         "end_time": 1, "is_demo": 1, "title": 1, "teacher_id": 1,
+         "enrolled_students": 1}
+    )
+    async for c in cursor:
+        end_t = c.get("end_time") or "23:59"
+        d = c.get("end_date") or c.get("date")
+        try:
+            end_dt = datetime.fromisoformat(f"{d}T{end_t}:00")
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        if end_dt > grace:
+            continue
+        # Mark no-show
+        await db.class_sessions.update_one(
+            {"class_id": c["class_id"]},
+            {"$set": {"status": "teacher_no_show", "teacher_no_show": True}}
+        )
+        updated += 1
+        # Refund any demo_booking transactions
+        async for t in db.transactions.find(
+            {"class_id": c["class_id"], "type": "demo_booking", "amount": {"$lt": 0}},
+            {"_id": 0}
+        ):
+            amount = abs(t["amount"])
+            # Idempotency: skip if a refund txn already exists for this class+user
+            already = await db.transactions.count_documents({
+                "class_id": c["class_id"], "user_id": t["user_id"],
+                "type": "class_delete_refund"
+            })
+            if already:
+                continue
+            import uuid as _uuid
+            await db.users.update_one({"user_id": t["user_id"]}, {"$inc": {"credits": amount}})
+            await db.transactions.insert_one({
+                "transaction_id": f"txn_{_uuid.uuid4().hex[:12]}",
+                "user_id": t["user_id"], "type": "class_delete_refund",
+                "amount": amount,
+                "description": f"Refund — teacher did not start the demo class '{c.get('title','Class')}'",
+                "class_id": c["class_id"],
+                "counterparty_user_id": c.get("teacher_id"),
+                "status": "completed",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            refunded += 1
+    return {
+        "count": updated,
+        "message": f"Marked {updated} overdue class(es) as teacher_no_show; issued {refunded} refund(s)"
+    }
+
+
+async def diagnose_duplicates() -> List[Dict[str, Any]]:
+    """Read-only: returns every group of classes that look like duplicates,
+    without modifying anything. Used by the admin UI to PREVIEW what System
+    Repair would do before committing."""
+    out: List[Dict[str, Any]] = []
+
+    # By demo_id
+    pipeline = [
+        {"$match": {"demo_id": {"$ne": None, "$exists": True}}},
+        {"$group": {"_id": "$demo_id", "ids": {"$push": "$class_id"}, "n": {"$sum": 1}}},
+        {"$match": {"n": {"$gt": 1}}},
+    ]
+    for g in await db.class_sessions.aggregate(pipeline).to_list(500):
+        classes = await db.class_sessions.find(
+            {"class_id": {"$in": g["ids"]}},
+            {"_id": 0, "class_id": 1, "title": 1, "teacher_name": 1, "date": 1,
+             "start_time": 1, "created_at": 1, "demo_id": 1}
+        ).sort("created_at", 1).to_list(50)
+        out.append({"reason": "shared demo_id", "key": g["_id"], "classes": classes})
+
+    # By behavioral fingerprint (teacher+student+date+time, demo flavor)
+    demo_classes = await db.class_sessions.find(
+        {"$or": [
+            {"is_demo": True},
+            {"title": {"$regex": "^Demo Session", "$options": "i"}},
+        ]},
+        {"_id": 0, "class_id": 1, "title": 1, "teacher_id": 1, "teacher_name": 1,
+         "assigned_student_id": 1, "enrolled_students": 1,
+         "date": 1, "start_time": 1, "created_at": 1, "demo_id": 1}
+    ).to_list(20000)
+    from collections import defaultdict
+    buckets = defaultdict(list)
+    for c in demo_classes:
+        sid = c.get("assigned_student_id")
+        if not sid and c.get("enrolled_students"):
+            sid = (c["enrolled_students"][0] or {}).get("user_id")
+        key = (c.get("teacher_id"), sid, (c.get("date") or "").split("T")[0], c.get("start_time"))
+        if key[0] and key[1] and key[2]:
+            buckets[key].append(c)
+    seen_ids = {cid for grp in out for c in grp["classes"] for cid in [c["class_id"]]}
+    for key, classes in buckets.items():
+        if len(classes) <= 1:
+            continue
+        # Skip groups already covered by demo_id stage
+        if any(c["class_id"] in seen_ids for c in classes):
+            continue
+        classes.sort(key=lambda c: c.get("created_at") or "")
+        out.append({
+            "reason": "same teacher+student+date+time",
+            "key": f"{key[0]} / {key[1]} / {key[2]} {key[3]}",
+            "classes": classes,
+        })
+    return out
+
+
 # ─── Public entry point ───────────────────────────────────────────────────────
 
 async def run_all_repairs() -> List[Dict[str, Any]]:
@@ -256,6 +444,7 @@ async def run_all_repairs() -> List[Dict[str, Any]]:
         ("Unstick demos in 'processing'", task_unstick_demos),
         ("Backfill demo→class back-links", task_link_demos_to_classes),
         ("Remove duplicate demo classes", task_dedupe_demo_classes),
+        ("Mark overdue classes as teacher no-show + refund", task_mark_overdue_no_show_classes),
         ("Clear orphan classes (failed demo accepts)", task_clear_orphan_processing_classes),
         ("Mark legacy classes as is_demo", task_backfill_class_demo_flag),
         ("Verify admin-created users (fixes login)", task_verify_admin_created_users),
@@ -268,4 +457,3 @@ async def run_all_repairs() -> List[Dict[str, Any]]:
     for name, fn in tasks:
         out.append(await _run(name, fn))
     return out
-
