@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any
 from database import db
 from models.schemas import ProofVerification
 from services.auth import get_current_user
+from services.time_utils import today_local_str
 
 router = APIRouter()
 
@@ -248,7 +249,7 @@ async def get_expired_classes(request: Request, authorization: Optional[str] = H
         raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
 
     now = datetime.now(timezone.utc)
-    today_str = now.strftime('%Y-%m-%d')
+    today_str = today_local_str()
     all_classes = await db.class_sessions.find({"status": "scheduled"}, {"_id": 0}).to_list(10000)
 
     expired_classes = []
@@ -365,7 +366,7 @@ async def transfer_student(data: Dict[str, Any], request: Request, authorization
     if not assignment:
         raise HTTPException(status_code=404, detail="No active assignment found for this student-teacher pair")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local_str()
 
     # Find active/scheduled classes for this student with old teacher
     active_classes = await db.class_sessions.find(
