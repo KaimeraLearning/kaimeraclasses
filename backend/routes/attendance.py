@@ -6,6 +6,7 @@ from typing import Optional
 
 from database import db
 from services.auth import get_current_user
+from services.time_utils import today_local_str
 
 router = APIRouter()
 
@@ -108,7 +109,7 @@ async def get_unmarked_attendance(request: Request, authorization: Optional[str]
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local_str()
 
     # Get all active classes for this teacher
     classes = await db.class_sessions.find(
@@ -172,7 +173,7 @@ async def get_today_classes_for_attendance(student_id: str, request: Request, au
     if user.role != "teacher":
         raise HTTPException(status_code=403, detail="Teacher access only")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local_str()
 
     # Today's classes for this student
     today_classes = await db.class_sessions.find(
