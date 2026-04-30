@@ -51,11 +51,24 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
         cls_date = cls.get('date', '')
         cls_end_date = cls.get('end_date', cls_date)
 
-        if status == 'cancelled' or status == 'cancelled_by_teacher':
+        if status == 'teacher_no_show' or cls.get('teacher_no_show'):
+            cls['teacher_no_show'] = True
+            cancelled.append(cls)
+        elif status == 'cancelled' or status == 'cancelled_by_teacher':
             cancelled.append(cls)
         elif status == 'in_progress' or (status == 'scheduled' and cls_date == today_str):
             _annotate_no_show(cls)
-            live_classes.append(cls)
+            # If on-the-fly no-show detected, route to cancelled (don't show "Join Live")
+            if cls.get('teacher_no_show'):
+                # Persist the flag so subsequent loads are consistent
+                await db.class_sessions.update_one(
+                    {"class_id": cls["class_id"]},
+                    {"$set": {"status": "teacher_no_show", "teacher_no_show": True}}
+                )
+                cls['status'] = 'teacher_no_show'
+                cancelled.append(cls)
+            else:
+                live_classes.append(cls)
         elif status == 'completed':
             # Check if student has rated it
             rated = await db.feedback.find_one(
