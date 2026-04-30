@@ -11,11 +11,12 @@ from typing import Optional
 from database import db
 from models.schemas import ComplaintCreate, ComplaintResolve
 from services.auth import get_current_user
+from services.time_utils import today_local_str
 
 router = APIRouter()
 
-UPLOADS_DIR = Path("/app/backend/uploads")
-UPLOADS_DIR.mkdir(exist_ok=True)
+UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ── My transactions (any role) ───────────────────────────────────────────────
@@ -369,7 +370,7 @@ async def check_renewals(request: Request, authorization: Optional[str] = Header
 
     classes = await db.class_sessions.find(query, {"_id": 0}).to_list(1000)
     renewal_needed = []
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_str = today_local_str()
     for cls in classes:
         try:
             start = datetime.strptime(cls.get("date", today_str), "%Y-%m-%d")
