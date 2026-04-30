@@ -17,6 +17,7 @@ from models.schemas import (
 )
 from services.auth import get_current_user, hash_password
 from services.helpers import generate_teacher_code, generate_student_code, send_email, generate_otp, insert_admin_mirror_txn, notify_event, generate_temp_password, invalidate_email_config_cache, _get_email_config
+from services.time_utils import is_past_grace
 
 router = APIRouter()
 
@@ -1683,20 +1684,12 @@ async def demo_no_show_audit(
     }, {"_id": 0}).to_list(500)
 
     seen_ids = {c["class_id"] for c in classes}
-    now = datetime.now(timezone.utc)
     for c in implicit:
         if c["class_id"] in seen_ids:
             continue
-        end_t = (c.get("end_time") or "23:59")
-        try:
-            end_dt = datetime.fromisoformat(f"{c.get('end_date') or c.get('date')}T{end_t}:00")
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=timezone.utc)
-            if now > end_dt + timedelta(minutes=30):
-                c["_implicit"] = True   # not yet flagged in DB
-                classes.append(c)
-        except Exception:
-            continue
+        if is_past_grace(c.get("end_date") or c.get("date"), c.get("end_time"), grace_minutes=30):
+            c["_implicit"] = True   # not yet flagged in DB
+            classes.append(c)
 
     rows = []
     for c in classes:
@@ -1762,15 +1755,8 @@ async def demo_no_show_recredit(
     if not is_explicit_no_show:
         if cls.get("started_at_actual"):
             raise HTTPException(status_code=400, detail="Teacher started this class — refund not applicable")
-        # Implicit check
-        end_t = (cls.get("end_time") or "23:59")
-        try:
-            end_dt = datetime.fromisoformat(f"{cls.get('end_date') or cls.get('date')}T{end_t}:00")
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=timezone.utc)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Class has invalid date/time")
-        if now <= end_dt + timedelta(minutes=30):
+        # Implicit check (IST + 30min grace)
+        if not is_past_grace(cls.get("end_date") or cls.get("date"), cls.get("end_time"), grace_minutes=30):
             raise HTTPException(status_code=400, detail="Class end+30min grace has not elapsed yet")
         # Mark as no-show now (so subsequent audits/queries are consistent)
         await db.class_sessions.update_one(
