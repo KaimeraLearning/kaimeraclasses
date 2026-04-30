@@ -1,5 +1,6 @@
 """Auth routes"""
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request, Response, Header
@@ -159,7 +160,13 @@ async def verify_otp(request: Request):
 @router.post("/auth/login")
 async def login(credentials: UserLogin, response: Response):
     """Login with email/password"""
-    user_doc = await db.users.find_one({"email": credentials.email}, {"_id": 0})
+    # Email match must be case-insensitive — many users type their email in
+    # different case than the one stored in DB and would otherwise see "Invalid credentials".
+    email_norm = (credentials.email or "").strip().lower()
+    user_doc = await db.users.find_one(
+        {"email": {"$regex": f"^{re.escape(email_norm)}$", "$options": "i"}},
+        {"_id": 0}
+    )
     if not user_doc:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -176,7 +183,7 @@ async def login(credentials: UserLogin, response: Response):
     if not user_doc.get('is_verified', True):
         return {
             "needs_verification": True,
-            "email": credentials.email,
+            "email": email_norm,
             "message": "Account not verified. Please check your email for verification OTP."
         }
 
@@ -195,7 +202,11 @@ async def login(credentials: UserLogin, response: Response):
     user_doc['created_at'] = datetime.fromisoformat(user_doc['created_at'])
     user = User(**user_doc)
 
-    return {"user": user.model_dump(exclude={"password_hash"}), "session_token": session_token}
+    return {
+        "user": user.model_dump(exclude={"password_hash"}),
+        "session_token": session_token,
+        "must_change_password": bool(user_doc.get("must_change_password")),
+    }
 
 
 @router.post("/auth/verify-account")
@@ -284,6 +295,44 @@ async def resend_verification_otp(request: Request):
     await send_email(email, "Kaimera Learning - Verify Your Account", html_content)
 
     return {"message": "Verification OTP resent to your email."}
+
+
+@router.post("/auth/change-password")
+async def change_password(request: Request, authorization: Optional[str] = Header(None)):
+    """User changes their own password (used both for forced first-login change and voluntary changes).
+    Clears the `must_change_password` flag once a real password is set.
+    """
+    user = await get_current_user(request, authorization)
+    body = await request.json()
+    current_pwd = (body.get("current_password") or "").strip()
+    new_pwd = (body.get("new_password") or "").strip()
+
+    if not new_pwd or len(new_pwd) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+    user_doc = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+    if not user_doc or not user_doc.get("password_hash"):
+        raise HTTPException(status_code=400, detail="Password change not available for this account")
+
+    # Require current password unless this is a forced reset (admin-set / auto-generated)
+    if not user_doc.get("must_change_password"):
+        if not current_pwd:
+            raise HTTPException(status_code=400, detail="Current password required")
+        if not verify_password(current_pwd, user_doc["password_hash"]):
+            raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    if verify_password(new_pwd, user_doc["password_hash"]):
+        raise HTTPException(status_code=400, detail="New password must be different from the current one")
+
+    await db.users.update_one(
+        {"user_id": user.user_id},
+        {"$set": {
+            "password_hash": hash_password(new_pwd),
+            "must_change_password": False,
+            "password_changed_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    return {"message": "Password updated successfully"}
 
 
 # REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
