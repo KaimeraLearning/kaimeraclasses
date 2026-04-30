@@ -1610,3 +1610,26 @@ async def delete_email_media(media_id: str, request: Request, authorization: Opt
     from services.email_templates import invalidate_template_cache
     invalidate_template_cache()
     return {"message": "Deleted"}
+
+
+# ─── System Repair ────────────────────────────────────────────────────────────
+
+@router.post("/admin/system/repair")
+async def run_system_repair(request: Request, authorization: Optional[str] = Header(None)):
+    """Run the full suite of data-repair tasks. Idempotent — safe to re-run.
+    NEVER deletes user accounts, transactions, balances, complaints, etc.
+    Only fixes inconsistencies that previous code bugs left behind."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    from services.system_repair import run_all_repairs
+    report = await run_all_repairs()
+    total_fixed = sum(item.get("count", 0) for item in report if item.get("ok"))
+    return {
+        "ok": True,
+        "total_fixed": total_fixed,
+        "tasks": report,
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "ran_by": user.user_id,
+    }
+
