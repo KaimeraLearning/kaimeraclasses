@@ -196,6 +196,16 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
   - Panel: `/app/frontend/src/components/LegacyUserMigration.js`.
 - **Deployment Health Badge** (header chip in Operations Center): polls `/api/health/config` and surfaces missing env vars / SMTP / pricing seeding in a dialog. Resolves the recurring "works in preview, fails on deploy" issue. Component: `/app/frontend/src/components/DeploymentHealthBadge.js`.
 
+### IST Timezone Fix for No-Show Detection (Feb 2026)
+- **Bug**: Students saw "Join Live" hours after the teacher had skipped the class. Class times were entered by users as IST wall-clock ("10:00") and stored verbatim, but no-show detection compared against UTC `datetime.now()` — a 5h30m skew that pushed the 30-min grace window 5.5 hours into the future.
+- **Fix**: New centralized helper `/app/backend/services/time_utils.py` (`now_local`, `today_local_str`, `parse_class_end`, `is_past_grace`) using `Asia/Kolkata` (overridable via `APP_TIMEZONE` env). All teacher no-show paths refactored to use it:
+  - `routes/student.py::_annotate_no_show` (live dashboard banner)
+  - `routes/demo.py::_is_teacher_no_show` (demo limit refund)
+  - `routes/admin.py` audit + recredit endpoints
+  - `services/system_repair.py::task_mark_overdue_no_show_classes` (cron)
+  - `routes/demo.py::create_demo_request` (past-slot validation)
+- Pytest coverage: `/app/backend/tests/test_iteration38_ist_timezone.py` (3/3 pass) — verifies dashboard marks no-show in IST, rejects past-IST slots, accepts future-IST slots.
+
 ## Backlog
 ### P2
 - Verify Resend domain for production email

@@ -313,12 +313,11 @@ async def task_invalidate_caches():
 
 async def task_mark_overdue_no_show_classes():
     """Backfill `teacher_no_show=True` and `status="teacher_no_show"` on any
-    scheduled class whose end-time + 30min grace has passed and the teacher
-    never started it. This is what triggers the demo-allowance refund logic.
-    Idempotent: skips classes already marked, and never overwrites a class
-    where the teacher actually started or that's already completed."""
-    now = datetime.now(timezone.utc)
-    grace = now - timedelta(minutes=30)
+    scheduled class whose end-time + 30min grace has passed (IST) and the
+    teacher never started it. This is what triggers the demo-allowance refund
+    logic. Idempotent: skips classes already marked, never overwrites started
+    or completed classes."""
+    from services.time_utils import is_past_grace
     updated = 0
     refunded = 0
     cursor = db.class_sessions.find(
@@ -332,15 +331,7 @@ async def task_mark_overdue_no_show_classes():
          "enrolled_students": 1}
     )
     async for c in cursor:
-        end_t = c.get("end_time") or "23:59"
-        d = c.get("end_date") or c.get("date")
-        try:
-            end_dt = datetime.fromisoformat(f"{d}T{end_t}:00")
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=timezone.utc)
-        except Exception:
-            continue
-        if end_dt > grace:
+        if not is_past_grace(c.get("end_date") or c.get("date"), c.get("end_time"), grace_minutes=30):
             continue
         # Mark no-show
         await db.class_sessions.update_one(

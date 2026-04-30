@@ -7,6 +7,7 @@ from database import db
 from models.schemas import StudentProfileUpdate, StudentFeedbackRating
 from services.auth import get_current_user
 from services.rating import recalc_teacher_rating, record_rating_event
+from services.time_utils import now_local, today_local_str, is_past_grace
 
 router = APIRouter()
 
@@ -26,7 +27,7 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
     ).to_list(1000)
 
     now = datetime.now(timezone.utc)
-    today_str = now.strftime('%Y-%m-%d')
+    today_str = today_local_str()  # IST date — class times are entered in IST wall-clock
 
     live_classes = []
     upcoming = []
@@ -35,22 +36,16 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
     cancelled = []
 
     def _annotate_no_show(c):
-        """Mark class as teacher_no_show if scheduled end has passed and the
-        teacher never started it (`started_at_actual` is null). Computed on the
-        fly so the banner appears automatically — no cron needed."""
+        """Mark class as teacher_no_show if scheduled end has passed (IST + 30m
+        grace) and the teacher never started it (`started_at_actual` is null)."""
         if c.get("started_at_actual"):
             c["teacher_no_show"] = False
             return
-        end_t = (c.get("end_time") or "23:59")
-        try:
-            end_dt = datetime.fromisoformat(f"{c.get('end_date') or c.get('date')}T{end_t}:00")
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=timezone.utc)
-        except Exception:
-            c["teacher_no_show"] = False
-            return
-        # 30 minute grace after scheduled end before declaring no-show
-        c["teacher_no_show"] = now > end_dt + timedelta(minutes=30)
+        c["teacher_no_show"] = is_past_grace(
+            c.get("end_date") or c.get("date"),
+            c.get("end_time"),
+            grace_minutes=30,
+        )
 
     for cls in all_classes:
         status = cls.get('status', 'scheduled')
