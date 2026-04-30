@@ -214,6 +214,13 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
   - Audit ISO timestamps (`created_at`, `marked_at`, etc.) intentionally remain UTC.
 - Pytest coverage: `/app/backend/tests/test_iteration38_ist_timezone.py` (3/3 pass) — verifies dashboard marks no-show in IST, rejects past-IST slots, accepts future-IST slots.
 
+### No-Show Routing & Teacher Dashboard Date Filter (Feb 2026)
+- **Bug fix**: Teacher dashboard was auto-marking time-elapsed-but-never-started classes as `completed` and routing them into the **Conducted** tab (showing a Submit Proof button on a class that was never conducted). Now: if `started_at_actual is None` and end-time has passed, the class is marked `teacher_no_show` and routed into **Cancelled** tab with a `MISSED` badge.
+- **Bug fix**: Same root cause was bleeding into student dashboard — student saw "Join Demo Live" on past-due no-show classes. Student dashboard now persists the `teacher_no_show` status on-the-fly and routes to `cancelled_classes` instead of `live_classes`.
+- **Frontend**: `Submit Proof` button hidden on classes with `teacher_no_show=true` or `status=teacher_no_show`. New `MISSED` badge shown on the card.
+- **Feature**: Date-range filter on the **Conducted** and **Cancelled** tabs in `TeacherDashboard.js` via reusable `DateRangeBar` sub-component (From / To inputs + Clear + "Showing N of M" counter). Declutters historical lists for active teachers.
+- Pytest coverage: `/app/backend/tests/test_iteration39_no_show_routing.py` (2/2 pass) — locks in teacher-side and student-side routing.
+
 ## Backlog
 ### P2
 - Verify Resend domain for production email

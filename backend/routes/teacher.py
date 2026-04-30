@@ -66,36 +66,63 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
         cls_end_date = cls.get('end_date', cls_date)
         status = cls.get('status', 'scheduled')
 
-        if status in ('cancelled',):
+        # NEW: classes flagged as teacher_no_show go into cancelled (not conducted)
+        if status == 'teacher_no_show' or cls.get('teacher_no_show'):
+            cls['teacher_no_show'] = True
+            cancelled_classes.append(cls)
+        elif status in ('cancelled', 'cancelled_by_teacher'):
             cancelled_classes.append(cls)
         elif status == 'completed':
             conducted_classes.append(cls)
         elif cls_end_date < today_str:
-            # Past end date - auto-complete
-            await db.class_sessions.update_one({"class_id": cls['class_id']}, {"$set": {"status": "completed"}})
-            cls['status'] = 'completed'
-            # Mark demo request as completed if this is a demo class
-            if cls.get('is_demo'):
-                sid = cls.get('assigned_student_id')
-                tid = cls.get('teacher_id')
-                if sid and tid:
-                    await db.demo_requests.update_many(
-                        {"$or": [{"student_user_id": sid}, {"student_id": sid}],
-                         "accepted_by_teacher_id": tid, "status": "accepted"},
-                        {"$set": {"status": "completed", "completed_at": now.isoformat()}}
-                    )
-            conducted_classes.append(cls)
+            # Past end date - auto-progress.
+            # If teacher never started → mark as teacher_no_show + refund any demo charge.
+            # Otherwise → mark as completed.
+            if not cls.get('started_at_actual'):
+                await db.class_sessions.update_one(
+                    {"class_id": cls['class_id']},
+                    {"$set": {"status": "teacher_no_show", "teacher_no_show": True,
+                              "no_show_marked_at": now.isoformat()}}
+                )
+                cls['status'] = 'teacher_no_show'
+                cls['teacher_no_show'] = True
+                cancelled_classes.append(cls)
+            else:
+                await db.class_sessions.update_one({"class_id": cls['class_id']}, {"$set": {"status": "completed"}})
+                cls['status'] = 'completed'
+                # Mark demo request as completed if this is a demo class
+                if cls.get('is_demo'):
+                    sid = cls.get('assigned_student_id')
+                    tid = cls.get('teacher_id')
+                    if sid and tid:
+                        await db.demo_requests.update_many(
+                            {"$or": [{"student_user_id": sid}, {"student_id": sid}],
+                             "accepted_by_teacher_id": tid, "status": "accepted"},
+                            {"$set": {"status": "completed", "completed_at": now.isoformat()}}
+                        )
+                conducted_classes.append(cls)
         elif cls_date == today_str or (cls_date <= today_str and cls_end_date >= today_str):
             # Check if today's session time has passed (IST)
             end_time_str = cls.get('end_time', '23:59')
             try:
                 end_time = parse_class_end(today_str, end_time_str)
                 if now_local() > end_time and status in ('scheduled', 'in_progress'):
-                    # Time passed today - show in conducted for proof submission
+                    # Time passed today
                     if cls_end_date == today_str:
+                        if not cls.get('started_at_actual'):
+                            # Teacher never started → no-show, NOT completed.
+                            await db.class_sessions.update_one(
+                                {"class_id": cls['class_id']},
+                                {"$set": {"status": "teacher_no_show", "teacher_no_show": True,
+                                          "no_show_marked_at": now.isoformat()}}
+                            )
+                            cls['status'] = 'teacher_no_show'
+                            cls['teacher_no_show'] = True
+                            cancelled_classes.append(cls)
+                            continue
+                        # Teacher started → mark completed for proof submission.
                         await db.class_sessions.update_one({"class_id": cls['class_id']}, {"$set": {"status": "completed"}})
                         cls['status'] = 'completed'
-                        # Mark demo request as completed if demo class
                         if cls.get('is_demo'):
                             sid = cls.get('assigned_student_id')
                             tid = cls.get('teacher_id')

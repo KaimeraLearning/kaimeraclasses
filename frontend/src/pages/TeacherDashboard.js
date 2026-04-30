@@ -10,6 +10,35 @@ import { GraduationCap, LogOut, Plus, Calendar, Users, AlertCircle, ShieldCheck,
 import { getApiError, API , apiFetch} from '../utils/api';
 import { ViewProfilePopup } from '../components/ViewProfilePopup';
 
+// Date-range filter bar used on Conducted/Cancelled tabs to declutter long history.
+const DateRangeBar = ({ from, to, setFrom, setTo, clear, active, total, shown }) => (
+  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 mb-4 flex flex-wrap items-center gap-3" data-testid="history-date-filter">
+    <span className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+      <CalendarDays className="w-3.5 h-3.5" /> Filter by date
+    </span>
+    <div className="flex items-center gap-2 text-xs">
+      <Label htmlFor="hist-from" className="text-slate-600">From</Label>
+      <Input
+        id="hist-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+        className="h-8 text-xs rounded-lg w-[140px]" data-testid="history-from"
+      />
+      <Label htmlFor="hist-to" className="text-slate-600">To</Label>
+      <Input
+        id="hist-to" type="date" value={to} onChange={(e) => setTo(e.target.value)}
+        className="h-8 text-xs rounded-lg w-[140px]" data-testid="history-to"
+      />
+    </div>
+    {active && (
+      <Button onClick={clear} variant="outline" size="sm" className="h-8 text-xs rounded-full" data-testid="history-clear">
+        <XCircle className="w-3 h-3 mr-1" /> Clear
+      </Button>
+    )}
+    <span className="text-[11px] text-slate-500 ml-auto" data-testid="history-count">
+      Showing {shown} of {total}
+    </span>
+  </div>
+);
+
 const TeacherDashboard = () => {
   const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState(null);
@@ -31,6 +60,9 @@ const TeacherDashboard = () => {
   const [demoFeedbackTarget, setDemoFeedbackTarget] = useState(null);
   const [demoFeedbackForm, setDemoFeedbackForm] = useState({ feedback_text: '', performance_rating: 'good', recommended_frequency: '' });
   const [classTab, setClassTab] = useState('today');
+  // Date-range filter for Conducted / Cancelled tabs (declutter long history)
+  const [historyDateFrom, setHistoryDateFrom] = useState('');
+  const [historyDateTo, setHistoryDateTo] = useState('');
   const [showNotifDialog, setShowNotifDialog] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -357,8 +389,23 @@ const TeacherDashboard = () => {
 
   const todaySessions = dashboardData?.todays_sessions || [];
   const upcomingClasses = dashboardData?.upcoming_classes || [];
-  const conductedClasses = dashboardData?.conducted_classes || [];
-  const cancelledClasses = dashboardData?.cancelled_classes || [];
+  const allConductedClasses = dashboardData?.conducted_classes || [];
+  const allCancelledClasses = dashboardData?.cancelled_classes || [];
+
+  // Apply date-range filter to conducted/cancelled tabs (so old history doesn't clutter)
+  const filterByDateRange = (list) => {
+    if (!historyDateFrom && !historyDateTo) return list;
+    return list.filter((c) => {
+      const d = c.end_date || c.date || '';
+      if (historyDateFrom && d < historyDateFrom) return false;
+      if (historyDateTo && d > historyDateTo) return false;
+      return true;
+    });
+  };
+  const conductedClasses = filterByDateRange(allConductedClasses);
+  const cancelledClasses = filterByDateRange(allCancelledClasses);
+  const filterActive = !!(historyDateFrom || historyDateTo);
+  const clearHistoryFilter = () => { setHistoryDateFrom(''); setHistoryDateTo(''); };
 
   const renderClassCard = (cls, section) => {
     const isLive = cls.status === 'in_progress';
@@ -375,7 +422,8 @@ const TeacherDashboard = () => {
           <div className="flex flex-col items-end gap-1">
             {isLive && <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-[10px] font-bold animate-pulse">LIVE</span>}
             {cls.is_demo && <span className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full text-[10px] font-semibold">DEMO</span>}
-            {cls.status === 'completed' && <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-semibold">DONE</span>}
+            {cls.teacher_no_show && <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full text-[10px] font-bold" data-testid={`no-show-badge-${cls.class_id}`}>MISSED</span>}
+            {cls.status === 'completed' && !cls.teacher_no_show && <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-semibold">DONE</span>}
           </div>
         </div>
 
@@ -441,8 +489,8 @@ const TeacherDashboard = () => {
                     <Play className="w-3 h-3 mr-1" /> Rejoin Live
                   </Button>
                 )}
-                {/* Proof button: after class time ends OR class completed */}
-                {(section === 'conducted' || (isToday && (cls.status === 'completed' || classTimeEnded))) && cls.status !== 'cancelled' && !cls.proof_submitted && (
+                {/* Proof button: after class time ends OR class completed — but NOT if teacher never started (no-show) */}
+                {(section === 'conducted' || (isToday && (cls.status === 'completed' || classTimeEnded))) && cls.status !== 'cancelled' && cls.status !== 'teacher_no_show' && !cls.teacher_no_show && !cls.proof_submitted && (
                   <Button onClick={() => { setProofClass(cls); setShowProofDialog(true); }} variant="outline" className={`w-full rounded-full text-xs h-7 ${cls.latest_proof_status === 'rejected' || cls.latest_proof_admin_status === 'rejected' ? 'border-red-300 text-red-700 hover:bg-red-50' : ''}`} data-testid={`submit-proof-${cls.class_id}`}>
                     <Upload className="w-3 h-3 mr-1" />
                     {cls.latest_proof_status === 'rejected' || cls.latest_proof_admin_status === 'rejected' ? 'Resubmit Proof (Rejected)' : "Submit Today's Proof"}
@@ -611,8 +659,14 @@ const TeacherDashboard = () => {
           </TabsContent>
 
           <TabsContent value="conducted">
+            <DateRangeBar
+              from={historyDateFrom} to={historyDateTo}
+              setFrom={setHistoryDateFrom} setTo={setHistoryDateTo}
+              clear={clearHistoryFilter} active={filterActive}
+              total={allConductedClasses.length} shown={conductedClasses.length}
+            />
             {conductedClasses.length === 0 ? (
-              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-500">No conducted classes yet</p></div>
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-500">{filterActive ? 'No conducted classes in this date range' : 'No conducted classes yet'}</p></div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {conductedClasses.map(cls => renderClassCard(cls, 'conducted'))}
@@ -621,8 +675,14 @@ const TeacherDashboard = () => {
           </TabsContent>
 
           <TabsContent value="cancelled">
+            <DateRangeBar
+              from={historyDateFrom} to={historyDateTo}
+              setFrom={setHistoryDateFrom} setTo={setHistoryDateTo}
+              clear={clearHistoryFilter} active={filterActive}
+              total={allCancelledClasses.length} shown={cancelledClasses.length}
+            />
             {cancelledClasses.length === 0 ? (
-              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-500">No cancelled classes</p></div>
+              <div className="bg-white rounded-3xl p-8 border-2 border-slate-100 text-center"><p className="text-slate-500">{filterActive ? 'No cancelled classes in this date range' : 'No cancelled classes'}</p></div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {cancelledClasses.map(cls => (
