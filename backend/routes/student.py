@@ -1,5 +1,5 @@
 """Student routes"""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional
 
@@ -7,6 +7,7 @@ from database import db
 from models.schemas import StudentProfileUpdate, StudentFeedbackRating
 from services.auth import get_current_user
 from services.rating import recalc_teacher_rating, record_rating_event
+from services.time_utils import now_local, today_local_str, is_past_grace
 
 router = APIRouter()
 
@@ -25,8 +26,7 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
         {"_id": 0}
     ).to_list(1000)
 
-    now = datetime.now(timezone.utc)
-    today_str = now.strftime('%Y-%m-%d')
+    today_str = today_local_str()  # IST date — class times are entered in IST wall-clock
 
     live_classes = []
     upcoming = []
@@ -34,14 +34,27 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
     pending_rating = []
     cancelled = []
 
+    def _annotate_no_show(c):
+        """Mark class as teacher_no_show if scheduled end has passed (IST + 30m
+        grace) and the teacher never started it (`started_at_actual` is null)."""
+        if c.get("started_at_actual"):
+            c["teacher_no_show"] = False
+            return
+        c["teacher_no_show"] = is_past_grace(
+            c.get("end_date") or c.get("date"),
+            c.get("end_time"),
+            grace_minutes=30,
+        )
+
     for cls in all_classes:
         status = cls.get('status', 'scheduled')
         cls_date = cls.get('date', '')
         cls_end_date = cls.get('end_date', cls_date)
 
-        if status == 'cancelled':
+        if status == 'cancelled' or status == 'cancelled_by_teacher':
             cancelled.append(cls)
         elif status == 'in_progress' or (status == 'scheduled' and cls_date == today_str):
+            _annotate_no_show(cls)
             live_classes.append(cls)
         elif status == 'completed':
             # Check if student has rated it
@@ -56,12 +69,22 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
         elif cls_date > today_str and status in ('scheduled',):
             upcoming.append(cls)
         elif cls_end_date < today_str and status not in ('completed', 'cancelled'):
-            # Auto-complete
-            await db.class_sessions.update_one(
-                {"class_id": cls["class_id"]}, {"$set": {"status": "completed"}}
-            )
-            cls["status"] = "completed"
-            pending_rating.append(cls)
+            # End-of-day auto-progression: if teacher never started, mark as no-show
+            # so the demo allowance can be refunded; otherwise treat as completed.
+            if not cls.get("started_at_actual"):
+                await db.class_sessions.update_one(
+                    {"class_id": cls["class_id"]},
+                    {"$set": {"status": "teacher_no_show", "teacher_no_show": True}}
+                )
+                cls["status"] = "teacher_no_show"
+                cls["teacher_no_show"] = True
+                cancelled.append(cls)
+            else:
+                await db.class_sessions.update_one(
+                    {"class_id": cls["class_id"]}, {"$set": {"status": "completed"}}
+                )
+                cls["status"] = "completed"
+                pending_rating.append(cls)
         else:
             completed.append(cls)
 
@@ -212,7 +235,7 @@ async def student_enrollment_status(request: Request, authorization: Optional[st
         {"student_id": user.user_id, "status": "approved"}, {"_id": 0}
     )
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local_str()
     active_classes = await db.class_sessions.find(
         {"assigned_student_id": user.user_id, "is_demo": False,
          "status": {"$in": ["scheduled", "in_progress"]},
