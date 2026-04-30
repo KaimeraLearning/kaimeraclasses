@@ -9,6 +9,7 @@ from database import db
 from models.schemas import DemoRequestCreate, DemoAssign, DemoFeedbackCreate
 from services.auth import get_current_user, hash_password
 from services.helpers import send_email, notify_event, insert_admin_mirror_txn
+from services.time_utils import is_past_grace
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ def _is_teacher_no_show(cls: dict) -> bool:
 
     Considers either an explicit DB flag (set by cron / dashboard auto-progression
     / admin) OR an on-the-fly calculation: scheduled end_time + 30min grace has
-    passed and the class was never started (`started_at_actual` is null).
+    passed (IST) and the class was never started (`started_at_actual` is null).
     """
     if not cls:
         return False
@@ -28,14 +29,11 @@ def _is_teacher_no_show(cls: dict) -> bool:
         return True
     if cls.get("started_at_actual"):
         return False
-    end_t = (cls.get("end_time") or "23:59")
-    try:
-        end_dt = datetime.fromisoformat(f"{cls.get('end_date') or cls.get('date')}T{end_t}:00")
-        if end_dt.tzinfo is None:
-            end_dt = end_dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        return False
-    return datetime.now(timezone.utc) > end_dt + timedelta(minutes=30)
+    return is_past_grace(
+        cls.get("end_date") or cls.get("date"),
+        cls.get("end_time"),
+        grace_minutes=30,
+    )
 
 
 async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str):
@@ -164,15 +162,13 @@ async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str
 @router.post("/demo/request")
 async def create_demo_request(demo_data: DemoRequestCreate):
     """Public endpoint - anyone can request a demo (no auth required)"""
-    # Date+time must be in the future
+    # Date+time must be in the future (compare in IST since users enter IST wall-clock)
+    from services.time_utils import parse_class_end, now_local
     try:
-        slot = (demo_data.preferred_time_slot or "10:00").strip()
-        scheduled = datetime.fromisoformat(f"{demo_data.preferred_date}T{slot}:00")
-        if scheduled.tzinfo is None:
-            scheduled = scheduled.replace(tzinfo=timezone.utc)
+        scheduled = parse_class_end(demo_data.preferred_date, (demo_data.preferred_time_slot or "10:00").strip())
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid date or time format")
-    if scheduled <= datetime.now(timezone.utc):
+    if scheduled <= now_local():
         raise HTTPException(status_code=400, detail="Demo can only be booked for a future date and time. Past or current slots are not allowed.")
 
     existing_demos_cur = await db.demo_requests.find(
