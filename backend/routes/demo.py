@@ -1,6 +1,6 @@
 """Demo booking and feedback routes"""
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional
 from pymongo import ReturnDocument
@@ -11,6 +11,31 @@ from services.auth import get_current_user, hash_password
 from services.helpers import send_email, notify_event, insert_admin_mirror_txn
 
 router = APIRouter()
+
+
+def _is_teacher_no_show(cls: dict) -> bool:
+    """Returns True if the teacher failed to start the class.
+
+    Considers either an explicit DB flag (set by cron / dashboard auto-progression
+    / admin) OR an on-the-fly calculation: scheduled end_time + 30min grace has
+    passed and the class was never started (`started_at_actual` is null).
+    """
+    if not cls:
+        return False
+    if cls.get("teacher_no_show"):
+        return True
+    if cls.get("status") in ("teacher_no_show", "cancelled", "cancelled_by_teacher"):
+        return True
+    if cls.get("started_at_actual"):
+        return False
+    end_t = (cls.get("end_time") or "23:59")
+    try:
+        end_dt = datetime.fromisoformat(f"{cls.get('end_date') or cls.get('date')}T{end_t}:00")
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return False
+    return datetime.now(timezone.utc) > end_dt + timedelta(minutes=30)
 
 
 async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str):
@@ -150,7 +175,39 @@ async def create_demo_request(demo_data: DemoRequestCreate):
     if scheduled <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Demo can only be booked for a future date and time. Past or current slots are not allowed.")
 
-    existing_demos = await db.demo_requests.count_documents({"email": demo_data.email})
+    existing_demos_cur = await db.demo_requests.find(
+        {"email": demo_data.email}, {"_id": 0, "demo_id": 1, "status": 1, "class_id": 1}
+    ).to_list(50)
+
+    # A demo only counts toward the user's allowance if it was either:
+    #   (a) still active (pending/processing/accepted with no conducted-status yet), or
+    #   (b) actually conducted by the teacher (class started OR completed).
+    # If the teacher failed to start (`teacher_no_show`) or cancelled the class,
+    # we DO NOT count it — the user keeps that demo slot.
+    counted = 0
+    for d in existing_demos_cur:
+        cid = d.get("class_id")
+        if not cid:
+            # No class created yet (still pending or rejected) — counts as used unless rejected.
+            if d.get("status") not in ("rejected",):
+                counted += 1
+            continue
+        cls = await db.class_sessions.find_one(
+            {"class_id": cid},
+            {
+                "_id": 0, "status": 1, "started_at_actual": 1, "teacher_no_show": 1,
+                "date": 1, "end_date": 1, "end_time": 1
+            }
+        )
+        if not cls:
+            # Class doc missing — orphan. Don't count against user.
+            continue
+        # Skip (= refund) if teacher never started OR class was cancelled.
+        if _is_teacher_no_show(cls):
+            continue
+        counted += 1
+
+    existing_demos = counted
     max_demos = 2
     extra = await db.demo_extras.find_one({"email": demo_data.email}, {"_id": 0})
     if extra:
