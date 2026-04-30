@@ -11,7 +11,7 @@ Every task is:
 Each task returns `{name, ok, count, message}`. The HTTP route aggregates them
 into a report the admin sees in the UI.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 
 from database import db
@@ -311,6 +311,75 @@ async def task_invalidate_caches():
     return {"count": 0, "message": "Cleared in-memory caches"}
 
 
+async def task_mark_overdue_no_show_classes():
+    """Backfill `teacher_no_show=True` and `status="teacher_no_show"` on any
+    scheduled class whose end-time + 30min grace has passed and the teacher
+    never started it. This is what triggers the demo-allowance refund logic.
+    Idempotent: skips classes already marked, and never overwrites a class
+    where the teacher actually started or that's already completed."""
+    now = datetime.now(timezone.utc)
+    grace = now - timedelta(minutes=30)
+    updated = 0
+    refunded = 0
+    cursor = db.class_sessions.find(
+        {
+            "started_at_actual": {"$in": [None]},
+            "status": {"$in": ["scheduled", "in_progress"]},
+            "$or": [{"teacher_no_show": {"$ne": True}}, {"teacher_no_show": {"$exists": False}}],
+        },
+        {"_id": 0, "class_id": 1, "date": 1, "end_date": 1,
+         "end_time": 1, "is_demo": 1, "title": 1, "teacher_id": 1,
+         "enrolled_students": 1}
+    )
+    async for c in cursor:
+        end_t = c.get("end_time") or "23:59"
+        d = c.get("end_date") or c.get("date")
+        try:
+            end_dt = datetime.fromisoformat(f"{d}T{end_t}:00")
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        if end_dt > grace:
+            continue
+        # Mark no-show
+        await db.class_sessions.update_one(
+            {"class_id": c["class_id"]},
+            {"$set": {"status": "teacher_no_show", "teacher_no_show": True}}
+        )
+        updated += 1
+        # Refund any demo_booking transactions
+        async for t in db.transactions.find(
+            {"class_id": c["class_id"], "type": "demo_booking", "amount": {"$lt": 0}},
+            {"_id": 0}
+        ):
+            amount = abs(t["amount"])
+            # Idempotency: skip if a refund txn already exists for this class+user
+            already = await db.transactions.count_documents({
+                "class_id": c["class_id"], "user_id": t["user_id"],
+                "type": "class_delete_refund"
+            })
+            if already:
+                continue
+            import uuid as _uuid
+            await db.users.update_one({"user_id": t["user_id"]}, {"$inc": {"credits": amount}})
+            await db.transactions.insert_one({
+                "transaction_id": f"txn_{_uuid.uuid4().hex[:12]}",
+                "user_id": t["user_id"], "type": "class_delete_refund",
+                "amount": amount,
+                "description": f"Refund — teacher did not start the demo class '{c.get('title','Class')}'",
+                "class_id": c["class_id"],
+                "counterparty_user_id": c.get("teacher_id"),
+                "status": "completed",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            refunded += 1
+    return {
+        "count": updated,
+        "message": f"Marked {updated} overdue class(es) as teacher_no_show; issued {refunded} refund(s)"
+    }
+
+
 async def diagnose_duplicates() -> List[Dict[str, Any]]:
     """Read-only: returns every group of classes that look like duplicates,
     without modifying anything. Used by the admin UI to PREVIEW what System
@@ -375,6 +444,7 @@ async def run_all_repairs() -> List[Dict[str, Any]]:
         ("Unstick demos in 'processing'", task_unstick_demos),
         ("Backfill demo→class back-links", task_link_demos_to_classes),
         ("Remove duplicate demo classes", task_dedupe_demo_classes),
+        ("Mark overdue classes as teacher no-show + refund", task_mark_overdue_no_show_classes),
         ("Clear orphan classes (failed demo accepts)", task_clear_orphan_processing_classes),
         ("Mark legacy classes as is_demo", task_backfill_class_demo_flag),
         ("Verify admin-created users (fixes login)", task_verify_admin_created_users),

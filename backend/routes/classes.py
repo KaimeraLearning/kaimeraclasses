@@ -724,3 +724,77 @@ async def student_left(class_id: str, request: Request, authorization: Optional[
             {"$set": {"student_left_at": datetime.now(timezone.utc).isoformat()}}
         )
     return {"ok": True}
+
+
+@router.post("/classes/mark-no-show/{class_id}")
+async def mark_class_no_show(class_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    """Admin-only: explicitly mark a class as 'teacher_no_show' before the
+    auto-detection kicks in. Refunds any demo_booking credits charged to the
+    student so the demo allowance is restored.
+
+    Idempotent: re-marking a class already flagged as no-show is a no-op."""
+    user = await get_current_user(request, authorization)
+    if user.role not in ("admin", "counsellor"):
+        raise HTTPException(status_code=403, detail="Admin or counsellor access only")
+
+    cls = await db.class_sessions.find_one({"class_id": class_id}, {"_id": 0})
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+    if cls.get("started_at_actual"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot mark as no-show — teacher already started this class. Use cancel instead."
+        )
+    if cls.get("teacher_no_show") or cls.get("status") == "teacher_no_show":
+        return {"ok": True, "message": "Class is already marked as teacher_no_show", "refunded": 0}
+
+    await db.class_sessions.update_one(
+        {"class_id": class_id},
+        {"$set": {
+            "status": "teacher_no_show",
+            "teacher_no_show": True,
+            "no_show_marked_at": datetime.now(timezone.utc).isoformat(),
+            "no_show_marked_by": user.user_id,
+        }}
+    )
+
+    # Refund any demo_booking transactions associated with this class.
+    refunded = 0
+    txns = await db.transactions.find(
+        {"class_id": class_id, "type": "demo_booking", "amount": {"$lt": 0}},
+        {"_id": 0}
+    ).to_list(50)
+    for t in txns:
+        amount = abs(t["amount"])
+        await db.users.update_one({"user_id": t["user_id"]}, {"$inc": {"credits": amount}})
+        await db.transactions.insert_one({
+            "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+            "user_id": t["user_id"], "type": "class_delete_refund", "amount": amount,
+            "description": f"Refund — teacher did not start the demo class '{cls.get('title','Class')}'",
+            "class_id": class_id,
+            "counterparty_user_id": cls.get("teacher_id"),
+            "status": "completed", "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        await insert_admin_mirror_txn(
+            amount=-amount,
+            description=f"Demo refund issued to {t['user_id']} (teacher did not start class)",
+            txn_type="class_refund_paid",
+            counterparty_user_id=t["user_id"],
+            class_id=class_id,
+        )
+        refunded += amount
+
+    # Notify the student(s)
+    for stu in cls.get("enrolled_students", []) or []:
+        await db.notifications.insert_one({
+            "notification_id": f"notif_{uuid.uuid4().hex[:12]}",
+            "user_id": stu["user_id"],
+            "type": "class_no_show",
+            "title": "Class did not start",
+            "message": f"Your teacher was unable to start '{cls.get('title','your class')}'. Your balance has been restored.",
+            "read": False, "related_id": class_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    return {"ok": True, "message": "Marked as no-show; refunds issued", "refunded": refunded}
+

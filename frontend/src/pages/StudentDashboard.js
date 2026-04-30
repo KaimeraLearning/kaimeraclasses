@@ -435,7 +435,12 @@ const StudentDashboard = () => {
                   </div>
                   <h3 className="font-bold text-slate-900 mb-1">{cls.title}</h3>
                   <p className="text-xs text-slate-600 mb-3">{cls.start_time} - {cls.end_time} | Teacher: <button onClick={(e) => { e.stopPropagation(); openProfile(cls.teacher_id, 'teacher'); }} className="text-sky-600 hover:underline font-semibold cursor-pointer" data-testid={`view-teacher-${cls.teacher_id}`}>{cls.teacher_name}</button></p>
-                  {!cls.cancelled_today ? (
+                  {cls.teacher_no_show ? (
+                    <div className="bg-red-50 rounded-xl p-3 text-center text-sm text-red-700 font-medium" data-testid={`no-show-${cls.class_id}`}>
+                      <AlertCircle className="w-4 h-4 inline mr-1" /> Teacher was unable to start the class
+                      <p className="text-[11px] text-red-500 mt-1 font-normal">If this was a paid demo, your balance has been (or will be) restored.</p>
+                    </div>
+                  ) : !cls.cancelled_today ? (
                     <Button onClick={() => navigate(`/class/${cls.class_id}`)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold animate-pulse" data-testid={`join-live-${cls.class_id}`}>
                       <Play className="w-4 h-4 mr-2" /> Join Live Class
                     </Button>
@@ -516,16 +521,27 @@ const StudentDashboard = () => {
           <div className="mb-8">
             <h2 className="text-xl font-bold text-red-600 mb-4 flex items-center gap-2"><XCircle className="w-5 h-5 text-red-500" /> Cancelled Classes ({cancelledClasses.length})</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {cancelledClasses.map(cls => (
-                <div key={cls.class_id} className="bg-red-50 rounded-2xl border-2 border-red-200 p-4" data-testid={`cancelled-class-${cls.class_id}`}>
-                  <div className="flex items-start justify-between mb-1">
-                    <h3 className="font-semibold text-slate-700 text-sm">{cls.title}</h3>
-                    <span className="bg-red-200 text-red-800 px-2 py-0.5 rounded-full text-[10px] font-bold">CANCELLED</span>
+              {cancelledClasses.map(cls => {
+                const isNoShow = cls.teacher_no_show || cls.status === 'teacher_no_show';
+                return (
+                  <div key={cls.class_id} className={`rounded-2xl border-2 p-4 ${isNoShow ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'}`} data-testid={`cancelled-class-${cls.class_id}`}>
+                    <div className="flex items-start justify-between mb-1">
+                      <h3 className="font-semibold text-slate-700 text-sm">{cls.title}</h3>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${isNoShow ? 'bg-amber-200 text-amber-800' : 'bg-red-200 text-red-800'}`}>
+                        {isNoShow ? 'TEACHER NO-SHOW' : 'CANCELLED'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">{cls.subject} | {cls.date} | Teacher: {cls.teacher_name}</p>
+                    {isNoShow ? (
+                      <p className="text-xs text-amber-700 mt-1 font-medium">
+                        Teacher was unable to start the class. Your demo allowance / wallet balance is preserved.
+                      </p>
+                    ) : (
+                      cls.cancelled_by && <p className="text-xs text-red-600 mt-1">Cancelled by: {cls.cancelled_by}</p>
+                    )}
                   </div>
-                  <p className="text-xs text-slate-500">{cls.subject} | {cls.date} | Teacher: {cls.teacher_name}</p>
-                  {cls.cancelled_by && <p className="text-xs text-red-600 mt-1">Cancelled by: {cls.cancelled_by}</p>}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

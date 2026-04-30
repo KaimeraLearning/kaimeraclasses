@@ -1,5 +1,5 @@
 """Student routes"""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional
 
@@ -34,14 +34,33 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
     pending_rating = []
     cancelled = []
 
+    def _annotate_no_show(c):
+        """Mark class as teacher_no_show if scheduled end has passed and the
+        teacher never started it (`started_at_actual` is null). Computed on the
+        fly so the banner appears automatically — no cron needed."""
+        if c.get("started_at_actual"):
+            c["teacher_no_show"] = False
+            return
+        end_t = (c.get("end_time") or "23:59")
+        try:
+            end_dt = datetime.fromisoformat(f"{c.get('end_date') or c.get('date')}T{end_t}:00")
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            c["teacher_no_show"] = False
+            return
+        # 30 minute grace after scheduled end before declaring no-show
+        c["teacher_no_show"] = now > end_dt + timedelta(minutes=30)
+
     for cls in all_classes:
         status = cls.get('status', 'scheduled')
         cls_date = cls.get('date', '')
         cls_end_date = cls.get('end_date', cls_date)
 
-        if status == 'cancelled':
+        if status == 'cancelled' or status == 'cancelled_by_teacher':
             cancelled.append(cls)
         elif status == 'in_progress' or (status == 'scheduled' and cls_date == today_str):
+            _annotate_no_show(cls)
             live_classes.append(cls)
         elif status == 'completed':
             # Check if student has rated it
@@ -56,12 +75,22 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
         elif cls_date > today_str and status in ('scheduled',):
             upcoming.append(cls)
         elif cls_end_date < today_str and status not in ('completed', 'cancelled'):
-            # Auto-complete
-            await db.class_sessions.update_one(
-                {"class_id": cls["class_id"]}, {"$set": {"status": "completed"}}
-            )
-            cls["status"] = "completed"
-            pending_rating.append(cls)
+            # End-of-day auto-progression: if teacher never started, mark as no-show
+            # so the demo allowance can be refunded; otherwise treat as completed.
+            if not cls.get("started_at_actual"):
+                await db.class_sessions.update_one(
+                    {"class_id": cls["class_id"]},
+                    {"$set": {"status": "teacher_no_show", "teacher_no_show": True}}
+                )
+                cls["status"] = "teacher_no_show"
+                cls["teacher_no_show"] = True
+                cancelled.append(cls)
+            else:
+                await db.class_sessions.update_one(
+                    {"class_id": cls["class_id"]}, {"$set": {"status": "completed"}}
+                )
+                cls["status"] = "completed"
+                pending_rating.append(cls)
         else:
             completed.append(cls)
 

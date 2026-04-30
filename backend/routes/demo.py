@@ -150,7 +150,36 @@ async def create_demo_request(demo_data: DemoRequestCreate):
     if scheduled <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Demo can only be booked for a future date and time. Past or current slots are not allowed.")
 
-    existing_demos = await db.demo_requests.count_documents({"email": demo_data.email})
+    existing_demos_cur = await db.demo_requests.find(
+        {"email": demo_data.email}, {"_id": 0, "demo_id": 1, "status": 1, "class_id": 1}
+    ).to_list(50)
+
+    # A demo only counts toward the user's allowance if it was either:
+    #   (a) still active (pending/processing/accepted with no conducted-status yet), or
+    #   (b) actually conducted by the teacher (class started OR completed).
+    # If the teacher failed to start (`teacher_no_show`) or cancelled the class,
+    # we DO NOT count it — the user keeps that demo slot.
+    counted = 0
+    for d in existing_demos_cur:
+        cid = d.get("class_id")
+        if not cid:
+            # No class created yet (still pending or rejected) — counts as used unless rejected.
+            if d.get("status") not in ("rejected",):
+                counted += 1
+            continue
+        cls = await db.class_sessions.find_one(
+            {"class_id": cid},
+            {"_id": 0, "status": 1, "started_at_actual": 1, "teacher_no_show": 1}
+        )
+        if not cls:
+            # Class doc missing — orphan. Don't count against user.
+            continue
+        # Skip (= refund) if teacher never started OR class was cancelled.
+        if cls.get("teacher_no_show") or cls.get("status") in ("teacher_no_show", "cancelled", "cancelled_by_teacher"):
+            continue
+        counted += 1
+
+    existing_demos = counted
     max_demos = 2
     extra = await db.demo_extras.find_one({"email": demo_data.email}, {"_id": 0})
     if extra:
