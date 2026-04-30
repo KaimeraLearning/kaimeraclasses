@@ -9,6 +9,7 @@ from database import db
 from models.schemas import ClassSessionCreate, BookingRequest
 from services.auth import get_current_user
 from services.helpers import insert_admin_mirror_txn, notify_event
+from services.time_utils import now_local, today_local_str
 
 router = APIRouter()
 
@@ -152,7 +153,7 @@ async def cancel_todays_session(class_id: str, request: Request, authorization: 
     if not is_enrolled:
         raise HTTPException(status_code=400, detail="Not enrolled")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local_str()
     cancellations = cls.get("cancellations", [])
     max_cancel = cls.get("max_cancellations", 3)
 
@@ -389,7 +390,7 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
 
     # Time window check: 5 min before start_time to end_time
     now = datetime.now(timezone.utc)
-    today_str = now.strftime("%Y-%m-%d")
+    today_str = today_local_str()
     class_date = cls.get("date", "")
     start_time_str = cls.get("start_time", "")
     end_time_str = cls.get("end_time", "")
@@ -403,9 +404,8 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
             start_hour, start_min = int(start_parts[0]), int(start_parts[1]) if len(start_parts) > 1 else 0
             end_hour, end_min = int(end_parts[0]), int(end_parts[1]) if len(end_parts) > 1 else 0
 
-            # Use IST (UTC+5:30) for time comparison
-            ist_offset = timedelta(hours=5, minutes=30)
-            now_ist = now + ist_offset
+            # Use IST wall-clock for time comparison (class times are stored as IST)
+            now_ist = now_local()
             current_hour = now_ist.hour
             current_min = now_ist.minute
             current_total_min = current_hour * 60 + current_min
@@ -419,7 +419,7 @@ async def start_class(class_id: str, request: Request, authorization: Optional[s
             if current_total_min > end_total_min:
                 # Record auto-cancel in session_history
                 session_history = cls.get("session_history", [])
-                today_date = now.strftime("%Y-%m-%d")
+                today_date = today_local_str()
                 already_recorded = any(s.get("date") == today_date and s.get("status") == "auto_cancelled" for s in session_history)
                 if not already_recorded:
                     session_history.append({
@@ -520,7 +520,7 @@ async def end_class(class_id: str, request: Request, authorization: Optional[str
     if cls['teacher_id'] != user.user_id:
         raise HTTPException(status_code=403, detail="Not your class")
 
-    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    today_str = today_local_str()
     end_date_str = cls.get('end_date', cls['date'])
     assigned_days = cls.get('duration_days', 1)
     sessions_conducted = cls.get('sessions_conducted', 0) + 1
@@ -660,7 +660,7 @@ async def cancel_class_day(class_id: str, request: Request, authorization: Optio
         })
         raise HTTPException(status_code=400, detail="Maximum cancellations reached. Class has been dismissed.")
 
-    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    today_str = today_local_str()
     existing_cancellations = cls.get('cancellations', [])
     for c in existing_cancellations:
         if c.get('date') == today_str:

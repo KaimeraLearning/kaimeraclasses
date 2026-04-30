@@ -204,6 +204,14 @@ EdTech CRM/Management Platform with roles: Admin, Counselor, Teacher, Student. W
   - `routes/admin.py` audit + recredit endpoints
   - `services/system_repair.py::task_mark_overdue_no_show_classes` (cron)
   - `routes/demo.py::create_demo_request` (past-slot validation)
+- **Broader IST sweep (P2 follow-up)**: All `today` / `today_str` UTC date computations across the backend converted to IST `today_local_str()`. Affected routes:
+  - `routes/teacher.py` — dashboard auto-completion, end-time check (parse_class_end), proof submission date, cancel-session, group-classes, reschedule check
+  - `routes/counsellor.py` — expired-classes, transfer-student
+  - `routes/classes.py` — student session cancel, start-class window (now uses `now_local()`), conduct-session, end-class
+  - `routes/student.py` — enrollment status check
+  - `routes/general.py` — renewal-needed query
+  - `routes/attendance.py` — unmarked + class-today endpoints
+  - Audit ISO timestamps (`created_at`, `marked_at`, etc.) intentionally remain UTC.
 - Pytest coverage: `/app/backend/tests/test_iteration38_ist_timezone.py` (3/3 pass) — verifies dashboard marks no-show in IST, rejects past-IST slots, accepts future-IST slots.
 
 ## Backlog

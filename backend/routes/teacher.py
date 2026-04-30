@@ -14,6 +14,7 @@ from models.schemas import (
 from services.auth import get_current_user
 from services.helpers import send_email, notify_event
 from services.rating import recalc_teacher_rating, record_rating_event
+from services.time_utils import now_local, today_local_str, parse_class_end
 
 router = APIRouter()
 
@@ -53,7 +54,7 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
 
     all_classes = await db.class_sessions.find({"teacher_id": user.user_id}, {"_id": 0}).to_list(1000)
     now = datetime.now(timezone.utc)
-    today_str = now.strftime('%Y-%m-%d')
+    today_str = today_local_str()  # IST date — class dates are IST wall-clock
 
     todays_sessions = []
     upcoming_classes = []
@@ -85,12 +86,11 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
                     )
             conducted_classes.append(cls)
         elif cls_date == today_str or (cls_date <= today_str and cls_end_date >= today_str):
-            # Check if today's session time has passed
+            # Check if today's session time has passed (IST)
             end_time_str = cls.get('end_time', '23:59')
             try:
-                end_time = datetime.strptime(f"{today_str} {end_time_str}", '%Y-%m-%d %H:%M')
-                end_time = end_time.replace(tzinfo=timezone.utc)
-                if now > end_time and status in ('scheduled', 'in_progress'):
+                end_time = parse_class_end(today_str, end_time_str)
+                if now_local() > end_time and status in ('scheduled', 'in_progress'):
                     # Time passed today - show in conducted for proof submission
                     if cls_end_date == today_str:
                         await db.class_sessions.update_one({"class_id": cls['class_id']}, {"$set": {"status": "completed"}})
@@ -144,7 +144,7 @@ async def teacher_dashboard(request: Request, authorization: Optional[str] = Hea
     # Check proof submission status for conducted classes AND today's ended sessions
     all_check_classes = conducted_classes + [c for c in todays_sessions if c.get('status') in ('completed', 'scheduled')]
     class_ids = [c['class_id'] for c in all_check_classes]
-    today_str_proof = now.strftime('%Y-%m-%d')
+    today_str_proof = today_local_str()
     if class_ids:
         # Get all proofs for these classes (include status fields so UI can show resubmit CTA)
         proofs = await db.class_proofs.find(
@@ -315,7 +315,7 @@ async def teacher_cancel_class(class_id: str, request: Request, authorization: O
     if cls.get('status') == 'cancelled':
         raise HTTPException(status_code=400, detail="This class is already cancelled")
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local_str()
 
     # Check if already cancelled today
     cancellations = cls.get("cancellations", [])
@@ -462,7 +462,7 @@ async def submit_class_proof(proof: ClassProofSubmit, request: Request, authoriz
     if cls['teacher_id'] != user.user_id:
         raise HTTPException(status_code=403, detail="Not your class")
 
-    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    today_str = today_local_str()
 
     # Existing proof for this class+date — block unless it was rejected (resubmission).
     existing_today = await db.class_proofs.find_one(
@@ -770,7 +770,7 @@ async def get_teacher_grouped_classes(request: Request, authorization: Optional[
         {"teacher_id": user.user_id}, {"_id": 0}
     ).sort("date", -1).to_list(1000)
 
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_str = today_local_str()
     today_classes = []
     active_by_student = {}
     ended_classes = []
@@ -837,7 +837,7 @@ async def reschedule_class(class_id: str, request: Request, authorization: Optio
 
     # Allow reschedule if: needs_reschedule flag set (teacher cancelled today) OR student cancelled today
     needs_reschedule = cls.get("needs_reschedule", False)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local_str()
     student_cancelled_today = any(c.get("date") == today for c in (cls.get("cancellations") or []))
 
     if not needs_reschedule and not student_cancelled_today:

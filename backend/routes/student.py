@@ -26,7 +26,6 @@ async def student_dashboard(request: Request, authorization: Optional[str] = Hea
         {"_id": 0}
     ).to_list(1000)
 
-    now = datetime.now(timezone.utc)
     today_str = today_local_str()  # IST date — class times are entered in IST wall-clock
 
     live_classes = []
@@ -236,7 +235,7 @@ async def student_enrollment_status(request: Request, authorization: Optional[st
         {"student_id": user.user_id, "status": "approved"}, {"_id": 0}
     )
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = today_local_str()
     active_classes = await db.class_sessions.find(
         {"assigned_student_id": user.user_id, "is_demo": False,
          "status": {"$in": ["scheduled", "in_progress"]},
