@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional
+from pymongo import ReturnDocument
 
 from database import db
 from models.schemas import DemoRequestCreate, DemoAssign, DemoFeedbackCreate
@@ -13,30 +14,59 @@ router = APIRouter()
 
 
 async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str):
-    """Shared helper to create a demo class from a demo request"""
+    """Shared helper to create a demo class from a demo request.
+
+    SAFETY GUARANTEES:
+      • Pre-flight: balance is verified BEFORE any DB writes — insufficient funds
+        raise immediately without leaving any orphaned class/transaction.
+      • Idempotent: if a demo class for this demo already exists, returns the
+        existing class instead of creating a duplicate.
+      • Caller is responsible for atomically marking demo.status before calling
+        (so two concurrent clicks can't both reach this helper).
+    """
+    # Idempotency check — if class already exists for this demo, return it.
+    demo_id = demo.get("demo_id")
+    if demo_id:
+        existing = await db.class_sessions.find_one({"demo_id": demo_id}, {"_id": 0})
+        if existing:
+            return existing["class_id"], existing.get("assigned_student_id"), None
+
     student = await db.users.find_one({"email": demo["email"]}, {"_id": 0})
     temp_password = None
+    is_new_student = False
 
     if not student:
+        is_new_student = True
         student_id = f"user_{uuid.uuid4().hex[:12]}"
         temp_password = f"demo{uuid.uuid4().hex[:8]}"
-        password_hash_val = hash_password(temp_password)
         student = {
             "user_id": student_id, "email": demo["email"], "name": demo["name"],
             "role": "student", "credits": 0.0, "picture": None,
-            "password_hash": password_hash_val, "is_approved": True,
+            "password_hash": hash_password(temp_password), "is_approved": True,
             "phone": demo.get("phone"), "bio": None,
             "institute": demo.get("institute"), "goal": None,
             "preferred_time_slot": demo.get("preferred_time_slot"),
             "created_at": datetime.now(timezone.utc).isoformat()
         }
-        insert_student = student.copy()
-        await db.users.insert_one(insert_student)
     else:
         student_id = student["user_id"]
 
     pricing = await db.system_pricing.find_one({"pricing_id": "system_pricing"}, {"_id": 0})
     demo_price = pricing.get("demo_price_student", 0) if pricing else 0
+
+    # ── PRE-FLIGHT: balance check BEFORE any writes ────────────────────────
+    # New students start with 0 credits; if the demo isn't free, fail upfront.
+    if demo_price > 0:
+        available = student.get("credits", 0) or 0
+        if available < demo_price:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Action Failed: Insufficient balance in {demo['name']}'s account. "
+                    f"Required: {demo_price} credits, Available: {available} credits. "
+                    "Please ask the student to recharge before accepting this demo."
+                ),
+            )
 
     preferred_time = demo.get("preferred_time_slot", "10:00")
     try:
@@ -48,11 +78,16 @@ async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str
         preferred_time = "10:00"
         end_time = "11:00"
 
+    # ── All preflight checks passed — safe to start writing ────────────────
+    if is_new_student:
+        await db.users.insert_one(student.copy())
+
     class_id = f"class_{uuid.uuid4().hex[:12]}"
     class_doc = {
         "class_id": class_id, "teacher_id": teacher_user_id, "teacher_name": teacher_name,
         "title": f"Demo Session - {demo['name']}", "subject": "Demo",
         "class_type": "1:1", "is_demo": True,
+        "demo_id": demo_id,                     # back-link for idempotency
         "date": demo["preferred_date"], "end_date": demo["preferred_date"],
         "duration_days": 1, "start_time": preferred_time, "end_time": end_time,
         "credits_required": demo_price, "max_students": 1,
@@ -62,15 +97,9 @@ async def _create_demo_class(demo: dict, teacher_user_id: str, teacher_name: str
         "cancellations": [], "cancellation_count": 0, "max_cancellations": 0,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    insert_class = class_doc.copy()
-    await db.class_sessions.insert_one(insert_class)
+    await db.class_sessions.insert_one(class_doc.copy())
 
     if demo_price > 0:
-        if (student.get("credits", 0) if student else 0) < demo_price:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Action Failed: Insufficient balance in {demo['name']}'s account. Required: {demo_price} credits, Available: {student.get('credits', 0) if student else 0} credits."
-            )
         await db.users.update_one({"user_id": student_id}, {"$inc": {"credits": -demo_price}})
         await db.transactions.insert_one({
             "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
@@ -186,13 +215,30 @@ async def accept_demo(demo_id: str, request: Request, authorization: Optional[st
     if not user.is_approved:
         raise HTTPException(status_code=403, detail="Teacher not approved")
 
-    demo = await db.demo_requests.find_one({"demo_id": demo_id}, {"_id": 0})
+    # Atomic claim: only one click can succeed. Subsequent clicks will see
+    # status="processing" or "accepted" and get rejected here.
+    demo = await db.demo_requests.find_one_and_update(
+        {"demo_id": demo_id, "status": "pending"},
+        {"$set": {"status": "processing"}},
+        return_document=ReturnDocument.AFTER,
+        projection={"_id": 0},
+    )
     if not demo:
-        raise HTTPException(status_code=404, detail="Demo request not found")
-    if demo["status"] != "pending":
-        raise HTTPException(status_code=400, detail="Demo already processed")
+        existing = await db.demo_requests.find_one({"demo_id": demo_id}, {"_id": 0})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Demo request not found")
+        raise HTTPException(status_code=400, detail="Demo already processed or being processed")
 
-    class_id, student_id, temp_password = await _create_demo_class(demo, user.user_id, user.name)
+    try:
+        class_id, student_id, temp_password = await _create_demo_class(demo, user.user_id, user.name)
+    except HTTPException:
+        # Revert the claim so the demo can be retried after the issue is fixed
+        # (e.g. student tops up wallet).
+        await db.demo_requests.update_one({"demo_id": demo_id}, {"$set": {"status": "pending"}})
+        raise
+    except Exception:
+        await db.demo_requests.update_one({"demo_id": demo_id}, {"$set": {"status": "pending"}})
+        raise
 
     await db.demo_requests.update_one(
         {"demo_id": demo_id},
@@ -257,17 +303,32 @@ async def assign_demo_to_teacher(data: DemoAssign, request: Request, authorizati
     if user.role not in ["counsellor", "admin"]:
         raise HTTPException(status_code=403, detail="Counsellor or Admin access only")
 
-    demo = await db.demo_requests.find_one({"demo_id": data.demo_id}, {"_id": 0})
-    if not demo:
-        raise HTTPException(status_code=404, detail="Demo request not found")
-    if demo["status"] != "pending":
-        raise HTTPException(status_code=400, detail="Demo already processed")
-
     teacher = await db.users.find_one({"user_id": data.teacher_id, "role": "teacher"}, {"_id": 0})
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
-    class_id, student_id, temp_password = await _create_demo_class(demo, teacher["user_id"], teacher["name"])
+    # Atomic claim — prevents two assigners (or rapid double-clicks) from
+    # creating duplicate classes for the same demo.
+    demo = await db.demo_requests.find_one_and_update(
+        {"demo_id": data.demo_id, "status": "pending"},
+        {"$set": {"status": "processing"}},
+        return_document=ReturnDocument.AFTER,
+        projection={"_id": 0},
+    )
+    if not demo:
+        existing = await db.demo_requests.find_one({"demo_id": data.demo_id}, {"_id": 0})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Demo request not found")
+        raise HTTPException(status_code=400, detail="Demo already processed or being processed")
+
+    try:
+        class_id, student_id, temp_password = await _create_demo_class(demo, teacher["user_id"], teacher["name"])
+    except HTTPException:
+        await db.demo_requests.update_one({"demo_id": data.demo_id}, {"$set": {"status": "pending"}})
+        raise
+    except Exception:
+        await db.demo_requests.update_one({"demo_id": data.demo_id}, {"$set": {"status": "pending"}})
+        raise
 
     await db.demo_requests.update_one(
         {"demo_id": data.demo_id},
