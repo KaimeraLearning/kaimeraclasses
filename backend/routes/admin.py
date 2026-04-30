@@ -1614,6 +1614,18 @@ async def delete_email_media(media_id: str, request: Request, authorization: Opt
 
 # ─── System Repair ────────────────────────────────────────────────────────────
 
+@router.get("/admin/system/diagnose")
+async def diagnose_system(request: Request, authorization: Optional[str] = Header(None)):
+    """Read-only preview — returns the duplicate groups System Repair would act on.
+    Useful to verify there's nothing before clicking Repair (or to confirm what got missed)."""
+    user = await get_current_user(request, authorization)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    from services.system_repair import diagnose_duplicates
+    duplicates = await diagnose_duplicates()
+    return {"duplicate_groups": duplicates, "total_groups": len(duplicates)}
+
+
 @router.post("/admin/system/repair")
 async def run_system_repair(request: Request, authorization: Optional[str] = Header(None)):
     """Run the full suite of data-repair tasks. Idempotent — safe to re-run.
